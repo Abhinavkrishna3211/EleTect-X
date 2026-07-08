@@ -1,0 +1,10 @@
+{
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+  "editor.formatOnSave": true,
+  "[python]": { "editor.defaultFormatter": "charliermarsh.ruff" },
+  "[javascript][typescript][typescriptreact]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "python.testing.pytestEnabled": true,
+  "git.branchProtection": ["main"],
+  "search.exclude": { "**/node_modules": true, "**/dist": true, "docs/archive/**": true }
+}

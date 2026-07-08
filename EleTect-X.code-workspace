@@ -1,0 +1,26 @@
+{
+  "folders": [
+    { "name": "① device/mcu (STM32U585)", "path": "device/mcu" },
+    { "name": "② device/mpu (QRB2210 Linux)", "path": "device/mpu" },
+    { "name": "③ ml (training)", "path": "ml" },
+    { "name": "④ web/frontend (dashboard+site)", "path": "web/frontend" },
+    { "name": "⑤ web/backend (Supabase)", "path": "web/backend" },
+    { "name": "⑥ hardware", "path": "hardware" },
+    { "name": "⑦ docs", "path": "docs" },
+    { "name": "★ root", "path": "." }
+  ],
+  "settings": {
+    "window.title": "EleTect X",
+    "files.exclude": { "**/.gitkeep": true },
+    "search.exclude": { "**/node_modules": true, "**/dist": true, "docs/archive/**": true }
+  },
+  "extensions": {
+    "recommendations": [
+      "ms-python.python", "ms-python.vscode-pylance", "charliermarsh.ruff",
+      "ms-vscode.cpptools", "platformio.platformio-ide",
+      "dbaeumer.vscode-eslint", "esbenp.prettier-vscode", "bradlc.vscode-tailwindcss",
+      "eamodio.gitlens", "usernamehw.errorlens", "yzhang.markdown-all-in-one",
+      "redhat.vscode-yaml", "tamasfe.even-better-toml", "ms-azuretools.vscode-docker"
+    ]
+  }
+}

@@ -1,0 +1,50 @@
+# --- Local dev-tool config (keep out of the shared repo) ---
+CLAUDE.md
+.claude/
+.cursor/
+*.local.md
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Node / frontend ---
+node_modules/
+dist/
+build/
+.vite/
+.next/
+.env
+.env.*
+!.env.example
+
+# --- Firmware build ---
+firmware/**/build/
+*.elf
+*.bin
+*.hex
+.pio/
+
+# --- AI / data (store pointers, not large binaries) ---
+ai/datasets/**/*.zip
+ai/datasets/**/*.npy
+ai/datasets/**/raw/
+ai/models/**/*.tflite
+*.onnx
+*.pt
+*.pth
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+*.swp
+
+# --- Secrets ---
+secrets/
+*.key
+*.pem
