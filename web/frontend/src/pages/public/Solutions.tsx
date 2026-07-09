@@ -1,3 +1,4 @@
+import { SectorMapIllustration } from '@/components/SectorMapIllustration'
 import { corridorSteps, otherWildlife, solutionsData } from '@/lib/content'
 
 export function Solutions() {
@@ -90,16 +91,8 @@ export function Solutions() {
             corridor back to the forest instead of just being scared in place.
           </p>
           <div className="grid grid-cols-[repeat(auto-fit,minmax(min(460px,100%),1fr))] items-start gap-5">
-            <div className="border-brand-fg/10 relative h-[clamp(280px,36vw,380px)] overflow-hidden rounded-2xl border bg-[#0B0D0B]">
-              <div className="absolute inset-0 grid place-items-center">
-                <div className="text-center">
-                  <p className="text-brand-fg/30 font-mono text-[11px] tracking-[0.14em]">
-                    COORDINATED CORRIDOR · LIVE DEMO
-                  </p>
-                  <p className="text-brand-fg/45 mt-2 font-sans text-sm">Sector map view, live in the dashboard.</p>
-                </div>
-              </div>
-              <div className="via-brand-green/25 absolute inset-x-0 top-1/2 h-px bg-linear-to-r from-transparent to-transparent" />
+            <div className="h-[clamp(280px,36vw,380px)]">
+              <SectorMapIllustration label="COORDINATED CORRIDOR · LIVE DEMO" />
             </div>
             <div className="flex flex-col gap-2.5">
               {corridorSteps.map((c) => (
@@ -113,6 +106,9 @@ export function Solutions() {
               ))}
             </div>
           </div>
+          <p className="text-brand-fg/40 mt-4 font-mono text-xs">
+            Illustrative sector view. Exact node locations withheld for wildlife protection.
+          </p>
         </div>
       </section>
     </>
