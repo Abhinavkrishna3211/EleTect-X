@@ -24,20 +24,24 @@ build/
 !.env.example
 
 # --- Firmware build ---
-firmware/**/build/
+device/mcu/**/build/
 *.elf
 *.bin
 *.hex
 .pio/
 
 # --- AI / data (store pointers, not large binaries) ---
-ai/datasets/**/*.zip
-ai/datasets/**/*.npy
-ai/datasets/**/raw/
-ai/models/**/*.tflite
+ml/datasets/**/*.zip
+ml/datasets/**/*.npy
+ml/datasets/**/raw/
+device/mpu/models/**/*.tflite
 *.onnx
 *.pt
 *.pth
+
+# --- Design export cache (keep the .dc.html spec + assets, not the paste cache) ---
+docs/design-reference/uploads/
+docs/design-reference/.thumbnail/
 
 # --- OS / editor ---
 .DS_Store

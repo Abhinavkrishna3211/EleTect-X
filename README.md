@@ -15,12 +15,13 @@ EleTect X is a rugged, solar-powered, autonomous forest-edge node built on the A
 | Path | Contents |
 |---|---|
 | `docs/` | Architecture, hardware, decisions (ADRs), deployment, manufacturing |
-| `firmware/stm32/` | STM32U585 real-time reflex firmware |
-| `linux/` | QRB2210 (Debian) cognition: vision, fusion, deterrence, comms |
-| `ai/` | Seismic TinyML + vision model training/eval |
+| `device/mcu/` | STM32U585 real-time reflex firmware |
+| `device/mpu/` | QRB2210 (Debian) cognition: vision, fusion, deterrence, comms |
+| `ml/` | Seismic/acoustic/vision model training + eval (off-device) |
 | `hardware/` | PCB, CAD/enclosure, wiring |
-| `cloud/` | Backend + gateway ingest |
-| `dashboard/` | Ranger web/PWA + public site |
+| `web/backend/` | Supabase schema, RLS, edge functions |
+| `web/ingest/` | ChirpStack MQTT → Supabase bridge |
+| `web/frontend/` | Ranger dashboard + public marketing site (React PWA) |
 | `deployment/` | Field protocols, install guides, logs |
 | `scripts/`, `tests/` | Utilities and tests |
 
