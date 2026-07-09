@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AuthLayout, authButtonClass, authInputClass } from '@/layouts/AuthLayout'
+import { AuthLayout, authButtonClass, authErrorMessage, authInputClass } from '@/layouts/AuthLayout'
 import { supabase } from '@/lib/supabase'
 
 export function ResetPassword() {
@@ -17,7 +17,7 @@ export function ResetPassword() {
     const { error } = await supabase.auth.updateUser({ password })
     setSubmitting(false)
     if (error) {
-      setError(error.message)
+      setError(authErrorMessage(error))
       return
     }
     setDone(true)

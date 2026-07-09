@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { AuthLayout, authButtonClass, authInputClass } from '@/layouts/AuthLayout'
+import { AuthLayout, authButtonClass, authErrorMessage, authInputClass } from '@/layouts/AuthLayout'
 import { supabase } from '@/lib/supabase'
 
 type SignupRole = 'resident' | 'officer'
@@ -37,7 +37,7 @@ export function Signup() {
       })
       setSubmitting(false)
       if (error) {
-        setError(error.message)
+        setError(authErrorMessage(error))
         return
       }
       setDone('resident')
@@ -58,7 +58,7 @@ export function Signup() {
       })
       setSubmitting(false)
       if (error) {
-        setError(error.message)
+        setError(authErrorMessage(error))
         return
       }
       setDone('officer')
