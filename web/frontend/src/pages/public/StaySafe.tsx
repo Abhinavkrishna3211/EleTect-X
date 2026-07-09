@@ -25,7 +25,7 @@ export function StaySafe() {
       </p>
 
       <div className="border-brand-fg/10 mb-4 flex flex-wrap items-center gap-4.5 rounded-2xl border bg-[#0B0D0B] p-6">
-        <div className="border-brand-green grid h-14.5 w-14.5 flex-shrink-0 place-items-center rounded-full border-2 bg-[rgba(95,169,124,0.12)] text-2xl">
+        <div className="border-brand-green grid h-14.5 w-14.5 shrink-0 place-items-center rounded-full border-2 bg-[rgba(95,169,124,0.12)] text-2xl">
           🟢
         </div>
         <div className="min-w-50 flex-1">
@@ -86,7 +86,7 @@ export function StaySafe() {
                 SMS alerts for detections near me
               </span>
               <span
-                className={`relative h-6.5 w-11.5 flex-shrink-0 rounded-full transition-colors ${smsEnabled ? 'bg-brand-green' : 'bg-brand-fg/20'}`}
+                className={`relative h-6.5 w-11.5 shrink-0 rounded-full transition-colors ${smsEnabled ? 'bg-brand-green' : 'bg-brand-fg/20'}`}
               >
                 <span
                   className={`bg-brand-fg absolute top-0.75 h-5 w-5 rounded-full transition-all ${smsEnabled ? 'left-6' : 'left-0.75'}`}

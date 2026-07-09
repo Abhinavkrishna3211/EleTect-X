@@ -48,7 +48,7 @@ export function Technology() {
               p.placeholder ? (
                 <div
                   key={p.id}
-                  className="border-brand-fg/20 bg-brand-fg/[0.015] flex min-h-70 flex-col items-start justify-center gap-2.5 rounded-[18px] border-[1.5px] border-dashed p-7"
+                  className="border-brand-fg/20 bg-brand-fg/1.5 flex min-h-70 flex-col items-start justify-center gap-2.5 rounded-[18px] border-[1.5px] border-dashed p-7"
                 >
                   <span className="text-2xl opacity-60">➕</span>
                   <p className="text-brand-fg/40 font-mono text-[11.5px] font-semibold tracking-[0.14em]">{p.tag}</p>

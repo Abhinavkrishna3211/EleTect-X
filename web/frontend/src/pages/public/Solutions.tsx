@@ -99,7 +99,7 @@ export function Solutions() {
                   <p className="text-brand-fg/45 mt-2 font-sans text-sm">Sector map view, live in the dashboard.</p>
                 </div>
               </div>
-              <div className="via-brand-green/25 absolute inset-x-0 top-1/2 h-px bg-gradient-to-r from-transparent to-transparent" />
+              <div className="via-brand-green/25 absolute inset-x-0 top-1/2 h-px bg-linear-to-r from-transparent to-transparent" />
             </div>
             <div className="flex flex-col gap-2.5">
               {corridorSteps.map((c) => (
