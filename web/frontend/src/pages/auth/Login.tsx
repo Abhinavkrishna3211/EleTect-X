@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { AuthLayout, authButtonClass, authInputClass } from '@/layouts/AuthLayout'
+import { AuthLayout, authButtonClass, authErrorMessage, authInputClass } from '@/layouts/AuthLayout'
 import { supabase } from '@/lib/supabase'
 
 const demoAccounts = [
@@ -23,7 +23,7 @@ export function Login() {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     setSubmitting(false)
     if (error) {
-      setError(error.message)
+      setError(authErrorMessage(error))
       return
     }
     navigate('/dashboard')
