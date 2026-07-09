@@ -5,9 +5,9 @@ export function Home() {
   return (
     <>
       {/* HERO */}
-      <section className="relative flex min-h-[100svh] flex-col justify-end overflow-hidden bg-brand-bg">
+      <section className="relative flex min-h-svh flex-col justify-end overflow-hidden bg-brand-bg">
         <div
-          className="absolute inset-0 bg-cover [background-position:center_40%] brightness-[0.42] saturate-[0.85]"
+          className="absolute inset-0 bg-cover bg-position-[center_40%] brightness-[0.42] saturate-[0.85]"
           style={{ backgroundImage: `url('${IMG.hero}')` }}
         />
         <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(7,13,10,0.55)_0%,rgba(7,13,10,0.15)_40%,rgba(7,13,10,0.92)_88%,#070D0A_100%)]" />
@@ -43,7 +43,7 @@ export function Home() {
       </section>
 
       {/* STATS BAND */}
-      <section className="border-brand-fg/[0.06] bg-brand-bg-alt border-y">
+      <section className="border-brand-fg/6 bg-brand-bg-alt border-y">
         <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6 md:py-20 lg:px-8">
           <p className="text-brand-gold mb-2 font-mono text-xs font-semibold tracking-[0.18em]">
             THE CRISIS, BY THE NUMBERS
@@ -87,7 +87,7 @@ export function Home() {
             {steps.map((st) => (
               <div
                 key={st.n}
-                className="border-brand-fg/[0.09] hover:border-brand-gold/45 rounded-2xl border bg-[linear-gradient(160deg,rgba(15,29,20,0.55),rgba(11,13,11,0.3))] p-6"
+                className="border-brand-fg/9 hover:border-brand-gold/45 rounded-2xl border bg-[linear-gradient(160deg,rgba(15,29,20,0.55),rgba(11,13,11,0.3))] p-6"
               >
                 <div className="mb-2.5 flex items-baseline gap-2.5">
                   <span className="text-brand-gold font-mono text-xs font-semibold">{st.n}</span>
@@ -103,7 +103,7 @@ export function Home() {
       {/* IMAGE INTERLUDE */}
       <section className="relative min-h-[52vh] overflow-hidden bg-[#0F1D14]">
         <div
-          className="absolute inset-0 bg-cover [background-position:center_60%] brightness-[0.55] saturate-90"
+          className="absolute inset-0 bg-cover bg-position-[center_60%] brightness-[0.55] saturate-90"
           style={{ backgroundImage: `url('${IMG.interlude}')` }}
         />
         <div className="absolute inset-0 bg-[linear-gradient(180deg,#070D0A_0%,rgba(7,13,10,0.1)_30%,rgba(7,13,10,0.1)_70%,#070D0A_100%)]" />
@@ -115,7 +115,7 @@ export function Home() {
       </section>
 
       {/* COMPARISON */}
-      <section className="border-brand-fg/[0.06] bg-brand-bg-alt border-t">
+      <section className="border-brand-fg/6 bg-brand-bg-alt border-t">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 md:py-24 lg:px-8">
           <p className="text-brand-gold mb-2 font-mono text-xs font-semibold tracking-[0.18em]">
             WHY EXISTING TOOLS FAIL
@@ -123,9 +123,9 @@ export function Home() {
           <h2 className="mb-10 max-w-[26ch] font-serif text-[clamp(28px,3.6vw,44px)] leading-[1.15] font-normal">
             Alarms get ignored. Fences get bypassed. EleTect adapts.
           </h2>
-          <div className="border-brand-fg/[0.09] overflow-x-auto rounded-2xl border">
-            <div className="min-w-[640px]">
-              <div className="bg-[#0F1D14]/60 border-brand-fg/[0.09] grid grid-cols-[2fr_1fr_1fr_1fr_1fr] border-b">
+          <div className="border-brand-fg/9 overflow-x-auto rounded-2xl border">
+            <div className="min-w-160">
+              <div className="bg-[#0F1D14]/60 border-brand-fg/9 grid grid-cols-[2fr_1fr_1fr_1fr_1fr] border-b">
                 <div className="text-brand-fg/55 px-4.5 py-3.5 font-mono text-xs font-semibold tracking-wide">
                   CAPABILITY
                 </div>
@@ -145,10 +145,10 @@ export function Home() {
               {compareRows.map((r) => (
                 <div
                   key={r.cap}
-                  className="border-brand-fg/[0.06] grid grid-cols-[2fr_1fr_1fr_1fr_1fr] border-b last:border-b-0"
+                  className="border-brand-fg/6 grid grid-cols-[2fr_1fr_1fr_1fr_1fr] border-b last:border-b-0"
                 >
                   <div className="text-brand-fg/85 px-4.5 py-4 font-sans text-sm font-medium">{r.cap}</div>
-                  <div className="text-brand-green bg-brand-green/[0.06] px-3 py-4 text-center font-sans text-sm font-semibold">
+                  <div className="text-brand-green bg-brand-green/6 px-3 py-4 text-center font-sans text-sm font-semibold">
                     {r.us}
                   </div>
                   <div className="text-brand-fg/45 px-3 py-4 text-center font-sans text-sm font-medium">
@@ -191,10 +191,10 @@ export function Home() {
               <Link
                 key={s.title}
                 to="/solutions"
-                className="border-brand-fg/[0.09] hover:border-brand-gold/50 bg-brand-bg-alt text-brand-fg block overflow-hidden rounded-2xl border"
+                className="border-brand-fg/9 hover:border-brand-gold/50 bg-brand-bg-alt text-brand-fg block overflow-hidden rounded-2xl border"
               >
                 <div
-                  className="h-[150px] bg-cover bg-center bg-[#0F1D14]"
+                  className="h-37.5 bg-cover bg-center bg-[#0F1D14]"
                   style={{
                     backgroundImage: `linear-gradient(180deg, rgba(7,13,10,0) 40%, rgba(7,13,10,0.85)), url('${s.img}')`,
                   }}
@@ -210,7 +210,7 @@ export function Home() {
       </section>
 
       {/* AWARDS */}
-      <section className="border-brand-fg/[0.06] border-t bg-[#0F1D14]">
+      <section className="border-brand-fg/6 border-t bg-[#0F1D14]">
         <div className="mx-auto grid max-w-6xl grid-cols-[repeat(auto-fit,minmax(260px,1fr))] items-center gap-6 px-4 py-12 sm:px-6 md:py-16 lg:px-8">
           <div>
             <p className="text-brand-gold mb-1.5 font-mono text-xs font-semibold tracking-[0.18em]">RECOGNITION</p>

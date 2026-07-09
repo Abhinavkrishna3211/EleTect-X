@@ -4,7 +4,7 @@ export function Technology() {
   return (
     <>
       {/* HERO */}
-      <section className="bg-brand-bg-alt border-brand-fg/[0.06] relative overflow-hidden border-b">
+      <section className="bg-brand-bg-alt border-brand-fg/6 relative overflow-hidden border-b">
         <div
           className="absolute inset-0 bg-cover bg-center brightness-[0.3]"
           style={{ backgroundImage: `url('${IMG.techHero}')` }}
@@ -29,7 +29,7 @@ export function Technology() {
             {techPillars.map((t) => (
               <div
                 key={t.title}
-                className="border-brand-fg/[0.09] rounded-2xl border bg-[linear-gradient(160deg,rgba(15,29,20,0.5),rgba(11,13,11,0.2))] p-6.5"
+                className="border-brand-fg/9 rounded-2xl border bg-[linear-gradient(160deg,rgba(15,29,20,0.5),rgba(11,13,11,0.2))] p-6.5"
               >
                 <div className="mb-3.5 text-2xl">{t.icon}</div>
                 <h3 className="mb-2.5 font-sans text-lg font-semibold">{t.title}</h3>
@@ -48,7 +48,7 @@ export function Technology() {
               p.placeholder ? (
                 <div
                   key={p.id}
-                  className="border-brand-fg/20 bg-brand-fg/[0.015] flex min-h-[280px] flex-col items-start justify-center gap-2.5 rounded-[18px] border-[1.5px] border-dashed p-7"
+                  className="border-brand-fg/20 bg-brand-fg/[0.015] flex min-h-70 flex-col items-start justify-center gap-2.5 rounded-[18px] border-[1.5px] border-dashed p-7"
                 >
                   <span className="text-2xl opacity-60">➕</span>
                   <p className="text-brand-fg/40 font-mono text-[11.5px] font-semibold tracking-[0.14em]">{p.tag}</p>
@@ -58,10 +58,10 @@ export function Technology() {
               ) : (
                 <div
                   key={p.id}
-                  className="border-brand-fg/[0.09] hover:border-brand-gold/40 overflow-hidden rounded-[18px] border bg-[#0B0D0B] transition-all hover:-translate-y-1"
+                  className="border-brand-fg/9 hover:border-brand-gold/40 overflow-hidden rounded-[18px] border bg-[#0B0D0B] transition-all hover:-translate-y-1"
                 >
                   <div
-                    className="h-[170px] bg-cover bg-center"
+                    className="h-42.5 bg-cover bg-center"
                     style={{
                       backgroundImage: `linear-gradient(180deg, rgba(7,13,10,0) 40%, rgba(7,13,10,0.9)), url('${p.img}')`,
                     }}
@@ -92,8 +92,8 @@ export function Technology() {
           <h2 className="mb-7 max-w-[24ch] font-serif text-[clamp(26px,3.4vw,40px)] leading-[1.15] font-normal">
             Every decision shows its reasoning.
           </h2>
-          <div className="border-brand-fg/12 max-w-[640px] overflow-hidden rounded-2xl border bg-[#0B0D0B]">
-            <div className="border-brand-fg/[0.08] flex flex-wrap items-center justify-between gap-2 border-b px-5 py-3.5">
+          <div className="border-brand-fg/12 max-w-160 overflow-hidden rounded-2xl border bg-[#0B0D0B]">
+            <div className="border-brand-fg/8 flex flex-wrap items-center justify-between gap-2 border-b px-5 py-3.5">
               <span className="text-brand-fg/60 font-mono text-xs font-semibold tracking-wide">
                 EVENT E-2231 · NODE S7-04 · 21:47 IST
               </span>

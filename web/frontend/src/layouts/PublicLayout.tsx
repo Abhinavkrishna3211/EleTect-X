@@ -8,10 +8,10 @@ export function PublicLayout() {
 
   return (
     <div className="bg-brand-bg text-brand-fg min-h-screen">
-      <header className="border-brand-fg/[0.07] bg-brand-bg/72 fixed inset-x-0 top-0 z-50 border-b backdrop-blur-md">
+      <header className="border-brand-fg/7 bg-brand-bg/72 fixed inset-x-0 top-0 z-50 border-b backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
           <Link to="/" className="text-brand-fg flex items-center gap-2.5" onClick={() => setNavOpen(false)}>
-            <img src="/assets/logo.png" alt="EleTect logo" className="h-[43px] w-[43px] rounded-full object-cover" />
+            <img src="/assets/logo.png" alt="EleTect logo" className="h-10.75 w-10.75 rounded-full object-cover" />
             <span className="font-sans text-[17px] font-semibold tracking-wide">EleTect</span>
           </Link>
 
@@ -32,7 +32,7 @@ export function PublicLayout() {
             ))}
             <Link
               to="/dashboard"
-              className="bg-brand-gold hover:bg-brand-gold-hover rounded-full px-[18px] py-[9px] font-sans text-[13px] font-semibold tracking-wide text-[#0B140E]"
+              className="bg-brand-gold hover:bg-brand-gold-hover rounded-full px-4.5 py-2.25 font-sans text-[13px] font-semibold tracking-wide text-[#0B140E]"
             >
               Dashboard
             </Link>
@@ -56,7 +56,7 @@ export function PublicLayout() {
                 end={l.href === '/'}
                 onClick={() => setNavOpen(false)}
                 className={({ isActive }) =>
-                  `border-brand-fg/[0.06] border-b py-3.5 font-sans text-base font-medium ${
+                  `border-brand-fg/6 border-b py-3.5 font-sans text-base font-medium ${
                     isActive ? 'text-brand-gold' : 'text-brand-fg/70'
                   }`
                 }
@@ -79,11 +79,11 @@ export function PublicLayout() {
         <Outlet />
       </main>
 
-      <footer className="border-brand-fg/[0.07] bg-[#060A08]">
+      <footer className="border-brand-fg/7 bg-[#060A08]">
         <div className="mx-auto flex max-w-6xl flex-wrap justify-between gap-7 px-4 py-12 sm:px-6 lg:px-8">
           <div className="max-w-80">
             <div className="mb-3.5 flex items-center gap-2.5">
-              <img src="/assets/logo.png" alt="EleTect logo" className="h-[38px] w-[38px] rounded-full object-cover" />
+              <img src="/assets/logo.png" alt="EleTect logo" className="h-9.5 w-9.5 rounded-full object-cover" />
               <span className="font-sans text-base font-semibold">EleTect</span>
             </div>
             <p className="text-brand-fg/50 font-sans text-[13.5px] leading-relaxed">
