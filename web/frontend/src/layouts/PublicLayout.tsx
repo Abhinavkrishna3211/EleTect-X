@@ -1,52 +1,141 @@
-import { Link, NavLink, Outlet } from 'react-router-dom'
-
-const NAV_LINKS = [
-  { to: '/', label: 'Home', end: true },
-  { to: '/technology', label: 'Technology' },
-  { to: '/solutions', label: 'Solutions' },
-  { to: '/deployments', label: 'Deployments' },
-  { to: '/research', label: 'Research' },
-  { to: '/about', label: 'About' },
-  { to: '/contact', label: 'Contact' },
-  { to: '/stay-safe', label: 'Stay Safe' },
-]
+import { useState } from 'react'
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
+import { navLinks } from '@/lib/content'
 
 export function PublicLayout() {
+  const [navOpen, setNavOpen] = useState(false)
+  const location = useLocation()
+
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="border-border border-b">
-        <nav className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-4">
-          <Link to="/" className="font-semibold tracking-tight">
-            EleTect
+    <div className="bg-brand-bg text-brand-fg min-h-screen">
+      <header className="border-brand-fg/[0.07] bg-brand-bg/72 fixed inset-x-0 top-0 z-50 border-b backdrop-blur-md">
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+          <Link to="/" className="text-brand-fg flex items-center gap-2.5" onClick={() => setNavOpen(false)}>
+            <img src="/assets/logo.png" alt="EleTect logo" className="h-[43px] w-[43px] rounded-full object-cover" />
+            <span className="font-sans text-[17px] font-semibold tracking-wide">EleTect</span>
           </Link>
-          <ul className="hidden flex-wrap items-center gap-6 text-sm md:flex">
-            {NAV_LINKS.map((link) => (
-              <li key={link.to}>
-                <NavLink
-                  to={link.to}
-                  end={link.end}
-                  className={({ isActive }) => (isActive ? 'font-medium' : 'text-muted-foreground')}
-                >
-                  {link.label}
-                </NavLink>
-              </li>
+
+          <nav className="hidden items-center gap-5 md:flex lg:gap-7">
+            {navLinks.map((l) => (
+              <NavLink
+                key={l.href}
+                to={l.href}
+                end={l.href === '/'}
+                className={({ isActive }) =>
+                  `font-sans text-[13.5px] font-medium tracking-wide transition-colors ${
+                    isActive ? 'text-brand-gold' : 'text-brand-fg/70 hover:text-brand-fg'
+                  }`
+                }
+              >
+                {l.label}
+              </NavLink>
             ))}
-          </ul>
-          <Link
-            to="/dashboard"
-            className="bg-primary text-primary-foreground rounded-md px-4 py-2 text-sm font-medium"
+            <Link
+              to="/dashboard"
+              className="bg-brand-gold hover:bg-brand-gold-hover rounded-full px-[18px] py-[9px] font-sans text-[13px] font-semibold tracking-wide text-[#0B140E]"
+            >
+              Dashboard
+            </Link>
+          </nav>
+
+          <button
+            onClick={() => setNavOpen((v) => !v)}
+            aria-label="Menu"
+            className="border-brand-fg/20 text-brand-fg min-h-11 rounded-[10px] border px-3.5 py-2.5 font-sans text-[13px] font-semibold md:hidden"
           >
-            Dashboard login
-          </Link>
-        </nav>
+            {navOpen ? '✕ Close' : '☰ Menu'}
+          </button>
+        </div>
+
+        {navOpen && (
+          <nav className="bg-brand-bg/97 flex flex-col gap-0.5 px-5 pt-2 pb-5 md:hidden">
+            {navLinks.map((l) => (
+              <NavLink
+                key={l.href}
+                to={l.href}
+                end={l.href === '/'}
+                onClick={() => setNavOpen(false)}
+                className={({ isActive }) =>
+                  `border-brand-fg/[0.06] border-b py-3.5 font-sans text-base font-medium ${
+                    isActive ? 'text-brand-gold' : 'text-brand-fg/70'
+                  }`
+                }
+              >
+                {l.label}
+              </NavLink>
+            ))}
+            <Link
+              to="/dashboard"
+              onClick={() => setNavOpen(false)}
+              className="bg-brand-gold mt-3.5 rounded-xl p-3.5 text-center font-sans text-[15px] font-semibold text-[#0B140E]"
+            >
+              Dashboard login
+            </Link>
+          </nav>
+        )}
       </header>
 
-      <main className="flex-1">
+      <main key={location.pathname} className="flex-1">
         <Outlet />
       </main>
 
-      <footer className="border-border text-muted-foreground border-t px-6 py-8 text-sm">
-        <div className="mx-auto max-w-6xl">EleTect. Protecting farms, forests, and the future.</div>
+      <footer className="border-brand-fg/[0.07] bg-[#060A08]">
+        <div className="mx-auto flex max-w-6xl flex-wrap justify-between gap-7 px-4 py-12 sm:px-6 lg:px-8">
+          <div className="max-w-80">
+            <div className="mb-3.5 flex items-center gap-2.5">
+              <img src="/assets/logo.png" alt="EleTect logo" className="h-[38px] w-[38px] rounded-full object-cover" />
+              <span className="font-sans text-base font-semibold">EleTect</span>
+            </div>
+            <p className="text-brand-fg/50 font-sans text-[13.5px] leading-relaxed">
+              Protecting farms, forests, and the future.
+            </p>
+          </div>
+
+          <nav className="flex flex-wrap gap-10 sm:gap-16">
+            <div className="flex flex-col gap-2.5">
+              <span className="text-brand-fg/40 font-mono text-[11.5px] font-semibold tracking-[0.14em]">
+                PLATFORM
+              </span>
+              <Link to="/technology" className="text-brand-fg/70 font-sans text-[13.5px] font-medium hover:text-brand-fg">
+                Technology
+              </Link>
+              <Link to="/solutions" className="text-brand-fg/70 font-sans text-[13.5px] font-medium hover:text-brand-fg">
+                Solutions
+              </Link>
+              <Link to="/deployments" className="text-brand-fg/70 font-sans text-[13.5px] font-medium hover:text-brand-fg">
+                Deployments
+              </Link>
+            </div>
+            <div className="flex flex-col gap-2.5">
+              <span className="text-brand-fg/40 font-mono text-[11.5px] font-semibold tracking-[0.14em]">
+                COMPANY
+              </span>
+              <Link to="/research" className="text-brand-fg/70 font-sans text-[13.5px] font-medium hover:text-brand-fg">
+                Research
+              </Link>
+              <Link to="/about" className="text-brand-fg/70 font-sans text-[13.5px] font-medium hover:text-brand-fg">
+                About
+              </Link>
+              <Link to="/contact" className="text-brand-fg/70 font-sans text-[13.5px] font-medium hover:text-brand-fg">
+                Contact
+              </Link>
+            </div>
+            <div className="flex flex-col gap-2.5">
+              <span className="text-brand-fg/40 font-mono text-[11.5px] font-semibold tracking-[0.14em]">
+                FOR RESIDENTS
+              </span>
+              <Link to="/stay-safe" className="text-brand-fg/70 font-sans text-[13.5px] font-medium hover:text-brand-fg">
+                Stay Safe
+              </Link>
+              <Link to="/dashboard" className="text-brand-fg/70 font-sans text-[13.5px] font-medium hover:text-brand-fg">
+                Dashboard
+              </Link>
+            </div>
+          </nav>
+        </div>
+        <div className="border-brand-fg/5 text-brand-fg/35 border-t px-4 py-4.5 text-center font-mono text-xs sm:px-6 lg:px-8">
+          © 2026 EleTect · Kerala, India · IEEE IAS CMD & Amarnath Raja Humanitarian Awards 2025
+        </div>
       </footer>
     </div>
   )
