@@ -20,7 +20,7 @@ The plan we follow from today to contest submission. Read `CONTEXT.md` first. Th
 
 ## 1. Repository architecture
 Polyglot monorepo (one repo = one product, atomic cross-cutting changes, one CI). Structure and rationale are in the tree + `docs/README.md`. Key choices:
-- **Monorepo over many repos:** firmware ↔ linux ↔ cloud ↔ dashboard change together; a monorepo keeps them in lockstep and simplifies CI/onboarding.
+- **Monorepo over many repos:** `device/mcu` ↔ `device/mpu` ↔ `web/backend` ↔ `web/frontend` change together; a monorepo keeps them in lockstep and simplifies CI/onboarding.
 - **`docs/` as first-class:** `CONTEXT.md` (canonical) + ADRs (the "why") prevent architecture drift.
 - **Local dev-tool config git-ignored** (`CLAUDE.md`, `.claude/`) → the committed repo reads as pure human engineering.
 - **Branch model:** trunk-based — `main` (protected, deployable) ← `develop` ← short-lived `feat/…`, `fix/…`. Conventional Commits → automated changelog/versioning.
@@ -41,7 +41,7 @@ See `docs/README.md` for the hierarchy and the consolidation map (migrate the re
 | **Ingest** | small service | ChirpStack MQTT → validate → Supabase | MQTT in, Supabase out |
 | **Frontend** | React PWA (Vite + Tailwind + shadcn/ui) | ranger dashboard + public site; Leaflet map, Recharts, offline cache | Supabase client |
 
-**Module map (create as work proceeds):** `linux/perception/{vision,audio}.py`, `linux/cognition/{fusion,bandit,risk,tracker}.py`, `linux/bridge/rpc.py`, `linux/comms/lora.py`, `firmware/stm32/src/{sensors,footfall,actuators,lora,power,state_machine}.c`, `cloud/backend/{migrations,functions}`, `cloud/ingest/`, `dashboard/src/{pages,components,lib}`.
+**Module map (create as work proceeds):** `device/mpu/perception/{vision,audio}.py`, `device/mpu/cognition/{fusion,bandit,risk,tracker}.py`, `device/mpu/bridge/rpc.py`, `device/mpu/comms/lora.py`, `device/mcu/src/{sensors,footfall,actuators,lora,power,state_machine}.c`, `web/backend/{migrations,functions}`, `web/ingest/`, `web/frontend/src/{pages,components,lib}`.
 
 **Interfaces are contracts** — define the RPC message schema and the Supabase table schema **first** (they let firmware, linux, and dashboard progress in parallel).
 
@@ -73,7 +73,7 @@ Pages to generate (give Fable this brief):
 - **Dashboard (ranger-first, dead simple):** Live **map** of nodes (status colours), **Alerts** feed (confirmed events, confidence, thumbnail, direction, acknowledge button), **Node detail** (battery/solar/last-seen/firmware), **Event replay** (timeline + media), **Analytics** (events by time/species/weather; hotspot heatmap), **Maintenance** queue (predictive), **Fleet health**, **Settings/OTA status**.
 - **Design system:** one theme, large tap targets, offline-friendly, "reads like a funded product."
 
-Fable workflow: (1) generate all pages with realistic placeholder data; (2) **export the React code into `dashboard/`**; (3) replace placeholders with the **Supabase client** (tables: `nodes`, `events`, `health`, `alerts`, `users`); (4) deploy to **Vercel**; (5) point a domain later. Do the *generation + export* before 12 Jul; the Supabase wiring can happen after.
+Fable workflow: (1) generate all pages with realistic placeholder data; (2) **export the React code into `web/frontend/`**; (3) replace placeholders with the **Supabase client** (tables: `nodes`, `events`, `health`, `alerts`, `users`); (4) deploy to **Vercel**; (5) point a domain later. Do the *generation + export* before 12 Jul; the Supabase wiring can happen after.
 
 **Backend build order:** Supabase project → schema + RLS → seed demo data (so the dashboard looks alive for the contest) → ingest bridge (ChirpStack MQTT → Supabase) → edge function for alert fan-out (WhatsApp/SMS) → OTA metadata table.
 
@@ -81,7 +81,7 @@ Fable workflow: (1) generate all pages with realistic placeholder data; (2) **ex
 - **Open via `EleTect-X.code-workspace`** (a multi-root workspace) — settings/extensions apply only to this workspace, never globally.
 - **Recommended extensions** are pinned in `.vscode/extensions.json` (VS Code will prompt to install *for this workspace*): Python + Pylance + **Ruff**, C/C++ + **PlatformIO** (STM32), ESLint + **Prettier** + Tailwind (frontend), **GitLens**, **Error Lens**, Markdown All-in-One, YAML/TOML, Docker.
 - **Formatters/linters:** Ruff (Python), Prettier+ESLint (web), clang-format (firmware). `format on save` is set per-language in `.vscode/settings.json` (workspace-scoped).
-- **Testing:** pytest (linux/ai), Vitest (dashboard), PlatformIO unit tests (firmware).
+- **Testing:** pytest (device/mpu, ml), Vitest (web/frontend), PlatformIO unit tests (device/mcu).
 - **Git/GitHub:** trunk-based + PR template + CI (`.github/workflows/ci.yml`) + branch protection.
 - **CLI tools:** `gh` (GitHub), `supabase` CLI, `pio` (PlatformIO), `ruff`, `pnpm`/`npm`, `mosquitto_sub` (test MQTT).
 
@@ -90,7 +90,7 @@ Fable workflow: (1) generate all pages with realistic placeholder data; (2) **ex
 - `CONTEXT.md` + `CLAUDE.md` are small and always loaded; **don't** paste large docs — reference paths.
 - **Load only the module you're touching.** Use the **explorer subagent** (Haiku, read-only) for wide searches so file dumps never enter the main context.
 - **`/compact` after each task; start a fresh session per feature.** Commit, then clear.
-- Keep the working set small: one subsystem per session (firmware *or* linux *or* dashboard).
+- Keep the working set small: one subsystem per session (device/mcu *or* device/mpu *or* web/frontend).
 
 **Model & effort routing:**
 | Task | Model | Reasoning effort |
@@ -112,7 +112,7 @@ Fable workflow: (1) generate all pages with realistic placeholder data; (2) **ex
 
 | Window | Focus | Milestones / exit criteria |
 |---|---|---|
-| **Now – 12 Jul** | Repo + **Fable frontend** + backend start | Repo pushed & protected; Fable pages generated + **exported to `dashboard/`**; Supabase project + schema; hardware orders confirmed |
+| **Now – 12 Jul** | Repo + **Fable frontend** + backend start | Repo pushed & protected; Fable pages generated + **exported to `web/frontend/`**; Supabase project + schema; hardware orders confirmed |
 | **12 – 21 Jul** | Backend wiring + firmware skeleton + AI bootstrap | Dashboard live on Vercel with seeded data; Supabase auth + RLS; ChirpStack + Grove E5 join/uplink working; STM32 state machine + LoRa uplink + actuator control on bench; vision detector training on public data |
 | **22 Jul – 1 Aug** | Integration as hardware lands | Geophone front-end (INA333→STM32 ADC) + STA/LTA + footfall model; IMX462 capture + IR + detector on device; DFPlayer→TPA3116→horn deterrence; log-odds fusion + bandit loop; end-to-end **detect→confirm→deter→learn** on the bench; **freeze MVP by ~1 Aug** |
 | **1 – 6 Aug** | Hardening + power + enclosure | PETG enclosure assembled; power/solar + protection validated; conformal coat; reliability + power-meter capture; build a spare node |
