@@ -28,7 +28,7 @@ export function StaySafe() {
         <div className="border-brand-green grid h-14.5 w-14.5 flex-shrink-0 place-items-center rounded-full border-2 bg-[rgba(95,169,124,0.12)] text-2xl">
           🟢
         </div>
-        <div className="min-w-[200px] flex-1">
+        <div className="min-w-50 flex-1">
           <p className="text-brand-fg/55 mb-1 font-mono text-xs font-semibold tracking-[0.12em]">
             CURRENT AREA RISK · KOTHAMANGALAM SECTOR
           </p>
@@ -39,7 +39,7 @@ export function StaySafe() {
 
       <div className="mb-9 grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3">
         {howItWorks.map((s) => (
-          <div key={s.n} className="border-brand-fg/[0.09] rounded-xl border bg-brand-panel/35 p-5">
+          <div key={s.n} className="border-brand-fg/9 rounded-xl border bg-brand-panel/35 p-5">
             <p className="mb-1.5 font-sans text-[15px] font-semibold">{s.n}</p>
             <p className="text-brand-fg/60 font-sans text-[13.5px] leading-snug">{s.body}</p>
           </div>

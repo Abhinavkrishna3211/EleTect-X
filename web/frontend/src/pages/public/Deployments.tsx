@@ -30,7 +30,7 @@ export function Deployments() {
         {deployPhases.map((d) => (
           <div
             key={d.title}
-            className="border-brand-fg/[0.09] rounded-2xl border p-6"
+            className="border-brand-fg/9 rounded-2xl border p-6"
             style={{ background: d.bg }}
           >
             <p

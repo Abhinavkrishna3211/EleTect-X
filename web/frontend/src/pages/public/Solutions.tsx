@@ -20,10 +20,10 @@ export function Solutions() {
         {solutionsData.map((s) => (
           <div
             key={s.title}
-            className="border-brand-fg/[0.09] grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] overflow-hidden rounded-2xl border bg-[#0B0D0B]"
+            className="border-brand-fg/9 grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] overflow-hidden rounded-2xl border bg-[#0B0D0B]"
           >
             <div
-              className="bg-brand-panel min-h-[240px] bg-cover bg-center"
+              className="bg-brand-panel min-h-60 bg-cover bg-center"
               style={{
                 backgroundImage: `linear-gradient(120deg, rgba(7,13,10,0.2), rgba(7,13,10,0.75)), url('${s.img}')`,
               }}
@@ -65,7 +65,7 @@ export function Solutions() {
           {otherWildlife.map((w) => (
             <div
               key={w.name}
-              className="border-brand-fg/[0.09] hover:border-brand-gold/40 rounded-2xl border bg-[linear-gradient(160deg,rgba(15,29,20,0.5),rgba(11,13,11,0.2))] p-5.5 transition-all hover:-translate-y-1"
+              className="border-brand-fg/9 hover:border-brand-gold/40 rounded-2xl border bg-[linear-gradient(160deg,rgba(15,29,20,0.5),rgba(11,13,11,0.2))] p-5.5 transition-all hover:-translate-y-1"
             >
               <div className="mb-3 text-2xl">{w.icon}</div>
               <h3 className="mb-2 font-sans text-base font-semibold">{w.name}</h3>
@@ -76,7 +76,7 @@ export function Solutions() {
       </section>
 
       {/* COORDINATED INTELLIGENCE / PHYSICAL AI */}
-      <section className="bg-brand-bg-alt border-brand-fg/[0.06] border-t">
+      <section className="bg-brand-bg-alt border-brand-fg/6 border-t">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 md:py-24 lg:px-8">
           <p className="text-brand-gold mb-2 font-mono text-xs font-semibold tracking-[0.18em]">
             COORDINATED INTELLIGENCE · PHYSICAL AI
@@ -105,7 +105,7 @@ export function Solutions() {
               {corridorSteps.map((c) => (
                 <div
                   key={c.node}
-                  className="border-brand-fg/[0.09] bg-brand-panel/35 rounded-xl border px-4.5 py-4"
+                  className="border-brand-fg/9 bg-brand-panel/35 rounded-xl border px-4.5 py-4"
                 >
                   <p className="text-brand-gold mb-1 font-mono text-xs font-bold tracking-[0.08em]">{c.node}</p>
                   <p className="text-brand-fg/70 font-sans text-sm leading-relaxed">{c.action}</p>

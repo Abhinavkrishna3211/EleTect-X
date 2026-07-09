@@ -25,7 +25,7 @@ export function About() {
       <h2 className="mb-6 font-serif text-[clamp(24px,3vw,34px)] font-normal">Team</h2>
       <div className="mb-13 grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3.5">
         {team.map((m) => (
-          <div key={m.name} className="border-brand-fg/[0.09] rounded-2xl border bg-[#0B0D0B] p-6.5">
+          <div key={m.name} className="border-brand-fg/9 rounded-2xl border bg-[#0B0D0B] p-6.5">
             <div className="mb-4 grid h-16 w-16 place-items-center rounded-full bg-[linear-gradient(140deg,#2F5E3F,#0F1D14)]">
               <span className="text-brand-gold font-serif text-2xl font-normal">{m.initials}</span>
             </div>
