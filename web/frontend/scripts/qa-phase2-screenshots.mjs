@@ -28,10 +28,13 @@ const viewports = [
   { tag: 'mobile', width: 390, height: 844 },
 ]
 
+const only = process.argv.slice(2)
+const targetPages = only.length ? pages.filter((p) => only.includes(p.slug)) : pages
+
 async function shootBuilt(browser) {
   for (const vp of viewports) {
     const page = await browser.newPage({ viewport: { width: vp.width, height: vp.height } })
-    for (const p of pages) {
+    for (const p of targetPages) {
       await page.goto(`${builtBaseUrl}${p.route}`, { waitUntil: 'networkidle' })
       const main = page.locator('main').first()
       await main.waitFor({ state: 'visible' })
@@ -46,7 +49,7 @@ async function shootBuilt(browser) {
 async function shootDesign(browser) {
   for (const vp of viewports) {
     const page = await browser.newPage({ viewport: { width: vp.width, height: vp.height } })
-    for (const p of pages) {
+    for (const p of targetPages) {
       await page.goto(`${designFileUrl}#/${p.hash}`, { waitUntil: 'load' })
       const section = page.locator(`[data-screen-label="${p.label}"]`).first()
       await section.waitFor({ state: 'visible' })

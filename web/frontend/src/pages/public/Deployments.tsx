@@ -1,3 +1,4 @@
+import { SectorMapIllustration } from '@/components/SectorMapIllustration'
 import { deployPhases } from '@/lib/content'
 
 export function Deployments() {
@@ -12,15 +13,8 @@ export function Deployments() {
         forest range, in the conflict hotspots where the state declared human–wildlife conflict a disaster in 2024.
       </p>
 
-      <div className="border-brand-fg/10 relative h-[clamp(320px,50vw,460px)] overflow-hidden rounded-2xl border bg-[#0B0D0B]">
-        <div className="absolute inset-0 grid place-items-center">
-          <div className="text-center">
-            <p className="text-brand-fg/30 font-mono text-[11px] tracking-[0.14em]">
-              KOTHAMANGALAM PILOT · LIVE VIEW
-            </p>
-            <p className="text-brand-fg/45 mt-2 font-sans text-sm">Sector map view, live in the dashboard.</p>
-          </div>
-        </div>
+      <div className="h-[clamp(320px,50vw,460px)]">
+        <SectorMapIllustration label="KOTHAMANGALAM PILOT · LIVE VIEW" />
       </div>
       <p className="text-brand-fg/40 mt-3 mb-12 font-mono text-xs">
         Illustrative sector view. Exact node locations withheld for wildlife protection.
