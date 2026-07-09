@@ -41,7 +41,6 @@ device/mpu/models/**/*.tflite
 
 # --- Design export cache (keep the .dc.html spec + assets, not the paste cache) ---
 docs/design-reference/uploads/
-docs/design-reference/.thumbnail/
 
 # --- OS / editor ---
 .DS_Store
