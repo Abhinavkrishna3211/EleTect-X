@@ -1,0 +1,1942 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style data-omelette-print-defaults>
+@media print {
+  @page { margin: 0.5in; }
+  h1, h2, h3, h4, h5, h6 { break-after: avoid; }
+  figure, table, pre, blockquote, img, svg, tr, [class~="card" i] { break-inside: avoid; }
+  img, svg { max-width: 100%; }
+  p { orphans: 3; widows: 3; }
+}
+</style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;padding:0;background:#070D0A;color:#E9EDE6;font-family:'Archivo',sans-serif;-webkit-font-smoothing:antialiased}
+  *{box-sizing:border-box}
+  a{color:#E2A13C;text-decoration:none}
+  a:hover{color:#EDBE6F}
+  input,select,button,textarea{font-family:'Archivo',sans-serif}
+  input[type=range]{accent-color:#E2A13C}
+  @keyframes et-ping{0%{transform:scale(.6);opacity:.9}100%{transform:scale(2.1);opacity:0}}
+  @keyframes et-dash{to{stroke-dashoffset:-40}}
+  @keyframes et-fadeUp{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+  @keyframes et-pulse{0%,100%{opacity:1}50%{opacity:.45}}
+  @keyframes et-marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  @keyframes et-drift{from{transform:scale(1.06) translateY(0)}to{transform:scale(1.12) translateY(-14px)}}
+</style>
+</helmet>
+
+<!-- ============ PUBLIC SHELL ============ -->
+<sc-if value="{{ isPublicSite }}" hint-placeholder-val="{{ true }}">
+<div data-screen-label="Public site" style="min-height:100vh;background:#070D0A;color:#E9EDE6">
+
+  <!-- NAV -->
+  <header style="position:fixed;top:0;left:0;right:0;z-index:60;backdrop-filter:blur(14px);background:rgba(7,13,10,0.72);border-bottom:1px solid rgba(233,237,230,0.07)">
+    <div style="max-width:1200px;margin:0 auto;padding:0 clamp(16px,4vw,32px);height:64px;display:flex;align-items:center;justify-content:space-between;gap:16px">
+      <a href="#/" style="display:flex;align-items:center;gap:10px;color:#E9EDE6">
+        <svg width="26" height="26" viewBox="0 0 26 26" fill="none"><circle cx="13" cy="13" r="12" stroke="#5FA97C" stroke-width="1.6"/><path d="M7 16 C7 10.5 9.5 7.5 13 7.5 C16.5 7.5 19 10.5 19 16 M10 16 L10 12.5 M16 16 L16 12.5" stroke="#E2A13C" stroke-width="1.7" stroke-linecap="round"/></svg>
+        <span style="font:600 17px 'Archivo';letter-spacing:0.02em">EleTect</span>
+      </a>
+      <sc-if value="{{ notMobile }}" hint-placeholder-val="{{ true }}">
+        <nav style="display:flex;align-items:center;gap:clamp(14px,2.4vw,28px)">
+          <sc-for list="{{ navLinks }}" as="l" hint-placeholder-count="7">
+            <a href="{{ l.href }}" style="font:500 13.5px 'Archivo';color:{{ l.color }};letter-spacing:0.02em" style-hover="color:#E9EDE6">{{ l.label }}</a>
+          </sc-for>
+          <a href="#/login" style="font:600 13px 'Archivo';color:#0B140E;background:#E2A13C;padding:9px 18px;border-radius:99px;letter-spacing:0.02em" style-hover="background:#EDBE6F;color:#0B140E">Dashboard</a>
+        </nav>
+      </sc-if>
+      <sc-if value="{{ mobile }}" hint-placeholder-val="{{ false }}">
+        <button onClick="{{ toggleNav }}" aria-label="Menu" style="background:none;border:1px solid rgba(233,237,230,0.2);border-radius:10px;color:#E9EDE6;padding:10px 14px;font:600 13px 'Archivo';cursor:pointer;min-height:44px">{{ navBtnLabel }}</button>
+      </sc-if>
+    </div>
+    <sc-if value="{{ navOpen }}" hint-placeholder-val="{{ false }}">
+      <nav style="display:flex;flex-direction:column;padding:8px 20px 20px;gap:2px;background:rgba(7,13,10,0.97)">
+        <sc-for list="{{ navLinks }}" as="l" hint-placeholder-count="7">
+          <a href="{{ l.href }}" onClick="{{ closeNav }}" style="font:500 17px 'Archivo';color:{{ l.color }};padding:13px 4px;border-bottom:1px solid rgba(233,237,230,0.06)">{{ l.label }}</a>
+        </sc-for>
+        <a href="#/login" onClick="{{ closeNav }}" style="margin-top:14px;font:600 15px 'Archivo';color:#0B140E;background:#E2A13C;padding:14px;border-radius:12px;text-align:center">Dashboard login</a>
+      </nav>
+    </sc-if>
+  </header>
+
+  <!-- ============ HOME ============ -->
+  <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+  <main data-screen-label="Home">
+    <!-- HERO -->
+    <section style="position:relative;min-height:100svh;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden;background:#070D0A">
+      <div style="position:absolute;inset:0;background-image:url('https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=2000&q=80');background-size:cover;background-position:center 30%;filter:brightness(0.42) saturate(0.85) hue-rotate(-8deg);animation:et-drift 24s ease-in-out infinite alternate"></div>
+      <div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(7,13,10,0.55) 0%, rgba(7,13,10,0.15) 40%, rgba(7,13,10,0.92) 88%, #070D0A 100%)"></div>
+      <div style="position:relative;max-width:1200px;margin:0 auto;width:100%;padding:120px clamp(16px,4vw,32px) clamp(48px,8vh,96px)">
+        <div style="display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(95,169,124,0.4);background:rgba(15,29,20,0.6);border-radius:99px;padding:7px 14px;margin-bottom:22px;animation:et-fadeUp .8s ease both">
+          <span style="width:7px;height:7px;border-radius:50%;background:#5FA97C;animation:et-pulse 2s infinite"></span>
+          <span style="font:600 11.5px 'IBM Plex Mono';letter-spacing:0.14em;color:#9DC7AC">FIELD-TESTED WITH THE KERALA FOREST DEPARTMENT</span>
+        </div>
+        <h1 style="margin:0 0 20px;font:400 clamp(44px,7.5vw,92px)/1.02 'Instrument Serif',serif;letter-spacing:-0.01em;max-width:13ch;animation:et-fadeUp .8s .1s ease both">The forest warns you <em style="color:#E2A13C">first</em>.</h1>
+        <p style="margin:0 0 32px;max-width:56ch;font:400 clamp(16px,1.6vw,19px)/1.6 'Archivo';color:rgba(233,237,230,0.75);animation:et-fadeUp .8s .2s ease both">EleTect is an autonomous, solar-powered AI system that detects wildlife early, warns people instantly, and deters animals safely — day and night, even without the internet.</p>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;animation:et-fadeUp .8s .3s ease both">
+          <a href="#/technology" style="font:600 15px 'Archivo';color:#0B140E;background:#E2A13C;padding:15px 28px;border-radius:99px;min-height:44px;display:inline-flex;align-items:center" style-hover="background:#EDBE6F;color:#0B140E">Explore the platform</a>
+          <a href="#/login" style="font:600 15px 'Archivo';color:#E9EDE6;border:1px solid rgba(233,237,230,0.28);padding:15px 28px;border-radius:99px;min-height:44px;display:inline-flex;align-items:center" style-hover="border-color:#E9EDE6;color:#E9EDE6">See it live →</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- STATS BAND -->
+    <section style="background:#0B0D0B;border-top:1px solid rgba(233,237,230,0.06);border-bottom:1px solid rgba(233,237,230,0.06)">
+      <div style="max-width:1200px;margin:0 auto;padding:clamp(56px,8vw,96px) clamp(16px,4vw,32px)">
+        <p style="margin:0 0 8px;font:600 12px 'IBM Plex Mono';letter-spacing:0.18em;color:#E2A13C">THE CRISIS, BY THE NUMBERS</p>
+        <h2 style="margin:0 0 40px;font:400 clamp(28px,3.6vw,44px)/1.15 'Instrument Serif',serif;max-width:24ch">Human–wildlife conflict is now an official disaster in Kerala.</h2>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px">
+          <sc-for list="{{ stats }}" as="s" hint-placeholder-count="4">
+            <div style="background:#0B0D0B;border:1px solid rgba(233,237,230,0.1);border-radius:14px;padding:28px 24px">
+              <div style="font:400 clamp(38px,4.5vw,56px)/1 'Instrument Serif',serif;color:#E9EDE6">{{ s.value }}</div>
+              <div style="margin-top:10px;font:500 13.5px/1.5 'Archivo';color:rgba(233,237,230,0.62)">{{ s.label }}</div>
+            </div>
+          </sc-for>
+        </div>
+        <p style="margin:18px 0 0;font:400 12px 'IBM Plex Mono';color:rgba(233,237,230,0.4)">Government and published figures, 2019–2024. Most fatal encounters happen at night — when people never see the animal coming.</p>
+      </div>
+    </section>
+
+    <!-- HOW IT WORKS -->
+    <section style="background:#070D0A">
+      <div style="max-width:1200px;margin:0 auto;padding:clamp(64px,9vw,120px) clamp(16px,4vw,32px)">
+        <p style="margin:0 0 8px;font:600 12px 'IBM Plex Mono';letter-spacing:0.18em;color:#5FA97C">ONE SYSTEM, SEVEN INSTINCTS</p>
+        <h2 style="margin:0 0 16px;font:400 clamp(30px,4vw,48px)/1.1 'Instrument Serif',serif;max-width:20ch">It senses, decides, and acts — like a ranger who never sleeps.</h2>
+        <p style="margin:0 0 44px;max-width:60ch;font:400 16px/1.65 'Archivo';color:rgba(233,237,230,0.68)">Every node runs fully offline on solar power. No internet is needed to detect, decide, or deter.</p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px">
+          <sc-for list="{{ steps }}" as="st" hint-placeholder-count="7">
+            <div style="border:1px solid rgba(233,237,230,0.09);border-radius:16px;padding:24px;background:linear-gradient(160deg, rgba(15,29,20,0.55), rgba(11,13,11,0.3))" style-hover="border-color:rgba(226,161,60,0.45)">
+              <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px">
+                <span style="font:600 12px 'IBM Plex Mono';color:#E2A13C">{{ st.n }}</span>
+                <h3 style="margin:0;font:600 17px 'Archivo';letter-spacing:0.01em">{{ st.title }}</h3>
+              </div>
+              <p style="margin:0;font:400 14.5px/1.6 'Archivo';color:rgba(233,237,230,0.65)">{{ st.body }}</p>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </section>
+
+    <!-- IMAGE INTERLUDE -->
+    <section style="position:relative;min-height:52vh;overflow:hidden;background:#0F1D14">
+      <div style="position:absolute;inset:0;background-image:url('https://images.unsplash.com/photo-1557050543-4d5f4e07ef46?auto=format&fit=crop&w=2000&q=80');background-size:cover;background-position:center 60%;filter:brightness(0.55) saturate(0.9)"></div>
+      <div style="position:absolute;inset:0;background:linear-gradient(180deg, #070D0A 0%, rgba(7,13,10,0.1) 30%, rgba(7,13,10,0.1) 70%, #070D0A 100%)"></div>
+      <div style="position:relative;max-width:1200px;margin:0 auto;padding:22vh clamp(16px,4vw,32px);display:flex;align-items:center;min-height:52vh">
+        <blockquote style="margin:0;font:400 clamp(22px,3vw,34px)/1.35 'Instrument Serif',serif;font-style:italic;max-width:26ch;color:#E9EDE6;text-shadow:0 2px 24px rgba(0,0,0,0.6)">"Deterrence that never repeats itself — so animals never learn to ignore it."</blockquote>
+      </div>
+    </section>
+
+    <!-- COMPARISON -->
+    <section style="background:#0B0D0B;border-top:1px solid rgba(233,237,230,0.06)">
+      <div style="max-width:1200px;margin:0 auto;padding:clamp(64px,9vw,110px) clamp(16px,4vw,32px)">
+        <p style="margin:0 0 8px;font:600 12px 'IBM Plex Mono';letter-spacing:0.18em;color:#E2A13C">WHY EXISTING TOOLS FAIL</p>
+        <h2 style="margin:0 0 40px;font:400 clamp(28px,3.6vw,44px)/1.15 'Instrument Serif',serif;max-width:26ch">Alarms get ignored. Fences get bypassed. EleTect adapts.</h2>
+        <div style="overflow-x:auto;border:1px solid rgba(233,237,230,0.09);border-radius:14px">
+          <div style="min-width:640px">
+            <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;background:rgba(15,29,20,0.6);border-bottom:1px solid rgba(233,237,230,0.09)">
+              <div style="padding:14px 18px;font:600 12px 'IBM Plex Mono';letter-spacing:0.1em;color:rgba(233,237,230,0.55)">CAPABILITY</div>
+              <div style="padding:14px 12px;font:700 12.5px 'IBM Plex Mono';letter-spacing:0.08em;color:#E2A13C;text-align:center">ELETECT</div>
+              <div style="padding:14px 12px;font:600 12px 'IBM Plex Mono';letter-spacing:0.08em;color:rgba(233,237,230,0.5);text-align:center">FIXED ALARMS</div>
+              <div style="padding:14px 12px;font:600 12px 'IBM Plex Mono';letter-spacing:0.08em;color:rgba(233,237,230,0.5);text-align:center">FENCES</div>
+              <div style="padding:14px 12px;font:600 12px 'IBM Plex Mono';letter-spacing:0.08em;color:rgba(233,237,230,0.5);text-align:center">CAMERA TRAPS</div>
+            </div>
+            <sc-for list="{{ compareRows }}" as="r" hint-placeholder-count="6">
+              <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;border-bottom:1px solid rgba(233,237,230,0.06)">
+                <div style="padding:15px 18px;font:500 14px 'Archivo';color:rgba(233,237,230,0.85)">{{ r.cap }}</div>
+                <div style="padding:15px 12px;text-align:center;font:600 14px 'Archivo';color:#5FA97C;background:rgba(95,169,124,0.06)">{{ r.us }}</div>
+                <div style="padding:15px 12px;text-align:center;font:500 14px 'Archivo';color:rgba(233,237,230,0.45)">{{ r.alarm }}</div>
+                <div style="padding:15px 12px;text-align:center;font:500 14px 'Archivo';color:rgba(233,237,230,0.45)">{{ r.fence }}</div>
+                <div style="padding:15px 12px;text-align:center;font:500 14px 'Archivo';color:rgba(233,237,230,0.45)">{{ r.cam }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <p style="margin:18px 0 0;font:400 13.5px/1.6 'Archivo';color:rgba(233,237,230,0.55);max-width:70ch">Electric and rail fences cost lakhs per kilometre and harm other wildlife. EleTect protects the same boundary at roughly <strong style="color:#E2A13C">1/10th the cost</strong> — and scales to thousands of nodes.</p>
+      </div>
+    </section>
+
+    <!-- SOLUTIONS PREVIEW -->
+    <section style="background:#070D0A">
+      <div style="max-width:1200px;margin:0 auto;padding:clamp(64px,9vw,110px) clamp(16px,4vw,32px)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap;margin-bottom:40px">
+          <div>
+            <p style="margin:0 0 8px;font:600 12px 'IBM Plex Mono';letter-spacing:0.18em;color:#5FA97C">ONE PLATFORM, MANY JOBS</p>
+            <h2 style="margin:0;font:400 clamp(28px,3.6vw,44px)/1.15 'Instrument Serif',serif">What EleTect protects</h2>
+          </div>
+          <a href="#/solutions" style="font:600 14px 'Archivo';color:#E2A13C">All solutions →</a>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px">
+          <sc-for list="{{ solutionCards }}" as="s" hint-placeholder-count="6">
+            <a href="#/solutions" style="display:block;border:1px solid rgba(233,237,230,0.09);border-radius:16px;overflow:hidden;background:#0B0D0B;color:#E9EDE6" style-hover="border-color:rgba(226,161,60,0.5);color:#E9EDE6">
+              <div style="height:150px;background-image:linear-gradient(180deg, rgba(7,13,10,0) 40%, rgba(7,13,10,0.85)), url('{{ s.img }}');background-size:cover;background-position:center;background-color:#0F1D14"></div>
+              <div style="padding:20px 22px 24px">
+                <h3 style="margin:0 0 8px;font:600 17px 'Archivo'">{{ s.title }}</h3>
+                <p style="margin:0;font:400 14px/1.55 'Archivo';color:rgba(233,237,230,0.6)">{{ s.tease }}</p>
+              </div>
+            </a>
+          </sc-for>
+        </div>
+      </div>
+    </section>
+
+    <!-- AWARDS -->
+    <section style="background:#0F1D14;border-top:1px solid rgba(233,237,230,0.06)">
+      <div style="max-width:1200px;margin:0 auto;padding:clamp(48px,7vw,80px) clamp(16px,4vw,32px);display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:24px;align-items:center">
+        <div>
+          <p style="margin:0 0 6px;font:600 12px 'IBM Plex Mono';letter-spacing:0.18em;color:#E2A13C">RECOGNITION</p>
+          <h2 style="margin:0;font:400 clamp(24px,3vw,34px)/1.2 'Instrument Serif',serif">Awarded for humanitarian technology</h2>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;gap:12px;align-items:center;border:1px solid rgba(233,237,230,0.12);border-radius:12px;padding:16px 18px;background:rgba(7,13,10,0.4)"><span style="font-size:20px">🏅</span><span style="font:600 14.5px 'Archivo'">IEEE IAS CMD Humanitarian Award 2025</span></div>
+          <div style="display:flex;gap:12px;align-items:center;border:1px solid rgba(233,237,230,0.12);border-radius:12px;padding:16px 18px;background:rgba(7,13,10,0.4)"><span style="font-size:20px">🏅</span><span style="font:600 14.5px 'Archivo'">Amarnath Raja Humanitarian Technology Award 2025</span></div>
+          <div style="display:flex;gap:12px;align-items:center;border:1px solid rgba(233,237,230,0.12);border-radius:12px;padding:16px 18px;background:rgba(7,13,10,0.4)"><span style="font-size:20px">🌿</span><span style="font:600 14.5px 'Archivo'">Field deployment in progress — Kerala Forest Department</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section style="background:#070D0A">
+      <div style="max-width:900px;margin:0 auto;padding:clamp(72px,10vw,130px) clamp(16px,4vw,32px);text-align:center">
+        <h2 style="margin:0 0 18px;font:400 clamp(32px,4.6vw,56px)/1.1 'Instrument Serif',serif">Protecting farms, forests,<br>and the <em style="color:#E2A13C">future</em>.</h2>
+        <p style="margin:0 0 32px;font:400 16px/1.6 'Archivo';color:rgba(233,237,230,0.65)">For Forest Departments, researchers and partners.</p>
+        <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
+          <a href="#/contact" style="font:600 15px 'Archivo';color:#0B140E;background:#E2A13C;padding:15px 30px;border-radius:99px" style-hover="background:#EDBE6F;color:#0B140E">Talk to us</a>
+          <a href="#/staysafe" style="font:600 15px 'Archivo';color:#E9EDE6;border:1px solid rgba(233,237,230,0.28);padding:15px 30px;border-radius:99px" style-hover="border-color:#E9EDE6;color:#E9EDE6">Get safety alerts</a>
+        </div>
+      </div>
+    </section>
+  </main>
+  </sc-if>
+
+  <!-- ============ TECHNOLOGY ============ -->
+  <sc-if value="{{ isTech }}" hint-placeholder-val="{{ false }}">
+  <main data-screen-label="Technology" style="padding-top:64px">
+    <section style="position:relative;overflow:hidden;background:#0B0D0B;border-bottom:1px solid rgba(233,237,230,0.06)">
+      <div style="position:absolute;inset:0;background-image:url('https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=2000&q=80');background-size:cover;background-position:center;filter:brightness(0.3)"></div>
+      <div style="position:absolute;inset:0;background:linear-gradient(180deg, rgba(7,13,10,0.5), #070D0A 95%)"></div>
+      <div style="position:relative;max-width:1200px;margin:0 auto;padding:clamp(72px,10vw,120px) clamp(16px,4vw,32px)">
+        <p style="margin:0 0 10px;font:600 12px 'IBM Plex Mono';letter-spacing:0.18em;color:#5FA97C">TECHNOLOGY</p>
+        <h1 style="margin:0 0 18px;font:400 clamp(36px,5.5vw,64px)/1.05 'Instrument Serif',serif;max-width:18ch">Physical AI that earns its place in the forest.</h1>
+        <p style="margin:0;max-width:58ch;font:400 17px/1.65 'Archivo';color:rgba(233,237,230,0.72)">EleTect doesn't just detect — it reasons across three senses, explains every decision, and learns what works at each site.</p>
+      </div>
+    </section>
+
+    <section style="background:#070D0A">
+      <div style="max-width:1200px;margin:0 auto;padding:clamp(56px,8vw,100px) clamp(16px,4vw,32px)">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:14px;margin-bottom:60px">
+          <sc-for list="{{ techPillars }}" as="t" hint-placeholder-count="6">
+            <div style="border:1px solid rgba(233,237,230,0.09);border-radius:16px;padding:26px;background:linear-gradient(160deg, rgba(15,29,20,0.5), rgba(11,13,11,0.2))">
+              <div style="font-size:26px;margin-bottom:14px">{{ t.icon }}</div>
+              <h3 style="margin:0 0 10px;font:600 18px 'Archivo'">{{ t.title }}</h3>
+              <p style="margin:0;font:400 14.5px/1.6 'Archivo';color:rgba(233,237,230,0.65)">{{ t.body }}</p>
+            </div>
+          </sc-for>
+        </div>
+
+        <p style="margin:0 0 8px;font:600 12px 'IBM Plex Mono';letter-spacing:0.18em;color:#E2A13C">EXPLAINABLE BY DESIGN</p>
+        <h2 style="margin:0 0 28px;font:400 clamp(26px,3.4vw,40px)/1.15 'Instrument Serif',serif;max-width:24ch">Every decision shows its reasoning.</h2>
+        <div style="max-width:640px;border:1px solid rgba(233,237,230,0.12);border-radius:16px;background:#0B0D0B;overflow:hidden">
+          <div style="padding:14px 20px;border-bottom:1px solid rgba(233,237,230,0.08);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <span style="font:600 12px 'IBM Plex Mono';letter-spacing:0.1em;color:rgba(233,237,230,0.6)">EVENT E-2231 · NODE S7-04 · 21:47 IST</span>
+            <span style="font:700 11px 'IBM Plex Mono';color:#0B140E;background:#5FA97C;padding:4px 10px;border-radius:99px">RESOLVED</span>
+          </div>
+          <div style="padding:20px;display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;gap:12px;align-items:center"><span style="color:#5FA97C;font-weight:700">✔</span><span style="font:500 14.5px 'Archivo'">Ground vibration — heavy footstep pattern</span><span style="margin-left:auto;font:600 13px 'IBM Plex Mono';color:#5FA97C">97%</span></div>
+            <div style="display:flex;gap:12px;align-items:center"><span style="color:#5FA97C;font-weight:700">✔</span><span style="font:500 14.5px 'Archivo'">Audio — elephant rumble signature</span><span style="margin-left:auto;font:600 13px 'IBM Plex Mono';color:#5FA97C">91%</span></div>
+            <div style="display:flex;gap:12px;align-items:center"><span style="color:#5FA97C;font-weight:700">✔</span><span style="font:500 14.5px 'Archivo'">Vision — elephant confirmed (night-capable)</span><span style="margin-left:auto;font:600 13px 'IBM Plex Mono';color:#5FA97C">94%</span></div>
+            <div style="border-top:1px dashed rgba(233,237,230,0.15);padding-top:14px;display:flex;flex-direction:column;gap:6px">
+              <span style="font:600 14.5px 'Archivo';color:#E2A13C">→ Decision: adaptive deterrent activated</span>
+              <span style="font:500 14px 'Archivo';color:rgba(233,237,230,0.65)">Outcome: herd retreated toward forest · verified by observation</span>
+            </div>
+          </div>
+        </div>
+        <p style="margin:16px 0 0;font:400 13.5px/1.6 'Archivo';color:rgba(233,237,230,0.55);max-width:64ch">Three sensing modalities — ground, audio, vision — are fused into one confidence score. Officers see <em>why</em> the system acted, not just that it did.</p>
+      </div>
+    </section>
+  </main>
+  </sc-if>
+
+  <!-- ============ SOLUTIONS ============ -->
+  <sc-if value="{{ isSolutions }}" hint-placeholder-val="{{ false }}">
+  <main data-screen-label="Solutions" style="padding-top:64px">
+    <section style="max-width:1200px;margin:0 auto;padding:clamp(56px,8vw,96px) clamp(16px,4vw,32px) 20px">
+      <p style="margin:0 0 10px;font:600 12px 'IBM Plex Mono';letter-spacing:0.18em;color:#5FA97C">SOLUTIONS</p>
+      <h1 style="margin:0 0 18px;font:400 clamp(36px,5.5vw,64px)/1.05 'Instrument Serif',serif;max-width:16ch">One system. Many jobs.</h1>
+      <p style="margin:0;max-width:60ch;font:400 17px/1.65 'Archivo';color:rgba(233,237,230,0.72)">The same networked intelligence that stops a night raid on a paddy field can hold a herd off a highway, hear a chainsaw, or smell a fire coming.</p>
+    </section>
+    <section style="max-width:1200px;margin:0 auto;padding:32px clamp(16px,4vw,32px) clamp(72px,10vw,120px);display:flex;flex-direction:column;gap:18px">
+      <sc-for list="{{ solutions }}" as="s" hint-placeholder-count="6">
+        <div style="border:1px solid rgba(233,237,230,0.09);border-radius:18px;overflow:hidden;background:#0B0D0B;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">
+          <div style="min-height:240px;background-image:linear-gradient(120deg, rgba(7,13,10,0.2), rgba(7,13,10,0.75)), url('{{ s.img }}');background-size:cover;background-position:center;background-color:#0F1D14"></div>
+          <div style="padding:clamp(24px,3vw,36px)">
+            <h2 style="margin:0 0 18px;font:400 clamp(24px,2.8vw,32px)/1.15 'Instrument Serif',serif">{{ s.title }}</h2>
+            <p style="margin:0 0 6px;font:600 11.5px 'IBM Plex Mono';letter-spacing:0.14em;color:#E25B4A">THE PROBLEM</p>
+            <p style="margin:0 0 16px;font:400 14.5px/1.6 'Archivo';color:rgba(233,237,230,0.7)">{{ s.problem }}</p>
+            <p style="margin:0 0 6px;font:600 11.5px 'IBM Plex Mono';letter-spacing:0.14em;color:#5FA97C">HOW ELETECT SOLVES IT</p>
+            <p style="margin:0 0 16px;font:400 14.5px/1.6 'Archivo';color:rgba(233,237,230,0.7)">{{ s.solution }}</p>
+            <p style="margin:0 0 6px;font:600 11.5px 'IBM Plex Mono';letter-spacing:0.14em;color:#E2A13C">WHY IT'S BETTER</p>
+            <p style="margin:0;font:400 14.5px/1.6 'Archivo';color:rgba(233,237,230,0.7)">{{ s.why }}</p>
+          </div>
+        </div>
+      </sc-for>
+    </section>
+  </main>
+  </sc-if>
+
+  <!-- ============ DEPLOYMENTS ============ -->
+  <sc-if value="{{ isDeploy }}" hint-placeholder-val="{{ false }}">
+  <main data-screen-label="Deployments" style="padding-top:64px">
+    <section style="max-width:1200px;margin:0 auto;padding:clamp(56px,8vw,96px) clamp(16px,4vw,32px)">
+      <p style="margin:0 0 10px;font:600 12px 'IBM Plex Mono';letter-spacing:0.18em;color:#5FA97C">DEPLOYMENTS</p>
+      <h1 style="margin:0 0 18px;font:400 clamp(36px,5.5vw,64px)/1.05 'Instrument Serif',serif;max-width:18ch">Proving it where it matters most.</h1>
+      <p style="margin:0 0 40px;max-width:60ch;font:400 17px/1.65 'Archivo';color:rgba(233,237,230,0.72)">EleTect is in field deployment with the Kerala Forest Department — in the conflict hotspots where the state declared human–wildlife conflict a disaster in 2024.</p>
+      <div style="border:1px solid rgba(233,237,230,0.1);border-radius:18px;overflow:hidden;height:clamp(320px,50vw,460px)">
+        <dc-import name="SectorMap" nodes="{{ mapNodes }}" label="KERALA PILOT — LIVE VIEW" herd-visible="{{ false }}" style="display:block;width:100%;height:100%" hint-size="100%,100%"></dc-import>
+      </div>
+      <p style="margin:12px 0 48px;font:400 12px 'IBM Plex Mono';color:rgba(233,237,230,0.4)">Illustrative sector view. Exact node locations withheld for wildlife protection.</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px">
+        <sc-for list="{{ deployPhases }}" as="d" hint-placeholder-count="3">
+          <div style="border:1px solid rgba(233,237,230,0.09);border-radius:16px;padding:24px;background:{{ d.bg }}">
+            <p style="margin:0 0 8px;font:600 11.5px 'IBM Plex Mono';letter-spacing:0.14em;color:{{ d.tagColor }}">{{ d.tag }}</p>
+            <h3 style="margin:0 0 10px;font:600 17px 'Archivo'">{{ d.title }}</h3>
+            <p style="margin:0;font:400 14.5px/1.6 'Archivo';color:rgba(233,237,230,0.65)">{{ d.body }}</p>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+  </main>
+  </sc-if>
+
+  <!-- ============ RESEARCH ============ -->
+  <sc-if value="{{ isResearch }}" hint-placeholder-val="{{ false }}">
+  <main data-screen-label="Research" style="padding-top:64px">
+    <section style="max-width:1200px;margin:0 auto;padding:clamp(56px,8vw,96px) clamp(16px,4vw,32px)">
+      <p style="margin:0 0 10px;font:600 12px 'IBM Plex Mono';letter-spacing:0.18em;color:#5FA97C">RESEARCH</p>
+      <h1 style="margin:0 0 18px;font:400 clamp(36px,5.5vw,64px)/1.05 'Instrument Serif',serif;max-width:18ch">A long-term memory for the forest.</h1>
+      <p style="margin:0 0 44px;max-width:60ch;font:400 17px/1.65 'Archivo';color:rgba(233,237,230,0.72)">Every detection, movement pattern, and deterrence outcome becomes structured data — a growing behavioural record for scientists and the Forest Department.</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-bottom:52px">
+        <sc-for list="{{ researchCards }}" as="r" hint-placeholder-count="4">
+          <div style="border:1px solid rgba(233,237,230,0.09);border-radius:16px;padding:26px;background:linear-gradient(160deg, rgba(15,29,20,0.5), rgba(11,13,11,0.2))">
+            <h3 style="margin:0 0 10px;font:600 17px 'Archivo'">{{ r.title }}</h3>
+            <p style="margin:0;font:400 14.5px/1.6 'Archivo';color:rgba(233,237,230,0.65)">{{ r.body }}</p>
+          </div>
+        </sc-for>
+      </div>
+      <div style="border:1px solid rgba(226,161,60,0.3);border-radius:16px;padding:28px;background:rgba(226,161,60,0.05)">
+        <h3 style="margin:0 0 10px;font:400 22px 'Instrument Serif',serif">Data ethics</h3>
+        <p style="margin:0;font:400 14.5px/1.65 'Archivo';color:rgba(233,237,230,0.7);max-width:75ch">Exact node and animal locations are shared only with the Forest Department. Public alerts carry direction and area — never coordinates that could aid poaching. Resident data is opt-in, minimal, and never sold.</p>
+      </div>
+    </section>
+  </main>
+  </sc-if>
+
+  <!-- ============ ABOUT ============ -->
+  <sc-if value="{{ isAbout }}" hint-placeholder-val="{{ false }}">
+  <main data-screen-label="About" style="padding-top:64px">
+    <section style="max-width:900px;margin:0 auto;padding:clamp(56px,8vw,96px) clamp(16px,4vw,32px)">
+      <p style="margin:0 0 10px;font:600 12px 'IBM Plex Mono';letter-spacing:0.18em;color:#5FA97C">ABOUT</p>
+      <h1 style="margin:0 0 22px;font:400 clamp(36px,5.5vw,64px)/1.05 'Instrument Serif',serif">Built where the conflict lives.</h1>
+      <p style="margin:0 0 16px;font:400 17px/1.7 'Archivo';color:rgba(233,237,230,0.75)">EleTect began in Kerala, where roughly 500 people are killed every year in India in human–elephant conflict, and around 100 elephants die from electrocution, collisions, poisoning, and retaliation. We believe both numbers can go to zero — without a single harmed animal.</p>
+      <p style="margin:0 0 52px;font:400 17px/1.7 'Archivo';color:rgba(233,237,230,0.75)">Our mission: protect farms, forests, and the future — with technology that respects the wild.</p>
+      <h2 style="margin:0 0 24px;font:400 clamp(24px,3vw,34px) 'Instrument Serif',serif">Team</h2>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin-bottom:52px">
+        <div style="border:1px solid rgba(233,237,230,0.09);border-radius:16px;padding:26px;background:#0B0D0B">
+          <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(140deg,#2F5E3F,#0F1D14);display:grid;place-items:center;font:400 24px 'Instrument Serif',serif;color:#E2A13C;margin-bottom:16px">AK</div>
+          <h3 style="margin:0 0 4px;font:600 17px 'Archivo'">Abhinav Krishna N</h3>
+          <p style="margin:0;font:500 13px 'IBM Plex Mono';color:rgba(233,237,230,0.5)">Co-founder</p>
+        </div>
+        <div style="border:1px solid rgba(233,237,230,0.09);border-radius:16px;padding:26px;background:#0B0D0B">
+          <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(140deg,#2F5E3F,#0F1D14);display:grid;place-items:center;font:400 24px 'Instrument Serif',serif;color:#E2A13C;margin-bottom:16px">AM</div>
+          <h3 style="margin:0 0 4px;font:600 17px 'Archivo'">Amritha M</h3>
+          <p style="margin:0;font:500 13px 'IBM Plex Mono';color:rgba(233,237,230,0.5)">Co-founder</p>
+        </div>
+      </div>
+      <h2 style="margin:0 0 20px;font:400 clamp(24px,3vw,34px) 'Instrument Serif',serif">Recognition</h2>
+      <ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:10px">
+        <li style="border:1px solid rgba(233,237,230,0.1);border-radius:12px;padding:16px 18px;font:600 14.5px 'Archivo';background:rgba(15,29,20,0.4)">IEEE IAS CMD Humanitarian Award 2025</li>
+        <li style="border:1px solid rgba(233,237,230,0.1);border-radius:12px;padding:16px 18px;font:600 14.5px 'Archivo';background:rgba(15,29,20,0.4)">Amarnath Raja Humanitarian Technology Award 2025</li>
+        <li style="border:1px solid rgba(233,237,230,0.1);border-radius:12px;padding:16px 18px;font:600 14.5px 'Archivo';background:rgba(15,29,20,0.4)">Field deployment in progress with the Kerala Forest Department</li>
+      </ul>
+    </section>
+  </main>
+  </sc-if>
+
+  <!-- ============ CONTACT ============ -->
+  <sc-if value="{{ isContact }}" hint-placeholder-val="{{ false }}">
+  <main data-screen-label="Contact" style="padding-top:64px">
+    <section style="max-width:640px;margin:0 auto;padding:clamp(56px,8vw,96px) clamp(16px,4vw,32px)">
+      <p style="margin:0 0 10px;font:600 12px 'IBM Plex Mono';letter-spacing:0.18em;color:#5FA97C">CONTACT</p>
+      <h1 style="margin:0 0 14px;font:400 clamp(34px,5vw,56px)/1.08 'Instrument Serif',serif">For Forest Departments, researchers & partners.</h1>
+      <p style="margin:0 0 36px;font:400 16px/1.6 'Archivo';color:rgba(233,237,230,0.7)">Tell us about your site — we'll respond within two working days.</p>
+      <sc-if value="{{ contactNotSent }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <input value="{{ cName }}" onChange="{{ setCName }}" placeholder="Your name" style="background:#0B0D0B;border:1px solid rgba(233,237,230,0.15);border-radius:12px;padding:15px 16px;color:#E9EDE6;font-size:15px;min-height:44px">
+          <input value="{{ cEmail }}" onChange="{{ setCEmail }}" placeholder="Email" type="email" style="background:#0B0D0B;border:1px solid rgba(233,237,230,0.15);border-radius:12px;padding:15px 16px;color:#E9EDE6;font-size:15px;min-height:44px">
+          <textarea value="{{ cMsg }}" onChange="{{ setCMsg }}" placeholder="Your site, your problem, your timeline…" rows="5" style="background:#0B0D0B;border:1px solid rgba(233,237,230,0.15);border-radius:12px;padding:15px 16px;color:#E9EDE6;font-size:15px;resize:vertical"></textarea>
+          <button onClick="{{ sendContact }}" style="background:#E2A13C;color:#0B140E;border:none;border-radius:99px;padding:16px;font:600 15px 'Archivo';cursor:pointer;min-height:48px" style-hover="background:#EDBE6F">Send message</button>
+          <p style="margin:0;font:400 13px 'Archivo';color:rgba(233,237,230,0.45)">Or write to <a href="mailto:hello@eletect.in">hello@eletect.in</a></p>
+        </div>
+      </sc-if>
+      <sc-if value="{{ contactSent }}" hint-placeholder-val="{{ false }}">
+        <div style="border:1px solid rgba(95,169,124,0.4);background:rgba(95,169,124,0.08);border-radius:16px;padding:32px;text-align:center">
+          <div style="font-size:32px;margin-bottom:12px">🌿</div>
+          <h3 style="margin:0 0 8px;font:400 24px 'Instrument Serif',serif">Message received.</h3>
+          <p style="margin:0;font:400 14.5px 'Archivo';color:rgba(233,237,230,0.65)">We'll get back to you within two working days.</p>
+        </div>
+      </sc-if>
+    </section>
+  </main>
+  </sc-if>
+
+  <!-- ============ STAY SAFE ============ -->
+  <sc-if value="{{ isSafe }}" hint-placeholder-val="{{ false }}">
+  <main data-screen-label="Stay Safe" style="padding-top:64px">
+    <section style="max-width:720px;margin:0 auto;padding:clamp(56px,8vw,96px) clamp(16px,4vw,32px)">
+      <p style="margin:0 0 10px;font:600 12px 'IBM Plex Mono';letter-spacing:0.18em;color:#5FA97C">STAY SAFE</p>
+      <h1 style="margin:0 0 14px;font:400 clamp(34px,5vw,56px)/1.08 'Instrument Serif',serif">Know before you step outside.</h1>
+      <p style="margin:0 0 36px;font:400 16px/1.65 'Archivo';color:rgba(233,237,230,0.7)">If EleTect detects a wild animal near a village, opted-in residents get an SMS within seconds — direction, distance band, and what to do. No app needed.</p>
+
+      <div style="border:1px solid rgba(233,237,230,0.1);border-radius:16px;padding:24px;background:#0B0D0B;margin-bottom:16px;display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+        <div style="width:58px;height:58px;border-radius:50%;background:rgba(95,169,124,0.12);border:2px solid #5FA97C;display:grid;place-items:center;font-size:24px">🟢</div>
+        <div style="flex:1;min-width:200px">
+          <p style="margin:0 0 4px;font:600 12px 'IBM Plex Mono';letter-spacing:0.12em;color:rgba(233,237,230,0.55)">CURRENT AREA RISK — VELLIKULAM SECTOR</p>
+          <p style="margin:0;font:600 19px 'Archivo';color:#5FA97C">Low · No wildlife detected near villages</p>
+        </div>
+        <span style="font:500 11.5px 'IBM Plex Mono';color:rgba(233,237,230,0.4)">Updated 2 min ago</span>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:36px">
+        <div style="border:1px solid rgba(233,237,230,0.09);border-radius:14px;padding:20px;background:rgba(15,29,20,0.35)"><p style="margin:0 0 6px;font:600 15px 'Archivo'">1 · Detection</p><p style="margin:0;font:400 13.5px/1.55 'Archivo';color:rgba(233,237,230,0.6)">The network senses and confirms an animal near your area.</p></div>
+        <div style="border:1px solid rgba(233,237,230,0.09);border-radius:14px;padding:20px;background:rgba(15,29,20,0.35)"><p style="margin:0 0 6px;font:600 15px 'Archivo'">2 · Alert in seconds</p><p style="margin:0;font:400 13.5px/1.55 'Archivo';color:rgba(233,237,230,0.6)">You get an SMS with direction and simple safety guidance.</p></div>
+        <div style="border:1px solid rgba(233,237,230,0.09);border-radius:14px;padding:20px;background:rgba(15,29,20,0.35)"><p style="margin:0 0 6px;font:600 15px 'Archivo'">3 · All clear</p><p style="margin:0;font:400 13.5px/1.55 'Archivo';color:rgba(233,237,230,0.6)">When the animal returns to the forest, you're told it's safe.</p></div>
+      </div>
+
+      <sc-if value="{{ optInNotDone }}" hint-placeholder-val="{{ true }}">
+      <div style="border:1px solid rgba(226,161,60,0.35);border-radius:18px;padding:clamp(22px,4vw,32px);background:rgba(226,161,60,0.05)">
+        <h2 style="margin:0 0 6px;font:400 26px 'Instrument Serif',serif">Enable SMS alerts</h2>
+        <p style="margin:0 0 22px;font:400 14px/1.6 'Archivo';color:rgba(233,237,230,0.65)">Free for residents of covered areas.</p>
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <input value="{{ optPhone }}" onChange="{{ setOptPhone }}" placeholder="Phone number (+91…)" type="tel" style="background:#0B0D0B;border:1px solid rgba(233,237,230,0.15);border-radius:12px;padding:15px 16px;color:#E9EDE6;font-size:15px;min-height:44px">
+          <input value="{{ optLoc }}" onChange="{{ setOptLoc }}" placeholder="Village / panchayat (optional)" style="background:#0B0D0B;border:1px solid rgba(233,237,230,0.15);border-radius:12px;padding:15px 16px;color:#E9EDE6;font-size:15px;min-height:44px">
+          <button onClick="{{ toggleSms }}" style="display:flex;align-items:center;justify-content:space-between;gap:14px;background:#0B0D0B;border:1px solid rgba(233,237,230,0.15);border-radius:12px;padding:15px 16px;cursor:pointer;min-height:52px">
+            <span style="font:600 14.5px 'Archivo';color:#E9EDE6;text-align:left">SMS alerts for detections near me</span>
+            <span style="position:relative;width:46px;height:26px;border-radius:99px;background:{{ smsBg }};transition:background .25s;flex-shrink:0"><span style="position:absolute;top:3px;left:{{ smsKnob }};width:20px;height:20px;border-radius:50%;background:#E9EDE6;transition:left .25s"></span></span>
+          </button>
+          <sc-if value="{{ optError }}" hint-placeholder-val="{{ false }}">
+            <p style="margin:0;font:500 13px 'Archivo';color:#E25B4A">{{ optErrorMsg }}</p>
+          </sc-if>
+          <button onClick="{{ submitOptIn }}" style="background:#E2A13C;color:#0B140E;border:none;border-radius:99px;padding:16px;font:600 15px 'Archivo';cursor:pointer;min-height:48px" style-hover="background:#EDBE6F">Sign me up</button>
+          <p style="margin:0;font:400 12.5px/1.6 'Archivo';color:rgba(233,237,230,0.45)">By signing up you consent to receive safety SMS from EleTect. Your number and location are used only for alerts, never shared or sold. Opt out anytime by replying STOP.</p>
+        </div>
+      </div>
+      </sc-if>
+      <sc-if value="{{ optInDone }}" hint-placeholder-val="{{ false }}">
+        <div style="border:1px solid rgba(95,169,124,0.4);background:rgba(95,169,124,0.08);border-radius:18px;padding:32px;text-align:center">
+          <div style="font-size:32px;margin-bottom:12px">✅</div>
+          <h3 style="margin:0 0 8px;font:400 24px 'Instrument Serif',serif">You're covered.</h3>
+          <p style="margin:0;font:400 14.5px/1.6 'Archivo';color:rgba(233,237,230,0.65)">Safety alerts enabled for {{ optPhoneShown }}. Reply STOP to any message to opt out.</p>
+        </div>
+      </sc-if>
+    </section>
+  </main>
+  </sc-if>
+
+  <!-- FOOTER -->
+  <footer style="border-top:1px solid rgba(233,237,230,0.07);background:#060A08">
+    <div style="max-width:1200px;margin:0 auto;padding:clamp(40px,6vw,64px) clamp(16px,4vw,32px);display:flex;justify-content:space-between;gap:28px;flex-wrap:wrap">
+      <div style="max-width:320px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+          <svg width="22" height="22" viewBox="0 0 26 26" fill="none"><circle cx="13" cy="13" r="12" stroke="#5FA97C" stroke-width="1.6"/><path d="M7 16 C7 10.5 9.5 7.5 13 7.5 C16.5 7.5 19 10.5 19 16 M10 16 L10 12.5 M16 16 L16 12.5" stroke="#E2A13C" stroke-width="1.7" stroke-linecap="round"/></svg>
+          <span style="font:600 16px 'Archivo'">EleTect</span>
+        </div>
+        <p style="margin:0;font:400 13.5px/1.6 'Archivo';color:rgba(233,237,230,0.5)">Protecting farms, forests, and the future.</p>
+      </div>
+      <nav style="display:flex;gap:clamp(24px,5vw,64px);flex-wrap:wrap">
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <span style="font:600 11.5px 'IBM Plex Mono';letter-spacing:0.14em;color:rgba(233,237,230,0.4)">PLATFORM</span>
+          <a href="#/technology" style="font:500 13.5px 'Archivo';color:rgba(233,237,230,0.7)">Technology</a>
+          <a href="#/solutions" style="font:500 13.5px 'Archivo';color:rgba(233,237,230,0.7)">Solutions</a>
+          <a href="#/deployments" style="font:500 13.5px 'Archivo';color:rgba(233,237,230,0.7)">Deployments</a>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <span style="font:600 11.5px 'IBM Plex Mono';letter-spacing:0.14em;color:rgba(233,237,230,0.4)">COMPANY</span>
+          <a href="#/research" style="font:500 13.5px 'Archivo';color:rgba(233,237,230,0.7)">Research</a>
+          <a href="#/about" style="font:500 13.5px 'Archivo';color:rgba(233,237,230,0.7)">About</a>
+          <a href="#/contact" style="font:500 13.5px 'Archivo';color:rgba(233,237,230,0.7)">Contact</a>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <span style="font:600 11.5px 'IBM Plex Mono';letter-spacing:0.14em;color:rgba(233,237,230,0.4)">FOR RESIDENTS</span>
+          <a href="#/staysafe" style="font:500 13.5px 'Archivo';color:rgba(233,237,230,0.7)">Stay Safe</a>
+          <a href="#/login" style="font:500 13.5px 'Archivo';color:rgba(233,237,230,0.7)">Dashboard</a>
+        </div>
+      </nav>
+    </div>
+    <div style="border-top:1px solid rgba(233,237,230,0.05);padding:18px clamp(16px,4vw,32px);text-align:center;font:400 12px 'IBM Plex Mono';color:rgba(233,237,230,0.35)">© 2026 EleTect · Kerala, India · IEEE IAS CMD & Amarnath Raja Humanitarian Awards 2025</div>
+  </footer>
+</div>
+</sc-if>
+
+<!-- ============ LOGIN ============ -->
+<sc-if value="{{ isLogin }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="Login" style="min-height:100vh;display:grid;place-items:center;background:radial-gradient(100% 80% at 50% 0%, #0F1D14 0%, #070D0A 70%);padding:24px">
+  <div style="width:100%;max-width:420px">
+    <a href="#/" style="display:flex;align-items:center;gap:10px;justify-content:center;margin-bottom:28px;color:#E9EDE6">
+      <svg width="30" height="30" viewBox="0 0 26 26" fill="none"><circle cx="13" cy="13" r="12" stroke="#5FA97C" stroke-width="1.6"/><path d="M7 16 C7 10.5 9.5 7.5 13 7.5 C16.5 7.5 19 10.5 19 16 M10 16 L10 12.5 M16 16 L16 12.5" stroke="#E2A13C" stroke-width="1.7" stroke-linecap="round"/></svg>
+      <span style="font:600 20px 'Archivo'">EleTect</span>
+    </a>
+    <div style="border:1px solid rgba(233,237,230,0.1);border-radius:20px;background:#0B0D0B;padding:clamp(24px,5vw,36px)">
+      <h1 style="margin:0 0 6px;font:400 30px 'Instrument Serif',serif">Dashboard login</h1>
+      <p style="margin:0 0 24px;font:400 14px 'Archivo';color:rgba(233,237,230,0.55)">Supabase auth · email + password</p>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <input value="{{ loginEmail }}" onChange="{{ setLoginEmail }}" placeholder="Email" type="email" style="background:#070D0A;border:1px solid rgba(233,237,230,0.15);border-radius:12px;padding:15px 16px;color:#E9EDE6;font-size:15px;min-height:44px">
+        <input value="{{ loginPass }}" onChange="{{ setLoginPass }}" placeholder="Password" type="password" style="background:#070D0A;border:1px solid rgba(233,237,230,0.15);border-radius:12px;padding:15px 16px;color:#E9EDE6;font-size:15px;min-height:44px">
+        <sc-if value="{{ loginError }}" hint-placeholder-val="{{ false }}">
+          <p style="margin:0;font:500 13px 'Archivo';color:#E25B4A">{{ loginErrorMsg }}</p>
+        </sc-if>
+        <button onClick="{{ doLogin }}" style="background:#E2A13C;color:#0B140E;border:none;border-radius:99px;padding:15px;font:600 15px 'Archivo';cursor:pointer;min-height:48px" style-hover="background:#EDBE6F">Sign in</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;margin:22px 0 14px">
+        <span style="flex:1;height:1px;background:rgba(233,237,230,0.1)"></span>
+        <span style="font:600 11px 'IBM Plex Mono';letter-spacing:0.12em;color:rgba(233,237,230,0.4)">DEMO ACCOUNTS</span>
+        <span style="flex:1;height:1px;background:rgba(233,237,230,0.1)"></span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button onClick="{{ loginAdmin }}" style="display:flex;justify-content:space-between;align-items:center;background:rgba(15,29,20,0.5);border:1px solid rgba(233,237,230,0.12);border-radius:12px;padding:13px 16px;cursor:pointer;min-height:48px" style-hover="border-color:#E2A13C"><span style="font:600 14px 'Archivo';color:#E9EDE6">Admin</span><span style="font:500 12px 'IBM Plex Mono';color:rgba(233,237,230,0.45)">admin@eletect.in</span></button>
+        <button onClick="{{ loginOfficer }}" style="display:flex;justify-content:space-between;align-items:center;background:rgba(15,29,20,0.5);border:1px solid rgba(233,237,230,0.12);border-radius:12px;padding:13px 16px;cursor:pointer;min-height:48px" style-hover="border-color:#E2A13C"><span style="font:600 14px 'Archivo';color:#E9EDE6">Forest Officer</span><span style="font:500 12px 'IBM Plex Mono';color:rgba(233,237,230,0.45)">officer@eletect.in</span></button>
+        <button onClick="{{ loginPublic }}" style="display:flex;justify-content:space-between;align-items:center;background:rgba(15,29,20,0.5);border:1px solid rgba(233,237,230,0.12);border-radius:12px;padding:13px 16px;cursor:pointer;min-height:48px" style-hover="border-color:#E2A13C"><span style="font:600 14px 'Archivo';color:#E9EDE6">Public resident</span><span style="font:500 12px 'IBM Plex Mono';color:rgba(233,237,230,0.45)">resident@eletect.in</span></button>
+      </div>
+      <p style="margin:18px 0 0;text-align:center;font:400 13px 'Archivo';color:rgba(233,237,230,0.4)"><a href="#/">← Back to site</a></p>
+    </div>
+  </div>
+</div>
+</sc-if>
+
+<!-- ============ DASHBOARD ============ -->
+<sc-if value="{{ isApp }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="Dashboard" style="min-height:100vh;background:#070D0A;color:#E9EDE6;display:flex;flex-direction:column">
+  <!-- top bar -->
+  <header style="height:56px;border-bottom:1px solid rgba(233,237,230,0.08);display:flex;align-items:center;gap:14px;padding:0 clamp(12px,3vw,24px);background:#0B0D0B;position:sticky;top:0;z-index:50">
+    <a href="#/" style="display:flex;align-items:center;gap:8px;color:#E9EDE6">
+      <svg width="22" height="22" viewBox="0 0 26 26" fill="none"><circle cx="13" cy="13" r="12" stroke="#5FA97C" stroke-width="1.6"/><path d="M7 16 C7 10.5 9.5 7.5 13 7.5 C16.5 7.5 19 10.5 19 16 M10 16 L10 12.5 M16 16 L16 12.5" stroke="#E2A13C" stroke-width="1.7" stroke-linecap="round"/></svg>
+      <span style="font:600 15px 'Archivo'">EleTect Ops</span>
+    </a>
+    <span style="display:inline-flex;align-items:center;gap:6px;font:600 10.5px 'IBM Plex Mono';letter-spacing:0.1em;color:#9DC7AC;background:rgba(95,169,124,0.1);border:1px solid rgba(95,169,124,0.3);border-radius:99px;padding:4px 10px"><span style="width:6px;height:6px;border-radius:50%;background:#5FA97C;animation:et-pulse 2s infinite"></span>LIVE</span>
+    <sc-if value="{{ demoRunning }}" hint-placeholder-val="{{ false }}">
+      <span style="font:700 10.5px 'IBM Plex Mono';letter-spacing:0.1em;color:#161009;background:#E2A13C;border-radius:99px;padding:5px 10px">DEMO · {{ demoName }}</span>
+    </sc-if>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:12px">
+      <span style="font:500 12.5px 'IBM Plex Mono';color:rgba(233,237,230,0.5)">{{ userLabel }}</span>
+      <button onClick="{{ signOut }}" style="background:none;border:1px solid rgba(233,237,230,0.2);border-radius:99px;color:rgba(233,237,230,0.75);padding:8px 14px;font:600 12.5px 'Archivo';cursor:pointer;min-height:38px" style-hover="border-color:#E9EDE6;color:#E9EDE6">Sign out</button>
+    </div>
+  </header>
+
+  <div style="display:flex;flex:1;min-height:0">
+    <!-- sidebar (desktop) -->
+    <sc-if value="{{ showSidebar }}" hint-placeholder-val="{{ true }}">
+      <nav style="width:200px;flex-shrink:0;border-right:1px solid rgba(233,237,230,0.07);padding:16px 10px;display:flex;flex-direction:column;gap:3px;background:#090C0A">
+        <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="7">
+          <a href="{{ t.href }}" style="display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:10px;font:600 13.5px 'Archivo';color:{{ t.color }};background:{{ t.bg }}" style-hover="color:#E9EDE6">
+            <span style="font-size:15px">{{ t.icon }}</span>{{ t.label }}
+            <sc-if value="{{ t.badge }}" hint-placeholder-val="{{ false }}">
+              <span style="margin-left:auto;background:#E25B4A;color:#fff;font:700 10.5px 'IBM Plex Mono';border-radius:99px;padding:2px 7px">{{ t.badgeText }}</span>
+            </sc-if>
+          </a>
+        </sc-for>
+      </nav>
+    </sc-if>
+
+    <!-- main panel -->
+    <div style="flex:1;min-width:0;overflow-y:auto;padding:clamp(14px,2.5vw,28px);padding-bottom:96px">
+
+      <!-- ===== PUBLIC RESIDENT VIEW ===== -->
+      <sc-if value="{{ isPublicUser }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="Resident dashboard" style="max-width:680px;margin:0 auto;display:flex;flex-direction:column;gap:16px">
+          <h1 style="margin:8px 0 0;font:400 clamp(26px,4vw,36px) 'Instrument Serif',serif">Your area tonight</h1>
+          <div style="border:1px solid rgba(95,169,124,0.35);border-radius:18px;padding:26px;background:rgba(95,169,124,0.07);display:flex;gap:18px;align-items:center;flex-wrap:wrap">
+            <div style="width:56px;height:56px;border-radius:50%;border:2px solid #5FA97C;display:grid;place-items:center;font-size:24px">🟢</div>
+            <div style="flex:1;min-width:200px">
+              <p style="margin:0 0 4px;font:600 11.5px 'IBM Plex Mono';letter-spacing:0.12em;color:rgba(233,237,230,0.5)">VELLIKULAM SECTOR · RISK LEVEL</p>
+              <p style="margin:0;font:600 20px 'Archivo';color:#5FA97C">Low — no wildlife near villages</p>
+            </div>
+          </div>
+          <div style="border:1px solid rgba(233,237,230,0.1);border-radius:18px;padding:24px;background:#0B0D0B">
+            <h2 style="margin:0 0 16px;font:600 16px 'Archivo'">Recent alerts near you</h2>
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <div style="display:flex;gap:12px;align-items:flex-start;border-bottom:1px solid rgba(233,237,230,0.06);padding-bottom:12px"><span style="font-size:18px">🐘</span><div style="flex:1"><p style="margin:0;font:600 14px 'Archivo'">Elephants moved back to forest — all clear</p><p style="margin:2px 0 0;font:400 12.5px 'IBM Plex Mono';color:rgba(233,237,230,0.45)">Yesterday 22:10 · 2 km NE of Vellikulam</p></div></div>
+              <div style="display:flex;gap:12px;align-items:flex-start;border-bottom:1px solid rgba(233,237,230,0.06);padding-bottom:12px"><span style="font-size:18px">⚠️</span><div style="flex:1"><p style="margin:0;font:600 14px 'Archivo'">Elephant herd detected — stay indoors, avoid NE paddy road</p><p style="margin:2px 0 0;font:400 12.5px 'IBM Plex Mono';color:rgba(233,237,230,0.45)">Yesterday 21:47 · alert sent by SMS</p></div></div>
+              <div style="display:flex;gap:12px;align-items:flex-start"><span style="font-size:18px">🐗</span><div style="flex:1"><p style="margin:0;font:600 14px 'Archivo'">Wild boar deterred near farm boundary — no action needed</p><p style="margin:2px 0 0;font:400 12.5px 'IBM Plex Mono';color:rgba(233,237,230,0.45)">Tue 19:12 · 1 km S</p></div></div>
+            </div>
+          </div>
+          <div style="border:1px solid rgba(233,237,230,0.1);border-radius:18px;padding:24px;background:#0B0D0B">
+            <button onClick="{{ toggleSms }}" style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:14px;background:none;border:none;padding:0;cursor:pointer;min-height:44px">
+              <span style="text-align:left"><span style="display:block;font:600 15px 'Archivo';color:#E9EDE6">SMS alerts</span><span style="display:block;margin-top:2px;font:400 13px 'Archivo';color:rgba(233,237,230,0.5)">{{ smsStatusText }}</span></span>
+              <span style="position:relative;width:50px;height:28px;border-radius:99px;background:{{ smsBg }};transition:background .25s;flex-shrink:0"><span style="position:absolute;top:3px;left:{{ smsKnob2 }};width:22px;height:22px;border-radius:50%;background:#E9EDE6;transition:left .25s"></span></span>
+            </button>
+          </div>
+          <p style="margin:0;font:400 12.5px/1.6 'Archivo';color:rgba(233,237,230,0.4)">Emergency? Call the Forest Department control room: 1926. This dashboard shows safety information only.</p>
+        </div>
+      </sc-if>
+
+      <!-- ===== OFFICER / ADMIN VIEWS ===== -->
+      <sc-if value="{{ isStaff }}" hint-placeholder-val="{{ true }}">
+
+        <!-- OVERVIEW -->
+        <sc-if value="{{ tabOverview }}" hint-placeholder-val="{{ true }}">
+          <div data-screen-label="Ops overview" style="display:flex;flex-direction:column;gap:16px">
+            <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+              <h1 style="margin:0;font:400 clamp(24px,3.5vw,32px) 'Instrument Serif',serif">Sector 7 — Vellikulam</h1>
+              <span style="font:500 12.5px 'IBM Plex Mono';color:rgba(233,237,230,0.45)">{{ clockLabel }}</span>
+            </div>
+            <!-- fleet tiles -->
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">
+              <sc-for list="{{ fleetTiles }}" as="f" hint-placeholder-count="5">
+                <div style="border:1px solid rgba(233,237,230,0.09);border-radius:14px;padding:16px 18px;background:{{ f.bg }}">
+                  <p style="margin:0;font:400 30px 'Instrument Serif',serif;color:{{ f.color }}">{{ f.value }}</p>
+                  <p style="margin:4px 0 0;font:600 11px 'IBM Plex Mono';letter-spacing:0.1em;color:rgba(233,237,230,0.55)">{{ f.label }}</p>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(460px,100%),1fr));gap:16px">
+              <!-- map -->
+              <div style="display:flex;flex-direction:column;gap:10px">
+                <div style="height:clamp(300px,42vw,420px);border-radius:16px;overflow:hidden;border:1px solid rgba(233,237,230,0.1)">
+                  <dc-import name="SectorMap" nodes="{{ mapNodes }}" herd-visible="{{ herdVisible }}" herd-x="{{ herdX }}" herd-y="{{ herdY }}" herd-count="{{ herdCount }}" herd-label="{{ herdLabel }}" show-corridor="{{ mapCorridor }}" corridor-points="{{ corridorPts }}" label="{{ mapLabel }}" style="display:block;width:100%;height:100%" hint-size="100%,380px"></dc-import>
+                </div>
+                <!-- node detail -->
+                <sc-if value="{{ hasSelNode }}" hint-placeholder-val="{{ false }}">
+                  <div style="border:1px solid rgba(226,161,60,0.35);border-radius:16px;padding:20px;background:rgba(226,161,60,0.04)">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:10px;flex-wrap:wrap">
+                      <h3 style="margin:0;font:600 16px 'Archivo'">Node {{ selNode.id }} · digital twin</h3>
+                      <div style="display:flex;gap:8px;align-items:center">
+                        <span style="font:700 10.5px 'IBM Plex Mono';letter-spacing:0.08em;color:{{ selNode.statusColor }};border:1px solid {{ selNode.statusColor }};border-radius:99px;padding:3px 10px">{{ selNode.status }}</span>
+                        <button onClick="{{ closeNode }}" style="background:none;border:none;color:rgba(233,237,230,0.5);font-size:18px;cursor:pointer;padding:4px 8px">✕</button>
+                      </div>
+                    </div>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px">
+                      <div><p style="margin:0;font:600 10.5px 'IBM Plex Mono';letter-spacing:0.08em;color:rgba(233,237,230,0.45)">BATTERY</p><p style="margin:3px 0 0;font:600 17px 'Archivo';color:{{ selNode.battColor }}">{{ selNode.battery }}</p></div>
+                      <div><p style="margin:0;font:600 10.5px 'IBM Plex Mono';letter-spacing:0.08em;color:rgba(233,237,230,0.45)">SOLAR INPUT</p><p style="margin:3px 0 0;font:600 17px 'Archivo'">{{ selNode.solar }}</p></div>
+                      <div><p style="margin:0;font:600 10.5px 'IBM Plex Mono';letter-spacing:0.08em;color:rgba(233,237,230,0.45)">SIGNAL / LAST SEEN</p><p style="margin:3px 0 0;font:600 17px 'Archivo'">{{ selNode.signal }}</p></div>
+                      <div><p style="margin:0;font:600 10.5px 'IBM Plex Mono';letter-spacing:0.08em;color:rgba(233,237,230,0.45)">SENSOR HEALTH</p><p style="margin:3px 0 0;font:600 17px 'Archivo'">{{ selNode.sensors }}</p></div>
+                      <div><p style="margin:0;font:600 10.5px 'IBM Plex Mono';letter-spacing:0.08em;color:rgba(233,237,230,0.45)">UPTIME</p><p style="margin:3px 0 0;font:600 17px 'Archivo'">{{ selNode.uptime }}</p></div>
+                      <div><p style="margin:0;font:600 10.5px 'IBM Plex Mono';letter-spacing:0.08em;color:rgba(233,237,230,0.45)">LAST DETECTION</p><p style="margin:3px 0 0;font:600 17px 'Archivo'">{{ selNode.lastDet }}</p></div>
+                    </div>
+                  </div>
+                </sc-if>
+              </div>
+              <!-- right column: alerts + XAI + radar -->
+              <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
+                <div style="border:1px solid rgba(233,237,230,0.1);border-radius:16px;background:#0B0D0B;overflow:hidden">
+                  <div style="padding:14px 18px;border-bottom:1px solid rgba(233,237,230,0.08);display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0;font:600 14px 'Archivo'">Alerts</h3><span style="font:600 11px 'IBM Plex Mono';color:#E25B4A">{{ unackLabel }}</span></div>
+                  <div style="display:flex;flex-direction:column">
+                    <sc-for list="{{ alerts }}" as="a" hint-placeholder-count="4">
+                      <div style="display:flex;gap:12px;padding:14px 18px;border-bottom:1px solid rgba(233,237,230,0.05);align-items:center">
+                        <div style="width:44px;height:44px;border-radius:10px;background-image:url('{{ a.thumb }}');background-size:cover;background-position:center;background-color:#0F1D14;flex-shrink:0"></div>
+                        <div style="flex:1;min-width:0">
+                          <p style="margin:0;font:600 13.5px 'Archivo';color:{{ a.titleColor }}">{{ a.title }}</p>
+                          <p style="margin:2px 0 0;font:500 11.5px 'IBM Plex Mono';color:rgba(233,237,230,0.45)">{{ a.meta }}</p>
+                        </div>
+                        <button onClick="{{ a.ack }}" disabled="{{ a.acked }}" style="flex-shrink:0;background:{{ a.ackBg }};color:{{ a.ackColor }};border:1px solid {{ a.ackBorder }};border-radius:99px;padding:9px 14px;font:600 12px 'Archivo';cursor:pointer;min-height:40px;min-width:44px">{{ a.ackLabel }}</button>
+                      </div>
+                    </sc-for>
+                  </div>
+                </div>
+                <!-- XAI card -->
+                <div style="border:1px solid rgba(233,237,230,0.1);border-radius:16px;background:#0B0D0B;padding:18px">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:10px;flex-wrap:wrap">
+                    <h3 style="margin:0;font:600 14px 'Archivo'">Why the AI acted — event {{ xaiEvent }}</h3>
+                    <span style="font:700 10.5px 'IBM Plex Mono';color:#0B140E;background:#5FA97C;padding:3px 10px;border-radius:99px">{{ xaiOutcomeTag }}</span>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:9px;margin-bottom:14px">
+                    <div style="display:flex;gap:10px;align-items:center"><span style="color:#5FA97C">✔</span><span style="font:500 13.5px 'Archivo';flex:1">Ground vibration · heavy footstep</span><span style="font:600 12px 'IBM Plex Mono';color:#5FA97C">{{ confSeismic }}%</span></div>
+                    <div style="display:flex;gap:10px;align-items:center"><span style="color:#5FA97C">✔</span><span style="font:500 13.5px 'Archivo';flex:1">Audio · elephant rumble</span><span style="font:600 12px 'IBM Plex Mono';color:#5FA97C">{{ confAudio }}%</span></div>
+                    <div style="display:flex;gap:10px;align-items:center"><span style="color:#5FA97C">✔</span><span style="font:500 13.5px 'Archivo';flex:1">Vision · elephant confirmed</span><span style="font:600 12px 'IBM Plex Mono';color:#5FA97C">{{ confVision }}%</span></div>
+                  </div>
+                  <div style="display:flex;gap:16px;align-items:center;border-top:1px dashed rgba(233,237,230,0.14);padding-top:14px;flex-wrap:wrap">
+                    <!-- radar -->
+                    <svg width="120" height="110" viewBox="0 0 120 110" aria-label="Confidence radar">
+                      <polygon points="60,10 110,92 10,92" fill="none" stroke="rgba(233,237,230,0.15)" stroke-width="1"></polygon>
+                      <polygon points="60,37 93,81 27,81" fill="none" stroke="rgba(233,237,230,0.1)" stroke-width="1"></polygon>
+                      <polygon points="{{ radarPoints }}" fill="rgba(226,161,60,0.25)" stroke="#E2A13C" stroke-width="1.5"></polygon>
+                      <text x="60" y="8" text-anchor="middle" style="font:600 8px 'IBM Plex Mono';fill:rgba(233,237,230,0.55)">VISION</text>
+                      <text x="114" y="101" text-anchor="end" style="font:600 8px 'IBM Plex Mono';fill:rgba(233,237,230,0.55)">AUDIO</text>
+                      <text x="6" y="101" text-anchor="start" style="font:600 8px 'IBM Plex Mono';fill:rgba(233,237,230,0.55)">SEISMIC</text>
+                    </svg>
+                    <div>
+                      <p style="margin:0;font:400 34px 'Instrument Serif',serif;color:#E2A13C">{{ confFused }}%</p>
+                      <p style="margin:2px 0 10px;font:600 10.5px 'IBM Plex Mono';letter-spacing:0.1em;color:rgba(233,237,230,0.5)">FUSED CONFIDENCE</p>
+                      <p style="margin:0;font:600 13.5px 'Archivo';color:#E2A13C">→ {{ xaiDecision }}</p>
+                      <p style="margin:3px 0 0;font:400 12.5px 'Archivo';color:rgba(233,237,230,0.6)">{{ xaiOutcome }}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- REPLAY -->
+        <sc-if value="{{ tabReplay }}" hint-placeholder-val="{{ false }}">
+          <div data-screen-label="Incident replay" style="display:flex;flex-direction:column;gap:16px">
+            <div>
+              <h1 style="margin:0 0 4px;font:400 clamp(24px,3.5vw,32px) 'Instrument Serif',serif">Incident replay</h1>
+              <p style="margin:0;font:500 13px 'IBM Plex Mono';color:rgba(233,237,230,0.5)">EVENT E-2231 · NIGHT ELEPHANT INCURSION · YESTERDAY 21:34–21:56 IST</p>
+            </div>
+            <div style="height:clamp(300px,44vw,440px);border-radius:16px;overflow:hidden;border:1px solid rgba(233,237,230,0.1)">
+              <dc-import name="SectorMap" nodes="{{ replayNodes }}" herd-visible="{{ true }}" herd-x="{{ rHerdX }}" herd-y="{{ rHerdY }}" herd-count="7" herd-label="HERD · 7" show-corridor="{{ rCorridor }}" corridor-points="30,52 42,40 58,30 74,20 88,12" label="REPLAY" style="display:block;width:100%;height:100%" hint-size="100%,400px"></dc-import>
+            </div>
+            <div style="border:1px solid rgba(233,237,230,0.1);border-radius:16px;padding:20px;background:#0B0D0B">
+              <div style="display:flex;align-items:center;gap:16px;margin-bottom:6px;flex-wrap:wrap">
+                <span style="font:400 30px 'Instrument Serif',serif;color:#E2A13C;min-width:88px">{{ replayClock }}</span>
+                <input type="range" min="0" max="100" value="{{ replayT }}" onChange="{{ setReplayT }}" style="flex:1;min-width:200px;height:32px;cursor:pointer">
+                <button onClick="{{ toggleReplayPlay }}" style="background:#E2A13C;color:#0B140E;border:none;border-radius:99px;padding:10px 20px;font:600 13px 'Archivo';cursor:pointer;min-height:44px">{{ replayPlayLabel }}</button>
+              </div>
+              <div style="display:flex;justify-content:space-between;font:500 11px 'IBM Plex Mono';color:rgba(233,237,230,0.4)"><span>21:34</span><span>21:56</span></div>
+            </div>
+            <div style="border:1px solid rgba(233,237,230,0.1);border-radius:16px;background:#0B0D0B;padding:20px;display:flex;flex-direction:column;gap:10px">
+              <sc-for list="{{ replayEvents }}" as="e" hint-placeholder-count="6">
+                <div style="display:flex;gap:12px;align-items:flex-start;opacity:{{ e.opacity }}">
+                  <span style="font:600 12px 'IBM Plex Mono';color:#E2A13C;min-width:44px">{{ e.time }}</span>
+                  <span style="width:8px;height:8px;border-radius:50%;background:{{ e.dot }};margin-top:4px;flex-shrink:0"></span>
+                  <span style="font:500 13.5px/1.5 'Archivo';color:rgba(233,237,230,0.85)">{{ e.text }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- CORRIDOR / NETWORK -->
+        <sc-if value="{{ tabNetwork }}" hint-placeholder-val="{{ false }}">
+          <div data-screen-label="Network intelligence" style="display:flex;flex-direction:column;gap:16px">
+            <div>
+              <h1 style="margin:0 0 4px;font:400 clamp(24px,3.5vw,32px) 'Instrument Serif',serif">Network intelligence</h1>
+              <p style="margin:0;max-width:70ch;font:400 14px/1.6 'Archivo';color:rgba(233,237,230,0.6)">Nodes coordinate to open a safe corridor back to the forest — steering the herd away from villages, never trapping or panicking it.</p>
+            </div>
+            <div style="height:clamp(300px,44vw,440px);border-radius:16px;overflow:hidden;border:1px solid rgba(233,237,230,0.1)">
+              <dc-import name="SectorMap" nodes="{{ corridorMapNodes }}" herd-visible="{{ true }}" herd-x="58%" herd-y="30%" herd-count="7" herd-label="HERD → FOREST" show-corridor="{{ true }}" corridor-points="30,52 42,40 58,30 74,20 88,12" label="SAFE-HERDING CORRIDOR" style="display:block;width:100%;height:100%" hint-size="100%,400px"></dc-import>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+              <sc-for list="{{ corridorSteps }}" as="c" hint-placeholder-count="4">
+                <div style="border:1px solid rgba(233,237,230,0.09);border-radius:14px;padding:18px;background:linear-gradient(160deg, rgba(15,29,20,0.5), rgba(11,13,11,0.2))">
+                  <p style="margin:0 0 6px;font:600 12px 'IBM Plex Mono';color:#E2A13C">{{ c.node }}</p>
+                  <p style="margin:0;font:500 13.5px/1.55 'Archivo';color:rgba(233,237,230,0.75)">{{ c.action }}</p>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- LEARNING -->
+        <sc-if value="{{ tabLearning }}" hint-placeholder-val="{{ false }}">
+          <div data-screen-label="AI learning" style="display:flex;flex-direction:column;gap:16px;max-width:840px">
+            <div>
+              <h1 style="margin:0 0 4px;font:400 clamp(24px,3.5vw,32px) 'Instrument Serif',serif">AI learning</h1>
+              <p style="margin:0;max-width:70ch;font:400 14px/1.6 'Archivo';color:rgba(233,237,230,0.6)">Deterrent effectiveness per pattern at this site — the node verifies whether the animal actually left, and shifts to what works. Values illustrative.</p>
+            </div>
+            <div style="border:1px solid rgba(233,237,230,0.1);border-radius:16px;background:#0B0D0B;padding:24px;display:flex;flex-direction:column;gap:18px">
+              <sc-for list="{{ learnBars }}" as="b" hint-placeholder-count="5">
+                <div>
+                  <div style="display:flex;justify-content:space-between;margin-bottom:7px;gap:10px">
+                    <span style="font:600 13.5px 'Archivo'">{{ b.label }}</span>
+                    <span style="font:600 12.5px 'IBM Plex Mono';color:{{ b.trendColor }}">{{ b.pct }}% {{ b.trend }}</span>
+                  </div>
+                  <div style="height:10px;border-radius:99px;background:rgba(233,237,230,0.07);overflow:hidden">
+                    <div style="height:100%;width:{{ b.width }};border-radius:99px;background:{{ b.barBg }};transition:width 1s ease"></div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="border:1px solid rgba(226,161,60,0.3);border-radius:14px;padding:18px 20px;background:rgba(226,161,60,0.05)">
+              <p style="margin:0;font:500 13.5px/1.6 'Archivo';color:rgba(233,237,230,0.75)">💡 Pattern rotation is randomized per encounter — the sequence never repeats, so habituation stays near zero even after months of exposure.</p>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- FLEET -->
+        <sc-if value="{{ tabFleet }}" hint-placeholder-val="{{ false }}">
+          <div data-screen-label="Fleet health" style="display:flex;flex-direction:column;gap:16px">
+            <div style="display:flex;align-items:baseline;gap:16px;flex-wrap:wrap">
+              <h1 style="margin:0;font:400 clamp(24px,3.5vw,32px) 'Instrument Serif',serif">Fleet health</h1>
+              <span style="font:600 14px 'IBM Plex Mono';color:#5FA97C">{{ fleetPct }}% OPERATIONAL</span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">
+              <sc-for list="{{ fleetTiles }}" as="f" hint-placeholder-count="5">
+                <div style="border:1px solid rgba(233,237,230,0.09);border-radius:14px;padding:16px 18px;background:{{ f.bg }}">
+                  <p style="margin:0;font:400 30px 'Instrument Serif',serif;color:{{ f.color }}">{{ f.value }}</p>
+                  <p style="margin:4px 0 0;font:600 11px 'IBM Plex Mono';letter-spacing:0.1em;color:rgba(233,237,230,0.55)">{{ f.label }}</p>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px">
+              <sc-for list="{{ fleetNodes }}" as="n" hint-placeholder-count="8">
+                <button onClick="{{ n.open }}" style="text-align:left;border:1px solid rgba(233,237,230,0.09);border-radius:14px;padding:16px;background:#0B0D0B;cursor:pointer;min-height:44px" style-hover="border-color:rgba(226,161,60,0.5)">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                    <span style="font:600 13px 'IBM Plex Mono';color:#E9EDE6">{{ n.id }}</span>
+                    <span style="width:9px;height:9px;border-radius:50%;background:{{ n.dotColor }}"></span>
+                  </div>
+                  <p style="margin:0;font:500 12px 'IBM Plex Mono';color:rgba(233,237,230,0.5)">BATT {{ n.batt }} · SOLAR {{ n.solar }}</p>
+                  <p style="margin:4px 0 0;font:500 12px 'Archivo';color:{{ n.noteColor }}">{{ n.note }}</p>
+                </button>
+              </sc-for>
+            </div>
+            <sc-if value="{{ hasSelNode }}" hint-placeholder-val="{{ false }}">
+              <div style="border:1px solid rgba(226,161,60,0.35);border-radius:16px;padding:20px;background:rgba(226,161,60,0.04)">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:10px;flex-wrap:wrap">
+                  <h3 style="margin:0;font:600 16px 'Archivo'">Node {{ selNode.id }} · digital twin</h3>
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <span style="font:700 10.5px 'IBM Plex Mono';letter-spacing:0.08em;color:{{ selNode.statusColor }};border:1px solid {{ selNode.statusColor }};border-radius:99px;padding:3px 10px">{{ selNode.status }}</span>
+                    <button onClick="{{ closeNode }}" style="background:none;border:none;color:rgba(233,237,230,0.5);font-size:18px;cursor:pointer;padding:4px 8px">✕</button>
+                  </div>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px">
+                  <div><p style="margin:0;font:600 10.5px 'IBM Plex Mono';color:rgba(233,237,230,0.45)">BATTERY</p><p style="margin:3px 0 0;font:600 17px 'Archivo';color:{{ selNode.battColor }}">{{ selNode.battery }}</p></div>
+                  <div><p style="margin:0;font:600 10.5px 'IBM Plex Mono';color:rgba(233,237,230,0.45)">SOLAR INPUT</p><p style="margin:3px 0 0;font:600 17px 'Archivo'">{{ selNode.solar }}</p></div>
+                  <div><p style="margin:0;font:600 10.5px 'IBM Plex Mono';color:rgba(233,237,230,0.45)">SIGNAL / LAST SEEN</p><p style="margin:3px 0 0;font:600 17px 'Archivo'">{{ selNode.signal }}</p></div>
+                  <div><p style="margin:0;font:600 10.5px 'IBM Plex Mono';color:rgba(233,237,230,0.45)">SENSOR HEALTH</p><p style="margin:3px 0 0;font:600 17px 'Archivo'">{{ selNode.sensors }}</p></div>
+                  <div><p style="margin:0;font:600 10.5px 'IBM Plex Mono';color:rgba(233,237,230,0.45)">UPTIME</p><p style="margin:3px 0 0;font:600 17px 'Archivo'">{{ selNode.uptime }}</p></div>
+                  <div><p style="margin:0;font:600 10.5px 'IBM Plex Mono';color:rgba(233,237,230,0.45)">LAST DETECTION</p><p style="margin:3px 0 0;font:600 17px 'Archivo'">{{ selNode.lastDet }}</p></div>
+                </div>
+              </div>
+            </sc-if>
+            <div style="border:1px solid rgba(233,237,230,0.09);border-radius:14px;padding:18px 20px;background:rgba(15,29,20,0.35)">
+              <p style="margin:0;font:500 13.5px/1.6 'Archivo';color:rgba(233,237,230,0.7)">🔮 Predictive maintenance: S7-11 solar intake trending down 12% over 9 days — panel cleaning recommended before the monsoon window.</p>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- PLANNER -->
+        <sc-if value="{{ tabPlanner }}" hint-placeholder-val="{{ false }}">
+          <div data-screen-label="Deployment planner" style="display:flex;flex-direction:column;gap:16px;max-width:840px">
+            <div>
+              <h1 style="margin:0 0 4px;font:400 clamp(24px,3.5vw,32px) 'Instrument Serif',serif">Deployment planner</h1>
+              <p style="margin:0;max-width:70ch;font:400 14px/1.6 'Archivo';color:rgba(233,237,230,0.6)">Describe a boundary — the planner estimates node count, coverage, and likely blind spots.</p>
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <sc-for list="{{ plannerPresets }}" as="p" hint-placeholder-count="3">
+                <button onClick="{{ p.pick }}" style="background:{{ p.bg }};border:1px solid {{ p.border }};color:{{ p.color }};border-radius:99px;padding:11px 20px;font:600 13.5px 'Archivo';cursor:pointer;min-height:44px">{{ p.label }}</button>
+              </sc-for>
+            </div>
+            <div style="border:1px solid rgba(233,237,230,0.1);border-radius:16px;background:#0B0D0B;padding:24px">
+              <div style="display:flex;justify-content:space-between;margin-bottom:8px;gap:10px;flex-wrap:wrap">
+                <span style="font:600 13.5px 'Archivo'">Protected boundary length</span>
+                <span style="font:600 14px 'IBM Plex Mono';color:#E2A13C">{{ plannerKmLabel }}</span>
+              </div>
+              <input type="range" min="1" max="40" value="{{ plannerKm }}" onChange="{{ setPlannerKm }}" style="width:100%;height:32px;cursor:pointer">
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-top:22px">
+                <div style="border:1px solid rgba(226,161,60,0.3);border-radius:14px;padding:18px;background:rgba(226,161,60,0.05)"><p style="margin:0;font:400 34px 'Instrument Serif',serif;color:#E2A13C">{{ estNodes }}</p><p style="margin:4px 0 0;font:600 11px 'IBM Plex Mono';letter-spacing:0.1em;color:rgba(233,237,230,0.55)">NODES REQUIRED</p></div>
+                <div style="border:1px solid rgba(95,169,124,0.3);border-radius:14px;padding:18px;background:rgba(95,169,124,0.05)"><p style="margin:0;font:400 34px 'Instrument Serif',serif;color:#5FA97C">{{ estCoverage }}</p><p style="margin:4px 0 0;font:600 11px 'IBM Plex Mono';letter-spacing:0.1em;color:rgba(233,237,230,0.55)">EST. COVERAGE</p></div>
+                <div style="border:1px solid rgba(233,237,230,0.12);border-radius:14px;padding:18px"><p style="margin:0;font:400 34px 'Instrument Serif',serif">{{ estBlind }}</p><p style="margin:4px 0 0;font:600 11px 'IBM Plex Mono';letter-spacing:0.1em;color:rgba(233,237,230,0.55)">LIKELY BLIND SPOTS</p></div>
+              </div>
+              <p style="margin:18px 0 0;font:400 13px/1.6 'Archivo';color:rgba(233,237,230,0.55)">{{ plannerNote }}</p>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- DEMO MODE -->
+        <sc-if value="{{ tabDemo }}" hint-placeholder-val="{{ false }}">
+          <div data-screen-label="Demo mode" style="display:flex;flex-direction:column;gap:16px">
+            <div>
+              <h1 style="margin:0 0 4px;font:400 clamp(24px,3.5vw,32px) 'Instrument Serif',serif">Demo mode</h1>
+              <p style="margin:0;font:400 14px/1.6 'Archivo';color:rgba(233,237,230,0.6)">One-click end-to-end scenario replays. Pick one — the map, alerts and log animate the full incident.</p>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
+              <sc-for list="{{ scenarios }}" as="sc" hint-placeholder-count="6">
+                <button onClick="{{ sc.run }}" style="text-align:left;border:1px solid {{ sc.border }};border-radius:14px;padding:18px;background:{{ sc.bg }};cursor:pointer;min-height:44px" style-hover="border-color:#E2A13C">
+                  <div style="font-size:22px;margin-bottom:10px">{{ sc.icon }}</div>
+                  <p style="margin:0;font:600 14px 'Archivo';color:#E9EDE6">{{ sc.label }}</p>
+                  <p style="margin:4px 0 0;font:500 11.5px 'IBM Plex Mono';color:rgba(233,237,230,0.45)">{{ sc.dur }}</p>
+                </button>
+              </sc-for>
+            </div>
+            <div style="height:clamp(300px,42vw,420px);border-radius:16px;overflow:hidden;border:1px solid rgba(233,237,230,0.1)">
+              <dc-import name="SectorMap" nodes="{{ demoMapNodes }}" herd-visible="{{ demoHerdVisible }}" herd-x="{{ demoHerdX }}" herd-y="{{ demoHerdY }}" herd-count="{{ demoHerdCount }}" herd-label="{{ demoHerdLabel }}" show-corridor="{{ demoCorridor }}" corridor-points="30,52 42,40 58,30 74,20 88,12" label="{{ demoMapLabel }}" style="display:block;width:100%;height:100%" hint-size="100%,380px"></dc-import>
+            </div>
+            <div style="border:1px solid rgba(233,237,230,0.1);border-radius:16px;background:#0B0D0B;padding:20px;min-height:120px;display:flex;flex-direction:column;gap:9px">
+              <sc-if value="{{ demoIdle }}" hint-placeholder-val="{{ true }}">
+                <p style="margin:0;font:500 13.5px 'Archivo';color:rgba(233,237,230,0.4)">Select a scenario above to begin the replay.</p>
+              </sc-if>
+              <sc-for list="{{ demoLog }}" as="d" hint-placeholder-count="0">
+                <div style="display:flex;gap:12px;align-items:flex-start;animation:et-fadeUp .4s ease both">
+                  <span style="font:600 12px 'IBM Plex Mono';color:#E2A13C;min-width:44px">{{ d.time }}</span>
+                  <span style="width:8px;height:8px;border-radius:50%;background:{{ d.dot }};margin-top:4px;flex-shrink:0"></span>
+                  <span style="font:500 13.5px/1.5 'Archivo';color:rgba(233,237,230,0.85)">{{ d.text }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ADMIN -->
+        <sc-if value="{{ tabAdmin }}" hint-placeholder-val="{{ false }}">
+          <div data-screen-label="Admin" style="display:flex;flex-direction:column;gap:16px;max-width:900px">
+            <h1 style="margin:0;font:400 clamp(24px,3.5vw,32px) 'Instrument Serif',serif">Administration</h1>
+            <!-- OTA -->
+            <div style="border:1px solid rgba(233,237,230,0.1);border-radius:16px;background:#0B0D0B;padding:22px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px;flex-wrap:wrap">
+                <h3 style="margin:0;font:600 15px 'Archivo'">Over-the-air update · v2.4.1</h3>
+                <span style="font:600 12px 'IBM Plex Mono';color:#E2A13C">18 / 24 NODES</span>
+              </div>
+              <div style="height:10px;border-radius:99px;background:rgba(233,237,230,0.07);overflow:hidden;margin-bottom:10px"><div style="height:100%;width:75%;background:linear-gradient(90deg,#5FA97C,#E2A13C);border-radius:99px"></div></div>
+              <p style="margin:0;font:500 12.5px 'IBM Plex Mono';color:rgba(233,237,230,0.5)">Rolling out in waves of 4 · staged rollback ready · est. completion 02:10 IST</p>
+            </div>
+            <!-- users -->
+            <div style="border:1px solid rgba(233,237,230,0.1);border-radius:16px;background:#0B0D0B;overflow:hidden">
+              <div style="padding:16px 20px;border-bottom:1px solid rgba(233,237,230,0.08);display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0;font:600 15px 'Archivo'">Users</h3><button style="background:rgba(226,161,60,0.15);border:1px solid rgba(226,161,60,0.4);color:#E2A13C;border-radius:99px;padding:8px 16px;font:600 12.5px 'Archivo';cursor:pointer;min-height:38px">+ Invite</button></div>
+              <sc-for list="{{ adminUsers }}" as="u" hint-placeholder-count="4">
+                <div style="display:flex;align-items:center;gap:14px;padding:14px 20px;border-bottom:1px solid rgba(233,237,230,0.05)">
+                  <div style="width:36px;height:36px;border-radius:50%;background:linear-gradient(140deg,#2F5E3F,#0F1D14);display:grid;place-items:center;font:600 13px 'Archivo';color:#E2A13C;flex-shrink:0">{{ u.initials }}</div>
+                  <div style="flex:1;min-width:0"><p style="margin:0;font:600 14px 'Archivo'">{{ u.name }}</p><p style="margin:1px 0 0;font:500 12px 'IBM Plex Mono';color:rgba(233,237,230,0.45)">{{ u.email }}</p></div>
+                  <span style="font:600 11px 'IBM Plex Mono';letter-spacing:0.08em;color:{{ u.roleColor }};border:1px solid {{ u.roleColor }};border-radius:99px;padding:4px 12px">{{ u.role }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <!-- config -->
+            <div style="border:1px solid rgba(233,237,230,0.1);border-radius:16px;background:#0B0D0B;padding:22px">
+              <h3 style="margin:0 0 14px;font:600 15px 'Archivo'">Notification channels</h3>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <span style="font:600 12.5px 'IBM Plex Mono';color:#5FA97C;border:1px solid rgba(95,169,124,0.45);border-radius:99px;padding:8px 16px;background:rgba(95,169,124,0.08)">SMS · MSG91 ✓</span>
+                <span style="font:600 12.5px 'IBM Plex Mono';color:#5FA97C;border:1px solid rgba(95,169,124,0.45);border-radius:99px;padding:8px 16px;background:rgba(95,169,124,0.08)">EMAIL ✓</span>
+                <span style="font:600 12.5px 'IBM Plex Mono';color:#D9B44A;border:1px solid rgba(217,180,74,0.45);border-radius:99px;padding:8px 16px;background:rgba(217,180,74,0.06)">WHATSAPP · PENDING</span>
+                <span style="font:600 12.5px 'IBM Plex Mono';color:rgba(233,237,230,0.4);border:1px solid rgba(233,237,230,0.15);border-radius:99px;padding:8px 16px">PUSH · OFF</span>
+              </div>
+              <p style="margin:14px 0 0;font:400 12.5px/1.6 'Archivo';color:rgba(233,237,230,0.5)">Channels are pluggable — app logic calls one Notification Service; delivery is chosen by config. SMS to Indian numbers pending TRAI DLT registration; email is the active fallback.</p>
+            </div>
+            <!-- audit -->
+            <div style="border:1px solid rgba(233,237,230,0.1);border-radius:16px;background:#0B0D0B;padding:22px">
+              <h3 style="margin:0 0 14px;font:600 15px 'Archivo'">Audit log</h3>
+              <div style="display:flex;flex-direction:column;gap:9px">
+                <sc-for list="{{ auditLog }}" as="l" hint-placeholder-count="5">
+                  <div style="display:flex;gap:12px;font:500 12.5px 'IBM Plex Mono';color:rgba(233,237,230,0.65);flex-wrap:wrap"><span style="color:rgba(233,237,230,0.4);min-width:110px">{{ l.time }}</span><span>{{ l.text }}</span></div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+      </sc-if>
+    </div>
+  </div>
+
+  <!-- mobile bottom nav -->
+  <sc-if value="{{ showBottomNav }}" hint-placeholder-val="{{ false }}">
+    <nav style="position:fixed;bottom:0;left:0;right:0;z-index:55;background:rgba(9,12,10,0.96);backdrop-filter:blur(12px);border-top:1px solid rgba(233,237,230,0.1);display:flex;justify-content:space-around;padding:6px 4px calc(6px + env(safe-area-inset-bottom))">
+      <sc-for list="{{ mobileTabs }}" as="t" hint-placeholder-count="5">
+        <a href="{{ t.href }}" style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 10px;min-width:56px;min-height:48px;border-radius:12px;color:{{ t.color }};background:{{ t.bg }}">
+          <span style="font-size:19px">{{ t.icon }}</span>
+          <span style="font:600 9.5px 'IBM Plex Mono';letter-spacing:0.04em">{{ t.short }}</span>
+        </a>
+      </sc-for>
+    </nav>
+  </sc-if>
+</div>
+</sc-if>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = {
+    route: 'home', tab: 'overview',
+    mobile: false, navOpen: false,
+    user: null,
+    loginEmail: '', loginPass: '', loginError: false, loginErrorMsg: '',
+    cName: '', cEmail: '', cMsg: '', contactSent: false,
+    optPhone: '', optLoc: '', smsOn: true, optInDone: false, optError: false, optErrorMsg: '',
+    selNodeId: null,
+    acked: {},
+    replayT: 0, replayPlaying: false,
+    plannerKm: 8, plannerPreset: 'Village boundary',
+    demoName: null, demoStep: -1,
+  };
+
+  componentDidMount() {
+    this.syncRoute();
+    this._onHash = () => this.syncRoute();
+    window.addEventListener('hashchange', this._onHash);
+    this._onResize = () => {
+      const m = window.innerWidth < 860;
+      if (m !== this.state.mobile) this.setState({ mobile: m, navOpen: false });
+    };
+    this._onResize();
+    window.addEventListener('resize', this._onResize);
+  }
+  componentWillUnmount() {
+    window.removeEventListener('hashchange', this._onHash);
+    window.removeEventListener('resize', this._onResize);
+    clearInterval(this._demoTimer); clearInterval(this._replayTimer);
+  }
+
+  syncRoute() {
+    const h = (window.location.hash || '#/').replace(/^#\/?/, '');
+    const parts = h.split('/').filter(Boolean);
+    let route = parts[0] || 'home';
+    let tab = parts[1] || 'overview';
+    const known = ['home','technology','solutions','deployments','research','about','contact','staysafe','login','app'];
+    if (!known.includes(route)) route = 'home';
+    if (route === 'app' && !this.state.user) route = 'login';
+    if (route === 'app') {
+      const role = this.state.user.role;
+      const allowed = role === 'public' ? ['home']
+        : ['overview','replay','network','learning','fleet','planner','demo'].concat(role === 'admin' ? ['admin'] : []);
+      if (!allowed.includes(tab)) tab = allowed[0];
+    }
+    const patch = { route, tab, navOpen: false };
+    if (route !== 'app' || tab !== 'demo') {
+      clearInterval(this._demoTimer);
+      if (this.state.demoName) { patch.demoName = null; patch.demoStep = -1; }
+    }
+    this.setState(patch);
+    if (route !== 'app') { clearInterval(this._replayTimer); }
+    try { document.querySelector('div') && window.scrollTo(0, 0); } catch(e) {}
+  }
+
+  login(role, name, email) {
+    this.setState({ user: { role, name, email }, loginError: false });
+    window.location.hash = role === 'public' ? '#/app/home' : '#/app/overview';
+  }
+
+  // ---------- demo scenarios ----------
+  scenarioScripts() {
+    const P = (x, y) => ({ x: x + '%', y: y + '%' });
+    return {
+      'Night Elephant': [
+        { t: '21:34', dot: '#D9B44A', text: 'S7-04 seismic: heavy footstep pattern, bearing NE', herd: P(78, 68), alert: ['S7-04'] },
+        { t: '21:35', dot: '#D9B44A', text: 'S7-04 audio: infrasonic rumble matched — elephant signature', herd: P(72, 62), alert: ['S7-04'] },
+        { t: '21:36', dot: '#E25B4A', text: 'Vision confirm (night-capable): herd of 7 incl. 2 calves · fused 96%', herd: P(66, 56), alert: ['S7-04', 'S7-05'] },
+        { t: '21:36', dot: '#E2A13C', text: 'Alerts out: 2 officers + 214 opted-in residents (SMS, <9 s)', herd: P(66, 56), alert: ['S7-04', 'S7-05'] },
+        { t: '21:38', dot: '#E2A13C', text: 'Adaptive deterrent: bee-buzz + moving strobe, pattern #47 (never repeated)', herd: P(58, 46), alert: ['S7-05'], corridor: true },
+        { t: '21:43', dot: '#E2A13C', text: 'Corridor open: S7-05 → S7-08 → S7-11 herding toward forest exit', herd: P(46, 34), alert: ['S7-08'], corridor: true },
+        { t: '21:50', dot: '#5FA97C', text: 'Observation: herd moving away, calves in centre — no panic', herd: P(34, 22), alert: ['S7-11'], corridor: true },
+        { t: '21:56', dot: '#5FA97C', text: 'Herd re-entered forest. All-clear sent. Outcome logged for learning.', herd: P(22, 12), alert: [] },
+      ],
+      'Road Crossing': [
+        { t: '05:12', dot: '#D9B44A', text: 'S7-02 seismic: large animal approaching NH-85 verge', herd: P(30, 70), alert: ['S7-02'] },
+        { t: '05:13', dot: '#E25B4A', text: 'Vision: lone tusker 40 m from carriageway · fused 93%', herd: P(34, 62), alert: ['S7-02'] },
+        { t: '05:13', dot: '#E2A13C', text: 'Roadside warning beacons triggered · traffic alert to control room', herd: P(34, 62), alert: ['S7-02', 'S7-05'] },
+        { t: '05:15', dot: '#E2A13C', text: 'Deterrent steers tusker parallel to road, away from the bend', herd: P(44, 50), alert: ['S7-05'], corridor: true },
+        { t: '05:21', dot: '#5FA97C', text: 'Tusker crossed at safe wildlife passage. Beacons cleared.', herd: P(60, 30), alert: [] },
+      ],
+      'Wildfire Risk': [
+        { t: '13:02', dot: '#D9B44A', text: 'S7-09 air sensing: smoke signature rising, humidity 31%', alert: ['S7-09'] },
+        { t: '13:04', dot: '#E25B4A', text: 'S7-08 confirms particulate spike — two-node triangulation, sector NE', alert: ['S7-08', 'S7-09'] },
+        { t: '13:04', dot: '#E2A13C', text: 'Wildfire early-warning to Forest Department control room + range office', alert: ['S7-08', 'S7-09'] },
+        { t: '13:26', dot: '#5FA97C', text: 'Ground crew on site: smouldering leaf litter contained at 0.2 ha', alert: ['S7-09'] },
+        { t: '13:40', dot: '#5FA97C', text: 'Readings back to baseline. Event archived for fire-risk model.', alert: [] },
+      ],
+      'Poaching Sound': [
+        { t: '02:41', dot: '#E25B4A', text: 'S7-11 acoustic: gunshot-like transient, 1.2 km NNW · 89%', alert: ['S7-11'] },
+        { t: '02:41', dot: '#D9B44A', text: 'Cross-check: no vehicle or human signature on adjacent nodes', alert: ['S7-08', 'S7-11'] },
+        { t: '02:42', dot: '#E2A13C', text: 'Silent alert to anti-poaching patrol (no local siren — do not tip off)', alert: ['S7-11'] },
+        { t: '03:15', dot: '#5FA97C', text: 'Patrol swept grid NNW-4. Audio archived as evidence package.', alert: [] },
+      ],
+      'Sensor Degraded': [
+        { t: '11:20', dot: '#D9B44A', text: 'S7-06 self-test: vision confidence drifting low in daylight', alert: ['S7-06'] },
+        { t: '11:20', dot: '#D9B44A', text: 'Diagnosis: lens fouling likely (pollen season) — seismic + audio unaffected', alert: ['S7-06'] },
+        { t: '11:21', dot: '#E2A13C', text: 'Graceful degradation: neighbours S7-05/S7-07 widen vision coverage', alert: ['S7-05', 'S7-06', 'S7-07'] },
+        { t: '11:21', dot: '#5FA97C', text: 'Maintenance ticket auto-created: clean lens, priority routine', alert: ['S7-06'] },
+      ],
+      'Heavy Rain': [
+        { t: '16:05', dot: '#D9B44A', text: 'Monsoon squall: audio SNR down across sector, rain 42 mm/h', alert: ['S7-04', 'S7-05'] },
+        { t: '16:05', dot: '#E2A13C', text: 'Fusion re-weights: seismic + vision carry detection while audio recovers', alert: ['S7-04', 'S7-05'] },
+        { t: '16:12', dot: '#E25B4A', text: 'S7-05 seismic: gaur herd moving in zero visibility · fused 88%', herd: P(60, 55), alert: ['S7-05'] },
+        { t: '16:13', dot: '#E2A13C', text: 'Residents on SE path warned by SMS — detection unaffected by rain', herd: P(52, 44), alert: ['S7-05'] },
+        { t: '16:30', dot: '#5FA97C', text: 'Herd passed through. Rain-mode logged; audio back online 16:41.', herd: P(38, 28), alert: [] },
+      ],
+    };
+  }
+
+  runScenario(name) {
+    clearInterval(this._demoTimer);
+    this.setState({ demoName: name, demoStep: 0 });
+    const script = this.scenarioScripts()[name];
+    this._demoTimer = setInterval(() => {
+      const next = this.state.demoStep + 1;
+      if (next >= script.length) { clearInterval(this._demoTimer); return; }
+      this.setState({ demoStep: next });
+    }, 1600);
+  }
+
+  // ---------- replay ----------
+  replayScript() {
+    return [
+      { pct: 0,  time: '21:34', dot: '#D9B44A', text: 'Seismic pickup on S7-04 — heavy footsteps, bearing NE', x: 78, y: 68 },
+      { pct: 9,  time: '21:35', dot: '#D9B44A', text: 'Audio match: elephant rumble signature', x: 72, y: 62 },
+      { pct: 18, time: '21:36', dot: '#E25B4A', text: 'Vision confirm: herd of 7 · fused confidence 96%', x: 66, y: 56 },
+      { pct: 22, time: '21:36', dot: '#E2A13C', text: 'Alerts sent: 2 officers, 214 residents (SMS, under 9 s)', x: 66, y: 56 },
+      { pct: 36, time: '21:38', dot: '#E2A13C', text: 'Adaptive deterrent on S7-04: bee-buzz + strobe pattern #47', x: 58, y: 46 },
+      { pct: 55, time: '21:43', dot: '#E2A13C', text: 'Corridor opened: S7-05 → S7-08 → S7-11, steering herd to forest', x: 46, y: 34 },
+      { pct: 77, time: '21:50', dot: '#5FA97C', text: 'Observation: herd retreating calmly, calves protected in centre', x: 34, y: 22 },
+      { pct: 100, time: '21:56', dot: '#5FA97C', text: 'Herd re-entered forest — all-clear sent, outcome logged', x: 22, y: 12 },
+    ];
+  }
+  toggleReplay() {
+    if (this.state.replayPlaying) { clearInterval(this._replayTimer); this.setState({ replayPlaying: false }); return; }
+    if (this.state.replayT >= 100) this.setState({ replayT: 0 });
+    this.setState({ replayPlaying: true });
+    this._replayTimer = setInterval(() => {
+      const t = this.state.replayT + 2;
+      if (t >= 100) { clearInterval(this._replayTimer); this.setState({ replayT: 100, replayPlaying: false }); return; }
+      this.setState({ replayT: t });
+    }, 180);
+  }
+
+  // ---------- data ----------
+  nodeSeed() {
+    return [
+      { id: 'S7-02', left: '18%', top: '64%', status: 'HEALTHY' },
+      { id: 'S7-04', left: '74%', top: '58%', status: 'HEALTHY' },
+      { id: 'S7-05', left: '56%', top: '44%', status: 'HEALTHY' },
+      { id: 'S7-06', left: '38%', top: '58%', status: 'NEEDS CLEANING' },
+      { id: 'S7-07', left: '30%', top: '38%', status: 'HEALTHY' },
+      { id: 'S7-08', left: '48%', top: '26%', status: 'HEALTHY' },
+      { id: 'S7-09', left: '68%', top: '20%', status: 'NEEDS BATTERY' },
+      { id: 'S7-11', left: '84%', top: '12%', status: 'HEALTHY' },
+      { id: 'S7-12', left: '10%', top: '28%', status: 'OFFLINE' },
+    ];
+  }
+  nodeDetail(id) {
+    const d = {
+      'S7-02': { battery: '91%', solar: '4.1 W', signal: 'Strong · 40 s ago', sensors: '3/3 nominal', uptime: '212 days', lastDet: 'Tusker · 05:13 today', status: 'HEALTHY' },
+      'S7-04': { battery: '87%', solar: '3.8 W', signal: 'Strong · 12 s ago', sensors: '3/3 nominal', uptime: '184 days', lastDet: 'Elephant herd · 21:47', status: 'HEALTHY' },
+      'S7-05': { battery: '84%', solar: '3.5 W', signal: 'Strong · 18 s ago', sensors: '3/3 nominal', uptime: '184 days', lastDet: 'Elephant herd · 21:49', status: 'HEALTHY' },
+      'S7-06': { battery: '78%', solar: '2.1 W ↓', signal: 'Good · 55 s ago', sensors: 'Vision degraded', uptime: '96 days', lastDet: 'Wild boar · Tue 19:12', status: 'NEEDS CLEANING' },
+      'S7-07': { battery: '93%', solar: '4.0 W', signal: 'Strong · 22 s ago', sensors: '3/3 nominal', uptime: '201 days', lastDet: 'Sambar deer · 03:40', status: 'HEALTHY' },
+      'S7-08': { battery: '89%', solar: '3.9 W', signal: 'Strong · 15 s ago', sensors: '3/3 nominal', uptime: '184 days', lastDet: 'Elephant herd · 21:50', status: 'HEALTHY' },
+      'S7-09': { battery: '31% ↓', solar: '3.2 W', signal: 'Good · 70 s ago', sensors: '3/3 nominal', uptime: '142 days', lastDet: 'Smoke event · 13:02 Tue', status: 'NEEDS BATTERY' },
+      'S7-11': { battery: '86%', solar: '3.6 W', signal: 'Strong · 25 s ago', sensors: '3/3 nominal', uptime: '184 days', lastDet: 'Acoustic transient · 02:41', status: 'HEALTHY' },
+      'S7-12': { battery: '—', solar: '—', signal: 'Lost · 2 d 4 h ago', sensors: 'Unknown', uptime: '—', lastDet: 'Elephant · 4 d ago', status: 'OFFLINE' },
+    };
+    return d[id];
+  }
+  statusColor(s) { return s === 'HEALTHY' ? '#5FA97C' : s === 'OFFLINE' ? '#E25B4A' : '#D9B44A'; }
+
+  renderVals() {
+    const S = this.state;
+    const route = S.route, tab = S.tab;
+    const isApp = route === 'app' && !!S.user;
+    const isLogin = route === 'login';
+    const isPublicSite = !isApp && !isLogin;
+    const user = S.user || {};
+    const isPublicUser = isApp && user.role === 'public';
+    const isStaff = isApp && (user.role === 'admin' || user.role === 'officer');
+    const isAdmin = user.role === 'admin';
+
+    // nav
+    const navDefs = [
+      ['Home', 'home'], ['Technology', 'technology'], ['Solutions', 'solutions'],
+      ['Deployments', 'deployments'], ['Research', 'research'], ['About', 'about'],
+      ['Contact', 'contact'], ['Stay Safe', 'staysafe'],
+    ];
+    const navLinks = navDefs.map(([label, r]) => ({
+      label, href: '#/' + (r === 'home' ? '' : r),
+      color: route === r ? '#E2A13C' : 'rgba(233,237,230,0.7)',
+    }));
+
+    // stats
+    const stats = [
+      { value: '~500', label: 'people killed every year in India in human–elephant conflict — 2,300+ deaths over 2019–2024' },
+      { value: '~100', label: 'elephants die each year from conflict: electrocution, collisions, poisoning, retaliation' },
+      { value: '56.6%', label: 'of households in Kerala hotspots lost more than half their seasonal crop' },
+      { value: '26.7%', label: 'suffered total crop failure — plus property damage, livestock loss, and abandoned farmland' },
+    ];
+
+    const steps = [
+      { n: '01', title: 'Sense', body: 'Feels the ground and listens to the forest — detecting animals in rain, fog, and total darkness, before they are visible.' },
+      { n: '02', title: 'Confirm', body: 'Night-capable AI vision verifies the species, eliminating the false alarms that make farmers ignore sirens.' },
+      { n: '03', title: 'Decide', body: 'Fuses ground, audio, and vision into one confidence score — and explains every decision it makes.' },
+      { n: '04', title: 'Deter', body: 'Light and sound patterns that change every time and never repeat — so animals never habituate.' },
+      { n: '05', title: 'Observe', body: 'Checks whether the animal actually left. If a pattern stops working, it stops using it.' },
+      { n: '06', title: 'Learn', body: 'Builds a site-specific playbook of what works, per species, per season.' },
+      { n: '07', title: 'Coordinate', body: 'Nodes work together to open a safe corridor back to the forest — steering herds away from villages, never trapping them.' },
+    ];
+
+    const compareRows = [
+      { cap: 'Species-specific, low false alarms', us: '✓', alarm: '✗', fence: '—', cam: '✓' },
+      { cap: 'Works at night, in fog and rain', us: '✓', alarm: '✗', fence: '✓', cam: '✗' },
+      { cap: 'Animals never habituate', us: '✓', alarm: '✗', fence: '✗', cam: '—' },
+      { cap: 'Warns people in seconds', us: '✓', alarm: '✗', fence: '✗', cam: '✗' },
+      { cap: 'Coordinated across a whole boundary', us: '✓', alarm: '✗', fence: '—', cam: '✗' },
+      { cap: 'Safe for all wildlife', us: '✓', alarm: '✓', fence: '✗', cam: '✓' },
+      { cap: 'Cost per protected kilometre', us: '~1/10th', alarm: 'Low', fence: 'Lakhs/km', cam: 'Medium' },
+    ];
+
+    const IMG = {
+      farm: 'https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1200&q=80',
+      road: 'https://images.unsplash.com/photo-1425913397330-cf8af2ff40a1?auto=format&fit=crop&w=1200&q=80',
+      rail: 'https://images.unsplash.com/photo-1474487548417-781cb71495f3?auto=format&fit=crop&w=1200&q=80',
+      night: 'https://images.unsplash.com/photo-1419242902214-272b3f66ee7a?auto=format&fit=crop&w=1200&q=80',
+      forest: 'https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=1200&q=80',
+      canopy: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=1200&q=80',
+      elephant: 'https://images.unsplash.com/photo-1557050543-4d5f4e07ef46?auto=format&fit=crop&w=1200&q=80',
+    };
+
+    const solutionsData = [
+      { title: 'Elephant-Conflict Mitigation', img: IMG.elephant,
+        tease: 'Detect herds before they reach the field. Warn families in seconds. Steer the herd home unharmed.',
+        problem: 'Roughly 500 people are killed every year in India in human–elephant conflict — mostly at night, when nobody sees the animal coming. In Kerala hotspots, 56.6% of households lost more than half a season\u2019s crop.',
+        solution: 'The network senses approaching elephants through ground and sound, confirms with night-capable vision, warns officers and opted-in residents within seconds, and deters with ever-changing light and sound while opening a safe corridor back to the forest.',
+        why: 'Fixed sirens get ignored within weeks; fences cost lakhs per kilometre and harm other wildlife. EleTect adapts every encounter and costs roughly a tenth of fencing.' },
+      { title: 'Road Safety', img: IMG.road,
+        tease: 'Hold animals off the highway — and warn drivers before the bend.',
+        problem: 'Vehicle collisions are a leading cause of the ~100 elephant deaths every year in India, and they kill drivers too — especially on forest-edge roads at dawn and dusk.',
+        solution: 'Nodes along known crossing zones detect large animals approaching the verge, trigger roadside warnings, alert the control room, and steer animals toward safe passages.',
+        why: 'Static signage is invisible at night and ignored by habit. EleTect warns only when an animal is actually there — so warnings keep their meaning.' },
+      { title: 'Railway Safety', img: IMG.rail,
+        tease: 'Early warning along track corridors where herds cross.',
+        problem: 'Train collisions are among the deadliest single events for elephants in India — a herd on the track at night gives a loco pilot no time to brake.',
+        solution: 'Detection nodes along vulnerable track sections identify herds approaching the corridor and push instant alerts to section control, giving time to caution trains through the block.',
+        why: 'A networked early-warning line costs a fraction of elevated passages and works the day it\u2019s installed — and it never dozes off.' },
+      { title: 'Anti-Poaching', img: IMG.night,
+        tease: 'The forest hears the shot — and the patrol knows in seconds.',
+        problem: 'Poachers work at night in remote terrain; by the time evidence is found, they are long gone.',
+        solution: 'Acoustic detection recognises gunshot-like transients and suspicious activity, triangulates across nodes, and silently alerts anti-poaching patrols — no local siren to tip anyone off.',
+        why: 'Camera traps record what already happened. EleTect makes intervention possible while it\u2019s happening — with audio archived as evidence.' },
+      { title: 'Wildfire Early-Warning', img: IMG.forest,
+        tease: 'Catch the smoulder before it becomes a front.',
+        problem: 'Forest fires in the Ghats often smoulder undetected for hours — by the time smoke is visible from a watchtower, containment is a battle.',
+        solution: 'Nodes sense smoke signatures and humidity shifts, triangulate across the network, and warn the Forest Department while the fire is still a patch of leaf litter.',
+        why: 'A distributed sensing net covers valleys no watchtower can see — on solar, with no infrastructure to build.' },
+      { title: 'Wildlife Analytics', img: IMG.canopy,
+        tease: 'Every detection becomes long-term science.',
+        problem: 'Conservation decisions are made on sparse, seasonal survey data; corridors shift, and no one sees it until conflict spikes.',
+        solution: 'Every detection, movement, and deterrence outcome is logged into a structured behavioural record — movement corridors, activity rhythms, deterrence responses — for scientists and the Forest Department.',
+        why: 'Camera-trap surveys sample weeks; EleTect observes continuously for years, day and night, in all weather.' },
+    ];
+    const solutionCards = solutionsData.map(s => ({ title: s.title, tease: s.tease, img: s.img }));
+
+    const techPillars = [
+      { icon: '🌍', title: 'Senses through the ground and sound', body: 'Detection begins before the animal is visible — footfall vibration and acoustic signatures work in rain, fog, and total darkness.' },
+      { icon: '👁', title: 'Night-capable AI vision', body: 'A second, independent confirmation step eliminates the false alarms that destroy trust in traditional systems.' },
+      { icon: '🎲', title: 'Adaptive, non-habituating deterrence', body: 'Light and sound patterns change every encounter and never repeat. The system verifies the animal actually left — and learns what works.' },
+      { icon: '🕸', title: 'Networked intelligence', body: 'Nodes coordinate to open safe corridors and steer herds away from villages — shared awareness, not isolated gadgets.' },
+      { icon: '📡', title: 'Instant human early-warning', body: 'Officers and opted-in residents are alerted within seconds — SMS, WhatsApp, email, or push, chosen by configuration.' },
+      { icon: '☀️', title: 'Fully offline, solar-powered', body: 'Every node detects, decides, and deters with no internet at all. Connectivity adds coordination; it is never required to act.' },
+    ];
+
+    const deployPhases = [
+      { tag: 'ACTIVE', tagColor: '#5FA97C', bg: 'rgba(95,169,124,0.06)', title: 'Kerala Forest Department pilot', body: 'Field deployment in progress in conflict-hotspot sectors — live detection, deterrence, and officer alerting under real forest conditions.' },
+      { tag: 'IN VALIDATION', tagColor: '#D9B44A', bg: 'rgba(217,180,74,0.05)', title: 'Effectiveness studies', body: 'Measuring deterrence outcomes, false-alarm rates, and habituation over full seasons with the department\u2019s field staff.' },
+      { tag: 'NEXT', tagColor: '#E2A13C', bg: 'rgba(226,161,60,0.05)', title: 'Scale to more ranges', body: 'The platform is designed to scale to thousands of nodes — road, rail, and farm-boundary deployments follow the pilot.' },
+    ];
+
+    const researchCards = [
+      { title: 'Movement corridors', body: 'Continuous detection across the network reveals how herds actually move between forest blocks — season by season, year over year.' },
+      { title: 'Behavioural response', body: 'Which deterrence patterns work, for which species, and for how long — measured against verified outcomes, not anecdote.' },
+      { title: 'Conflict forecasting', body: 'Crop calendars, weather, and movement history combine into early risk signals for the sectors most likely to see conflict next.' },
+      { title: 'Open collaboration', body: 'Anonymised, location-safe datasets available to research partners under Forest Department data governance.' },
+    ];
+
+    // ---- dashboard data ----
+    const alertsSeed = [
+      { id: 'a1', icon: '🐘', title: 'Elephant herd (7) — deterred, corridor opened', meta: '21:47 · S7-04 · NE→SW · fused 96%', sev: '#E25B4A', thumb: IMG.elephant },
+      { id: 'a2', icon: '🔊', title: 'Acoustic transient — patrol dispatched', meta: '02:41 · S7-11 · NNW · 89%', sev: '#E25B4A', thumb: IMG.night },
+      { id: 'a3', icon: '🐘', title: 'Lone tusker near NH-85 — crossed safely', meta: '05:13 · S7-02 · road zone · 93%', sev: '#D9B44A', thumb: IMG.road },
+      { id: 'a4', icon: '🐗', title: 'Wild boar — deterred at farm boundary', meta: 'Tue 19:12 · S7-06 · S · 88%', sev: '#5FA97C', thumb: IMG.farm },
+    ];
+    const alerts = alertsSeed.map(a => {
+      const acked = !!S.acked[a.id];
+      return {
+        title: a.title, meta: a.meta, thumb: a.thumb, titleColor: acked ? 'rgba(233,237,230,0.55)' : '#E9EDE6',
+        acked,
+        ackLabel: acked ? '✓ Ack' : 'Acknowledge',
+        ackBg: acked ? 'transparent' : 'rgba(226,161,60,0.15)',
+        ackColor: acked ? 'rgba(233,237,230,0.4)' : '#E2A13C',
+        ackBorder: acked ? 'rgba(233,237,230,0.15)' : 'rgba(226,161,60,0.5)',
+        ack: () => this.setState(s => ({ acked: { ...s.acked, [a.id]: true } })),
+      };
+    });
+    const unack = alertsSeed.filter(a => !S.acked[a.id]).length;
+
+    // demo state
+    const script = S.demoName ? this.scenarioScripts()[S.demoName] : null;
+    const demoSteps = script ? script.slice(0, S.demoStep + 1) : [];
+    const cur = demoSteps.length ? demoSteps[demoSteps.length - 1] : null;
+    const demoAlertIds = cur ? (cur.alert || []) : [];
+    const demoCorridor = !!(cur && cur.corridor);
+    const demoHerd = cur && cur.herd ? cur.herd : null;
+
+    const mkNodes = (alertIds) => this.nodeSeed().map(n => {
+      const c = n.status === 'OFFLINE' ? '#E25B4A' : n.status === 'HEALTHY' ? '#5FA97C' : '#D9B44A';
+      const isAlert = alertIds.includes(n.id);
+      return {
+        id: n.id, left: n.left, top: n.top,
+        color: isAlert ? '#E2A13C' : c,
+        glow: isAlert ? 'rgba(226,161,60,0.8)' : (c === '#5FA97C' ? 'rgba(95,169,124,0.6)' : c + '99'),
+        alert: isAlert,
+        onClick: () => this.setState({ selNodeId: n.id }),
+      };
+    });
+
+    const mapNodes = mkNodes(unack > 0 && !S.acked['a1'] ? ['S7-04'] : []);
+    const demoMapNodes = mkNodes(demoAlertIds);
+    const corridorMapNodes = mkNodes(['S7-05', 'S7-08', 'S7-11']);
+
+    // replay derived
+    const rs = this.replayScript();
+    const passed = rs.filter(e => e.pct <= S.replayT);
+    const rCur = passed.length ? passed[passed.length - 1] : rs[0];
+    const replayEvents = rs.map(e => ({
+      time: e.time, text: e.text, dot: e.dot, opacity: e.pct <= S.replayT ? 1 : 0.28,
+    }));
+    const replayNodes = mkNodes(S.replayT > 15 && S.replayT < 90 ? ['S7-04', 'S7-05', 'S7-08'] : []);
+
+    // node detail
+    const sel = S.selNodeId ? this.nodeDetail(S.selNodeId) : null;
+    const selNode = sel ? {
+      id: S.selNodeId, status: sel.status, statusColor: this.statusColor(sel.status),
+      battery: sel.battery, battColor: sel.battery.includes('↓') || sel.battery === '—' ? '#E25B4A' : '#5FA97C',
+      solar: sel.solar, signal: sel.signal, sensors: sel.sensors, uptime: sel.uptime, lastDet: sel.lastDet,
+    } : null;
+
+    // fleet
+    const fleetTiles = [
+      { value: '19', label: 'HEALTHY', color: '#5FA97C', bg: 'rgba(95,169,124,0.07)' },
+      { value: '2', label: 'NEEDS CLEANING', color: '#D9B44A', bg: 'rgba(217,180,74,0.06)' },
+      { value: '2', label: 'NEEDS BATTERY', color: '#D9B44A', bg: 'rgba(217,180,74,0.06)' },
+      { value: '1', label: 'OFFLINE', color: '#E25B4A', bg: 'rgba(226,91,74,0.07)' },
+      { value: '96%', label: 'FLEET OPERATIONAL', color: '#E9EDE6', bg: 'rgba(233,237,230,0.03)' },
+    ];
+    const fleetNodes = this.nodeSeed().map(n => {
+      const d = this.nodeDetail(n.id);
+      const c = this.statusColor(n.status);
+      return {
+        id: n.id, batt: d.battery, solar: d.solar, dotColor: c,
+        note: n.status === 'HEALTHY' ? 'Nominal' : n.status === 'OFFLINE' ? 'No contact 2 d — dispatch' : (n.status === 'NEEDS CLEANING' ? 'Lens/panel cleaning due' : 'Battery swap due'),
+        noteColor: n.status === 'HEALTHY' ? 'rgba(233,237,230,0.45)' : c,
+        open: () => this.setState({ selNodeId: n.id }),
+      };
+    });
+
+    const learnBars = [
+      { label: 'Bee-buzz acoustic', pct: 92, trend: '▲ improving', up: true },
+      { label: 'Tiger-growl acoustic', pct: 84, trend: '▲ improving', up: true },
+      { label: 'Strobe pattern B', pct: 77, trend: '▲ improving', up: true },
+      { label: 'Firecracker acoustic', pct: 63, trend: '— stable', up: true },
+      { label: 'Fixed siren (legacy baseline)', pct: 41, trend: '▼ habituating', up: false },
+    ].map(b => ({
+      ...b, width: b.pct + '%',
+      trendColor: b.up ? '#5FA97C' : '#E25B4A',
+      barBg: b.up ? 'linear-gradient(90deg,#2F5E3F,#5FA97C)' : 'linear-gradient(90deg,#7A3B31,#E25B4A)',
+    }));
+
+    // planner
+    const presets = [
+      { label: 'Farm boundary · 3 km', km: 3 },
+      { label: 'Village boundary · 8 km', km: 8 },
+      { label: 'Rail corridor · 22 km', km: 22 },
+    ];
+    const plannerPresets = presets.map(p => {
+      const active = S.plannerKm === p.km;
+      return {
+        label: p.label,
+        bg: active ? 'rgba(226,161,60,0.15)' : 'transparent',
+        border: active ? '#E2A13C' : 'rgba(233,237,230,0.2)',
+        color: active ? '#E2A13C' : 'rgba(233,237,230,0.75)',
+        pick: () => this.setState({ plannerKm: p.km }),
+      };
+    });
+    const estNodes = Math.max(2, Math.ceil(S.plannerKm * 2.5));
+    const coverage = Math.min(99, 86 + Math.round(8 * Math.min(1, 12 / S.plannerKm)));
+    const blind = S.plannerKm <= 4 ? 0 : S.plannerKm <= 12 ? 1 : Math.ceil(S.plannerKm / 12);
+    const plannerNote = blind === 0
+      ? 'Full sensing overlap at this length — every approach vector is covered by at least two nodes.'
+      : 'Likely blind spots at ridgelines or deep gullies — a site survey refines placement. Estimate assumes ~400 m effective spacing with two-node overlap.';
+
+    // scenarios list
+    const scDefs = [
+      ['Night Elephant', '🐘', '8 steps · 13 s'], ['Road Crossing', '🛣\uFE0F', '5 steps · 8 s'],
+      ['Wildfire Risk', '🔥', '5 steps · 8 s'], ['Poaching Sound', '🎯', '4 steps · 6 s'],
+      ['Sensor Degraded', '🛠\uFE0F', '4 steps · 6 s'], ['Heavy Rain', '🌧\uFE0F', '5 steps · 8 s'],
+    ];
+    const scenarios = scDefs.map(([label, icon, dur]) => ({
+      label, icon, dur,
+      border: S.demoName === label ? '#E2A13C' : 'rgba(233,237,230,0.1)',
+      bg: S.demoName === label ? 'rgba(226,161,60,0.08)' : '#0B0D0B',
+      run: () => this.runScenario(label),
+    }));
+    const demoLog = demoSteps.map(d => ({ time: d.t, text: d.text, dot: d.dot }));
+
+    // tabs
+    const tabDefs = [
+      ['overview', 'Overview', '🗺\uFE0F'], ['replay', 'Replay', '⏪'], ['network', 'Corridor', '🕸\uFE0F'],
+      ['learning', 'Learning', '📈'], ['fleet', 'Fleet', '🔋'], ['planner', 'Planner', '📐'], ['demo', 'Demo Mode', '▶\uFE0F'],
+    ];
+    if (isAdmin) tabDefs.push(['admin', 'Admin', '⚙\uFE0F']);
+    const tabs = tabDefs.map(([id, label, icon]) => ({
+      id, label, icon, href: '#/app/' + id,
+      color: tab === id ? '#E2A13C' : 'rgba(233,237,230,0.6)',
+      bg: tab === id ? 'rgba(226,161,60,0.1)' : 'transparent',
+      badge: id === 'overview' && unack > 0, badgeText: String(unack),
+    }));
+    const mobileTabDefs = isAdmin
+      ? [['overview','Map','🗺\uFE0F'],['replay','Replay','⏪'],['demo','Demo','▶\uFE0F'],['fleet','Fleet','🔋'],['admin','Admin','⚙\uFE0F']]
+      : [['overview','Map','🗺\uFE0F'],['replay','Replay','⏪'],['network','Corridor','🕸\uFE0F'],['fleet','Fleet','🔋'],['demo','Demo','▶\uFE0F']];
+    const mobileTabs = mobileTabDefs.map(([id, short, icon]) => ({
+      href: '#/app/' + id, short: short.toUpperCase(), icon,
+      color: tab === id ? '#E2A13C' : 'rgba(233,237,230,0.55)',
+      bg: tab === id ? 'rgba(226,161,60,0.12)' : 'transparent',
+    }));
+
+    const adminUsers = [
+      { name: 'Abhinav Krishna N', email: 'admin@eletect.in', role: 'ADMIN', roleColor: '#E2A13C', initials: 'AK' },
+      { name: 'Amritha M', email: 'amritha@eletect.in', role: 'ADMIN', roleColor: '#E2A13C', initials: 'AM' },
+      { name: 'R. Suresh IFS', email: 'officer@eletect.in', role: 'OFFICER', roleColor: '#5FA97C', initials: 'RS' },
+      { name: 'Beat Officer · Vellikulam', email: 'beat.vlk@eletect.in', role: 'OFFICER', roleColor: '#5FA97C', initials: 'BV' },
+    ];
+    const auditLog = [
+      { time: 'Today 02:10', text: 'OTA v2.4.1 wave 5 → nodes S7-16…S7-19 (admin@eletect.in)' },
+      { time: 'Today 21:56', text: 'Event E-2231 auto-archived · outcome: herd returned' },
+      { time: 'Yesterday 21:47', text: 'Alert E-2231 acknowledged by officer@eletect.in' },
+      { time: 'Tue 14:02', text: 'Config: WhatsApp channel set to PENDING (DLT wait)' },
+      { time: 'Tue 09:31', text: 'User beat.vlk@eletect.in invited · role OFFICER' },
+    ];
+
+    // corridor steps
+    const corridorSteps = [
+      { node: 'S7-04 · CONTACT', action: 'First detection and deterrence — herd turned away from paddy boundary.' },
+      { node: 'S7-05 · STEER', action: 'Gentle pressure from the south keeps the herd moving north-west.' },
+      { node: 'S7-08 · GUIDE', action: 'Silent — leaves the corridor open. No deterrence in the escape path.' },
+      { node: 'S7-11 · EXIT', action: 'Confirms forest re-entry, sends the all-clear, logs outcome for learning.' },
+    ];
+
+    // replay + XAI numbers
+    const confSeismic = 97, confAudio = 91, confVision = 94;
+    const fused = 96;
+    // radar triangle: center (60,64), vertices at top (60,10), br (110,92), bl (10,92)
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const rp = (vx, vy, pct) => lerp(60, vx, pct / 100) + ',' + lerp(64, vy, pct / 100);
+    const radarPoints = rp(60, 10, confVision) + ' ' + rp(110, 92, confAudio) + ' ' + rp(10, 92, confSeismic);
+
+    return {
+      // shell
+      mobile: S.mobile, notMobile: !S.mobile, navOpen: S.navOpen,
+      navBtnLabel: S.navOpen ? '✕ Close' : '☰ Menu',
+      toggleNav: () => this.setState(s => ({ navOpen: !s.navOpen })),
+      closeNav: () => this.setState({ navOpen: false }),
+      navLinks,
+      isPublicSite, isLogin, isApp,
+      isHome: isPublicSite && route === 'home',
+      isTech: isPublicSite && route === 'technology',
+      isSolutions: isPublicSite && route === 'solutions',
+      isDeploy: isPublicSite && route === 'deployments',
+      isResearch: isPublicSite && route === 'research',
+      isAbout: isPublicSite && route === 'about',
+      isContact: isPublicSite && route === 'contact',
+      isSafe: isPublicSite && route === 'staysafe',
+
+      stats, steps, compareRows, solutionCards, solutions: solutionsData,
+      techPillars, deployPhases, researchCards,
+
+      // contact
+      cName: S.cName, cEmail: S.cEmail, cMsg: S.cMsg,
+      setCName: e => this.setState({ cName: e.target.value }),
+      setCEmail: e => this.setState({ cEmail: e.target.value }),
+      setCMsg: e => this.setState({ cMsg: e.target.value }),
+      sendContact: () => this.setState({ contactSent: true }),
+      contactSent: S.contactSent, contactNotSent: !S.contactSent,
+
+      // opt-in
+      optPhone: S.optPhone, optLoc: S.optLoc,
+      setOptPhone: e => this.setState({ optPhone: e.target.value, optError: false }),
+      setOptLoc: e => this.setState({ optLoc: e.target.value }),
+      toggleSms: () => this.setState(s => ({ smsOn: !s.smsOn })),
+      smsBg: S.smsOn ? '#5FA97C' : 'rgba(233,237,230,0.2)',
+      smsKnob: S.smsOn ? '23px' : '3px',
+      smsKnob2: S.smsOn ? '25px' : '3px',
+      smsStatusText: S.smsOn ? 'On — you\u2019ll get alerts for detections near you' : 'Off — you will not receive safety SMS',
+      optError: S.optError, optErrorMsg: S.optErrorMsg,
+      submitOptIn: () => {
+        if (S.optPhone.replace(/\D/g, '').length < 10) { this.setState({ optError: true, optErrorMsg: 'Please enter a valid phone number.' }); return; }
+        this.setState({ optInDone: true, optError: false });
+      },
+      optInDone: S.optInDone, optInNotDone: !S.optInDone,
+      optPhoneShown: S.optPhone || 'your number',
+
+      // login
+      loginEmail: S.loginEmail, loginPass: S.loginPass,
+      setLoginEmail: e => this.setState({ loginEmail: e.target.value, loginError: false }),
+      setLoginPass: e => this.setState({ loginPass: e.target.value, loginError: false }),
+      loginError: S.loginError, loginErrorMsg: S.loginErrorMsg,
+      doLogin: () => {
+        const em = S.loginEmail.trim().toLowerCase();
+        if (em === 'admin@eletect.in') return this.login('admin', 'Abhinav Krishna N', em);
+        if (em === 'officer@eletect.in') return this.login('officer', 'R. Suresh IFS', em);
+        if (em === 'resident@eletect.in') return this.login('public', 'Resident · Vellikulam', em);
+        this.setState({ loginError: true, loginErrorMsg: 'Unknown account — use a demo account below, or check your email.' });
+      },
+      loginAdmin: () => this.login('admin', 'Abhinav Krishna N', 'admin@eletect.in'),
+      loginOfficer: () => this.login('officer', 'R. Suresh IFS', 'officer@eletect.in'),
+      loginPublic: () => this.login('public', 'Resident · Vellikulam', 'resident@eletect.in'),
+
+      // dashboard shell
+      userLabel: user.name ? (user.name + ' · ' + (user.role || '').toUpperCase()) : '',
+      signOut: () => { clearInterval(this._demoTimer); clearInterval(this._replayTimer); this.setState({ user: null, demoName: null, demoStep: -1, replayT: 0, replayPlaying: false, selNodeId: null }); window.location.hash = '#/'; },
+      isPublicUser, isStaff,
+      showSidebar: isStaff && !S.mobile,
+      showBottomNav: isStaff && S.mobile,
+      tabs, mobileTabs,
+      tabOverview: isStaff && tab === 'overview',
+      tabReplay: isStaff && tab === 'replay',
+      tabNetwork: isStaff && tab === 'network',
+      tabLearning: isStaff && tab === 'learning',
+      tabFleet: isStaff && tab === 'fleet',
+      tabPlanner: isStaff && tab === 'planner',
+      tabDemo: isStaff && tab === 'demo',
+      tabAdmin: isStaff && isAdmin && tab === 'admin',
+      clockLabel: 'LIVE · ' + new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) + ' IST',
+
+      // overview
+      fleetTiles, alerts, unackLabel: unack + ' UNACKNOWLEDGED', mapNodes,
+      herdVisible: false, herdX: '50%', herdY: '40%', herdCount: '7', herdLabel: 'HERD',
+      mapCorridor: false, corridorPts: '', mapLabel: 'SECTOR 7 — LIVE',
+      hasSelNode: !!selNode, selNode: selNode || {},
+      closeNode: () => this.setState({ selNodeId: null }),
+      xaiEvent: 'E-2231', xaiOutcomeTag: 'RESOLVED',
+      confSeismic, confAudio, confVision, confFused: fused, radarPoints,
+      xaiDecision: 'Adaptive deterrent activated', xaiOutcome: 'Herd retreated to forest · verified by observation',
+
+      // replay
+      replayT: S.replayT,
+      setReplayT: e => { clearInterval(this._replayTimer); this.setState({ replayT: Number(e.target.value), replayPlaying: false }); },
+      toggleReplayPlay: () => this.toggleReplay(),
+      replayPlayLabel: S.replayPlaying ? '❚❚ Pause' : (S.replayT >= 100 ? '↺ Replay' : '▶ Play'),
+      replayClock: rCur.time, replayEvents, replayNodes,
+      rHerdX: rCur.x + '%', rHerdY: rCur.y + '%',
+      rCorridor: S.replayT >= 36,
+
+      // corridor
+      corridorMapNodes, corridorSteps,
+
+      // learning
+      learnBars,
+
+      // fleet
+      fleetNodes, fleetPct: '96',
+
+      // planner
+      plannerPresets, plannerKm: S.plannerKm, plannerKmLabel: S.plannerKm + ' km',
+      setPlannerKm: e => this.setState({ plannerKm: Number(e.target.value) }),
+      estNodes, estCoverage: coverage + '%', estBlind: String(blind), plannerNote,
+
+      // demo
+      scenarios, demoLog, demoIdle: !S.demoName,
+      demoRunning: !!S.demoName && S.demoStep < (script ? script.length - 1 : 0),
+      demoName: (S.demoName || '').toUpperCase(),
+      demoMapNodes,
+      demoHerdVisible: !!demoHerd, demoHerdX: demoHerd ? demoHerd.x : '50%', demoHerdY: demoHerd ? demoHerd.y : '40%',
+      demoHerdCount: S.demoName === 'Night Elephant' ? '7' : '1',
+      demoHerdLabel: S.demoName === 'Night Elephant' ? 'HERD · 7' : (S.demoName === 'Heavy Rain' ? 'GAUR HERD' : 'ANIMAL'),
+      demoCorridor,
+      demoMapLabel: S.demoName ? ('DEMO — ' + S.demoName.toUpperCase()) : 'SECTOR 7 — STANDBY',
+
+      // admin
+      adminUsers, auditLog,
+    };
+  }
+}
+</script>
+<script>
+(async () => {
+  if (!document.title || !document.title.trim()) document.title = "EleTect Platform";
+  // Prepend so page-supplied @page / break rules (deck-stage's margin:0,
+  // author CSS) keep source-order precedence over the baseline.
+  const baseCss = document.createElement('style');
+  baseCss.textContent = "@media print {\n  figure, table { break-inside: avoid; }\n  *, *::before, *::after {\n    print-color-adjust: exact; -webkit-print-color-adjust: exact;\n    backdrop-filter: none !important; -webkit-backdrop-filter: none !important;\n    animation-delay: -99s !important; animation-duration: .001s !important;\n    animation-iteration-count: 1 !important; animation-fill-mode: both !important;\n    animation-play-state: running !important; transition-duration: 0s !important;\n  }\n}";
+  document.head.prepend(baseCss);
+  if (document.readyState === 'loading') {
+    await new Promise((r) => document.addEventListener('DOMContentLoaded', r, { once: true }));
+  }
+  let ds = document.querySelector('deck-stage');
+  // whenDefined never resolves when nothing registers the element, so only
+  // await it when a <deck-stage> tag exists (and race a timeout regardless).
+  if (ds && !customElements.get('deck-stage')) {
+    try {
+      await Promise.race([
+        customElements.whenDefined('deck-stage'),
+        new Promise((r) => setTimeout(r, 3000)),
+      ]);
+    } catch (e) {}
+    ds = document.querySelector('deck-stage');
+  }
+  // dc-runtime assigns window.DCLogic at init and mounts into #dc-root on
+  // DOMContentLoaded; settle on that subtree so React has rendered before
+  // print(). Non-DC pages fall through to weighing body.
+  const isDc = !ds && 'DCLogic' in window;
+  const settleRoot = ds || (isDc ? document.getElementById('dc-root') : null) || document.body;
+  if (settleRoot) {
+    // Weigh only content children — skip script/style/template so inline
+    // Babel/CSS doesn't register as stable "content" before the framework
+    // has mounted anything.
+    const MEDIA = 'img,svg,canvas,video,picture,iframe,embed,object';
+    const weigh = () => {
+      let text = 0, media = 0;
+      for (const c of settleRoot.children) {
+        const t = c.tagName;
+        if (t === 'SCRIPT' || t === 'STYLE' || t === 'TEMPLATE') continue;
+        text += (c.textContent || '').trim().length;
+        media += c.querySelectorAll(MEDIA).length + (c.matches(MEDIA) ? 1 : 0);
+      }
+      return text + media * 100;
+    };
+    // "Non-zero and stable" alone is not sufficient to mean rendered: generic
+    // body can carry a static shell while async main content is pending, and
+    // #dc-root can carry the root DC's static text while child refs are still
+    // .sc-placeholder boxes. Gate generic on readyState 'complete', and never
+    // accept stability while a dc-runtime placeholder is present.
+    const isGeneric = settleRoot === document.body;
+    const deadline = Date.now() + 15000;
+    let last = -1, stable = 0;
+    while (Date.now() < deadline) {
+      const n = weigh();
+      const ready =
+        (!isGeneric || document.readyState === 'complete') &&
+        !settleRoot.querySelector('.sc-placeholder');
+      if (n > 0 && n === last && ready) { if (++stable >= 2) break; } else { stable = 0; }
+      last = n;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
+  // Project support.js may predate runtime default-seeding; push via bridge.
+  if (isDc && window.__dcSetProps && window.__dcRootName) {
+    try {
+      const dpEl = document.querySelector('script[data-dc-script]');
+      const meta = JSON.parse((dpEl && dpEl.getAttribute('data-props')) || '{}');
+      const bag = {};
+      for (const k in meta)
+        if (k[0] !== '$' && meta[k] && meta[k].default !== undefined)
+          bag[k] = meta[k].default;
+      if (Object.keys(bag).length) {
+        window.__dcSetProps(window.__dcRootName(), bag);
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    } catch (e) {}
+  }
+  // Reveal content gated on scroll or visibility before printing. Lazy <img>,
+  // IntersectionObserver fade-ins, and collapsed <details> don't render while
+  // off-screen, so a long page would print with them blank or closed. Open
+  // every <details>, force native-lazy images eager, and scroll the document
+  // through its full height to trip lazy-load + IO; then wait (bounded) for the
+  // newly-triggered images. Inert for deck-stage (slides aren't scroll-gated).
+  try {
+    for (const d of document.querySelectorAll('details')) d.open = true;
+    for (const img of document.querySelectorAll('img[loading="lazy"]'))
+      img.loading = 'eager';
+    const scroller = document.scrollingElement || document.documentElement;
+    const full = Math.max(scroller.scrollHeight, document.body.scrollHeight);
+    const step = window.innerHeight || 800;
+    for (let y = 0; y <= full; y += step) {
+      window.scrollTo(0, y);
+      await new Promise((r) => requestAnimationFrame(r));
+    }
+    window.scrollTo(0, 0);
+    await Promise.race([
+      Promise.all(
+        [...document.images].map((img) =>
+          img.complete
+            ? null
+            : new Promise((res) => {
+                img.addEventListener('load', res, { once: true });
+                img.addEventListener('error', res, { once: true });
+              })
+        )
+      ),
+      new Promise((r) => setTimeout(r, 4000)),
+    ]);
+  } catch (e) {}
+  try { await document.fonts.ready; } catch (e) {}
+  // Jump every animation to its end state so print() never captures a slide
+  // mid-entrance. Ordering matters: the 0s-transition style must be live
+  // BEFORE data-deck-active is set so attribute-keyed transitions don't
+  // start a (now-0s) run from the pre-active base.
+  const st = document.createElement('style');
+  st.textContent = '*,*::before,*::after{animation-delay:-99s !important;animation-duration:.001s !important;animation-iteration-count:1 !important;animation-fill-mode:both !important;animation-play-state:running !important;transition-duration:0s !important}';
+  document.head.appendChild(st);
+  for (const d of document.querySelectorAll('deck-stage')) {
+    for (const c of d.children) {
+      const t = c.tagName;
+      if (t === 'SCRIPT' || t === 'STYLE' || t === 'TEMPLATE') continue;
+      c.setAttribute('data-deck-active', '');
+    }
+  }
+  // Re-append deck-stage's @page last so no author @page can add a margin and
+  // spill each full-bleed slide onto two sheets. Backstop for old copies.
+  if (ds) {
+    let pg = document.getElementById('deck-stage-print-page');
+    if (!pg) {
+      pg = document.createElement('style');
+      pg.textContent = '@page{size:' + (+ds.getAttribute('width') || 1920) +
+        'px ' + (+ds.getAttribute('height') || 1080) + 'px;margin:0}';
+    }
+    document.body.appendChild(pg);
+  }
+  try {
+    const sweep = () => {
+      for (const a of document.getAnimations()) {
+        try { a.finish(); } catch (e) {
+          try { a.currentTime = (a.effect && a.effect.getComputedTiming().duration) || 0; a.pause(); } catch (e2) {}
+        }
+      }
+    };
+    sweep();
+    await new Promise((r) => requestAnimationFrame(r));
+    sweep();
+    await new Promise((r) => requestAnimationFrame(r));
+  } catch (e) {}
+  // Size the PDF page to the rendered design unless the file opted into
+  // standard paper via @page{size:letter|A4|…}. Decks own their own @page.
+  // Wrappers (body, …) lose padding+margin so the frame sits at (0,0); the
+  // frame itself loses only margin — its padding is INSIDE the measured
+  // rect and must stay, or content shifts and leaves a gap at bottom/right.
+  var __m = null;
+  try { __m = (() => {
+  var STAMP = true;
+  var docEl = document.documentElement;
+  var doc = { width: docEl.scrollWidth, height: docEl.scrollHeight };
+
+  var ds = document.querySelector('deck-stage');
+  if (ds) {
+    var dw = Number(ds.getAttribute('width')) || 1920;
+    var dh = Number(ds.getAttribute('height')) || 1080;
+    var n = typeof ds.length === 'number' ? ds.length : ds.children.length;
+    var idx = typeof ds.index === 'number' ? ds.index : 0;
+    var frames = [];
+    for (var i = 0; i < n; i++) frames.push({ left: 0, top: 0, width: dw, height: dh });
+    return { kind: 'deck', source: 'declared', doc: doc, frames: frames,
+      authored: frames.map(function(){return{width:true,height:true}}),
+      deck: { width: dw, height: dh, slideCount: n, index: idx },
+      signals: { paperPage: false, pxPage: false } };
+  }
+
+  // Declared kind: a doc-page tag names the kind outright, so no signal
+  // heuristics run (like the deck branch above, signals report false —
+  // they describe inferred classifications only). The tag alone is not
+  // trusted: the element must have upgraded (shadowRoot present), so a
+  // leftover tag whose script was deleted falls through to the heuristics
+  // that handle plain markup.
+  var stageSx = window.scrollX || 0, stageSy = window.scrollY || 0;
+  var dp = document.querySelector('doc-page');
+  if (dp && dp.shadowRoot) {
+    // Crop to the sheet, not the host — the desk around it is screen-only
+    // chrome that must not land in PNG exports.
+    var sheet = dp.shadowRoot.querySelector('.sheet');
+    var sr = (sheet || dp).getBoundingClientRect();
+    return { kind: 'paper-doc', source: 'declared', doc: doc,
+      frames: [{ left: sr.left + stageSx, top: sr.top + stageSy,
+        width: sr.width, height: sr.height }],
+      authored: [{ width: false, height: false }],
+      signals: { paperPage: false, pxPage: false } };
+  }
+  var paperPage = false, pxPage = false;
+  var eachRule = function (fn) {
+    for (var s = 0; s < document.styleSheets.length; s++) {
+      var rs; try { rs = document.styleSheets[s].cssRules; } catch (e) { continue; }
+      for (var r = 0; r < rs.length; r++) {
+        fn(rs[r]);
+        if (rs[r].cssRules) for (var n = 0; n < rs[r].cssRules.length; n++) fn(rs[r].cssRules[n]);
+      }
+    }
+  };
+  eachRule(function (r) {
+    if (r.type !== 6) return;
+    var m = /\bsize\s*:\s*([^;}]+)/i.exec(r.cssText || '');
+    if (!m) return;
+    if (/\b(letter|a[3-5]|legal|ledger)\b/i.test(m[1])) paperPage = true;
+    if (/\d+(?:\.\d+)?px\b/i.test(m[1])) pxPage = true;
+  });
+  var signals = { paperPage: paperPage, pxPage: pxPage };
+
+  var pxVal = function (v) {
+    var m = /^(\d+(?:\.\d+)?)px$/.exec(v || ''); return m ? +m[1] : 0;
+  };
+  var authoredPx = function (el, prop) {
+    if (pxVal(el.style[prop])) return true;
+    var attr = el.getAttribute(prop);
+    if (attr && /^\d+$/.test(attr)) return true;
+    var hit = false;
+    eachRule(function (r) {
+      if (hit || r.type !== 1 || !r.style) return;
+      try { if (el.matches(r.selectorText) && pxVal(r.style[prop])) hit = true; } catch (e) {}
+    });
+    return hit;
+  };
+
+  var el = document.body, rootPxW = false;
+  for (;;) {
+    var kids = [];
+    for (var c = 0; c < el.children.length; c++) {
+      var t = el.children[c].tagName;
+      if (t !== 'SCRIPT' && t !== 'STYLE' && t !== 'TEMPLATE') kids.push(el.children[c]);
+    }
+    if (kids.length !== 1 || !(kids[0] instanceof HTMLElement)) break;
+    if (STAMP) el.setAttribute('data-om-frame-wrap', '');
+    el = kids[0];
+    rootPxW = authoredPx(el, 'width');
+    if (rootPxW) break;
+  }
+  if (!rootPxW) rootPxW = authoredPx(el, 'width');
+
+  // @page{size:letter} alone is a flowing doc; with a px-width root it's a
+  // fixed sheet pretending to be paper — fall through and size to render.
+  if (paperPage && !rootPxW) {
+    return { kind: 'paper-doc', source: 'inferred', doc: doc, signals: signals,
+      frames: [{ left: 0, top: 0, width: doc.width, height: doc.height }],
+      authored: [{ width: false, height: false }] };
+  }
+
+  var sx = window.scrollX || 0, sy = window.scrollY || 0;
+  var rectOf = function (e) {
+    var r = e.getBoundingClientRect();
+    var oy; try { oy = getComputedStyle(e).overflowY; } catch (err) {}
+    var h = oy === 'visible' ? Math.max(r.height, e.scrollHeight || 0) : r.height;
+    return { left: r.left + sx, top: r.top + sy, width: r.width, height: h };
+  };
+
+  // Multi-frame: off unless the page opts in via data-om-multi-frame on the
+  // stop element — the explicit opt-in is what guards against card grids
+  // and pricing tables that match the geometry but aren't separate
+  // canvases. Two ways to name the frames, explicit first:
+  // 1. Descendants marked data-om-frame-export (the social-frames starter
+  //    marks each asset frame; shells/panels around them are presentation,
+  //    so nesting is expected). Document order.
+  // 2. Fallback, no marked descendants: direct children with an authored px
+  //    width AND height (the original geometry heuristic).
+  // Frames may be different sizes (a gallery mixes 1080×1920 stories with
+  // 728×90 banners); data-om-frame-label rides along for export filenames.
+  if (el.hasAttribute('data-om-multi-frame')) {
+    var visOk = function (e) {
+      var cs; try { cs = getComputedStyle(e); } catch (err) { return false; }
+      return cs.display !== 'none' && cs.visibility !== 'hidden' && cs.position !== 'fixed';
+    };
+    // A frame's crop is its VISUAL box — never the scrollHeight-inflated
+    // rect that rectOf computes for page roots. Shadow-DOM hover controls
+    // (image-slot's Replace bar parks 29px below its host) and similar
+    // escaping UI contribute scrollable overflow to the frame, and the
+    // inflated height both squashes the nominal-size resize and drags
+    // content below the frame into the crop. Zoom-independent; bit every
+    // slot-bearing frame.
+    var frameRectOf = function (e) {
+      var r = e.getBoundingClientRect();
+      return { left: r.left + sx, top: r.top + sy, width: r.width, height: r.height };
+    };
+    var pushCand = function (list, e) {
+      if (!visOk(e)) return;
+      var rc = frameRectOf(e);
+      if (rc.width < 2 || rc.height < 2) return;
+      var lbl = e.getAttribute('data-om-frame-label');
+      if (lbl) rc.label = lbl;
+      list.push(rc);
+    };
+    var cands = [];
+    var marked = el.querySelectorAll('[data-om-frame-export]');
+    if (marked.length) {
+      for (var mk = 0; mk < marked.length; mk++) pushCand(cands, marked[mk]);
+    } else {
+      for (var k = 0; k < el.children.length; k++) {
+        var ch = el.children[k];
+        if (!authoredPx(ch, 'width') || !authoredPx(ch, 'height')) continue;
+        pushCand(cands, ch);
+      }
+    }
+    if (cands.length >= 2) {
+      return { kind: 'multi-frame', source: 'inferred', doc: doc, signals: signals,
+        frames: cands, authored: cands.map(function(){return{width:true,height:true}}) };
+    }
+  }
+
+  if (STAMP) el.setAttribute('data-om-frame', '');
+  return { kind: 'single-canvas', source: 'inferred', doc: doc, signals: signals,
+    frames: [rectOf(el)],
+    authored: [{ width: rootPxW, height: authoredPx(el, 'height') }] };
+})(); } catch (e) {}
+  var frame = null;
+  if (__m && __m.kind === 'single-canvas') {
+    var f = __m.frames && __m.frames[0];
+    if (f && f.width >= 200 && f.height >= 200) {
+      frame = f;
+      var fst = document.createElement('style');
+      fst.textContent = '@media print{@page{size:' + Math.ceil(f.width) + 'px ' +
+        Math.ceil(f.height) + 'px;margin:0}' +
+        'html,body,[data-om-frame-wrap]{padding:0!important;margin:0!important;background:none!important}' +
+        '[data-om-frame]{margin:0!important}}';
+      document.body.appendChild(fst);
+    }
+  }
+  // Relax break-inside on oversized elements. An element taller than a
+  // printable page can't honor break-inside: avoid — browsers either overflow
+  // it or push it whole to the next page, leaving a blank gap, then break it
+  // anyway at an arbitrary point. After the final layout (content revealed,
+  // animations jumped), find elements taller than a page that still compute
+  // break-inside: avoid and reset them to auto, so the browser breaks them at
+  // their children's boundaries instead (children keep their own avoid). PAGE_PX
+  // is a conservative portrait estimate at 96 CSS px/in — Letter/A4 usable
+  // height minus our 0.5in margins — so only clearly-oversized elements are
+  // touched and under-page elements still stay whole. Skipped for decks (slides
+  // are sized to the page) and for fixed-size canvases (frame set, or an author
+  // px-based @page) — runs as before for flowing docs on letter/A4.
+  try {
+    if (!ds && !frame && !(__m && __m.signals && __m.signals.pxPage)) {
+      const PAGE_PX = 1024;
+      // Our print defaults add a real @page margin only when the source has
+      // no @page of its own; computed style can't tell us (it reports screen
+      // media), so read the injected rule directly.
+      const defaults = document.querySelector('style[data-omelette-print-defaults]');
+      const pageInset = /@page\s*\{[^}]*margin/.test(defaults ? defaults.textContent || '' : '');
+      const SEL = 'section,article,figure,table,pre,blockquote,[class~="card" i],[class~="page" i],[class~="sheet" i]';
+      for (const el of document.body.querySelectorAll(SEL)) {
+        if (el instanceof HTMLElement && el.offsetHeight > PAGE_PX) {
+          el.setAttribute('data-om-oversized', '');
+          // Fake-paged docs simulate sheets with over-tall break-after:page
+          // boxes; honoring the break spills half-blank pages and ends a
+          // colored box mid-sheet. Flow them, and (only when we own the page
+          // inset) drop the redundant padding/background via the rule below.
+          const cs = getComputedStyle(el);
+          if (cs.breakAfter === 'page' || cs.pageBreakAfter === 'always') {
+            el.setAttribute('data-om-fakepage', '');
+          }
+        }
+      }
+      const ost = document.createElement('style');
+      ost.textContent = '@media print{' +
+        '[data-om-oversized]{break-inside:auto !important;page-break-inside:auto !important}' +
+        '[data-om-fakepage]{break-after:auto !important;page-break-after:auto !important}' +
+        (pageInset ? '[data-om-fakepage]{padding:0 !important;background:none !important}' : '') +
+        '}';
+      document.head.appendChild(ost);
+    }
+  } catch (e) {}
+  // macOS Preview renders Skia-PDF Luminosity soft-masks as opaque grey boxes;
+  // swap the CSS that triggers them for Preview-safe forms.
+  try {
+    for (const el of document.body.querySelectorAll('*')) {
+      const cs = getComputedStyle(el);
+
+      if (cs.boxShadow !== 'none' && cs.filter === 'none') {
+        const outs = [], kept = [];
+        for (const s of cs.boxShadow.split(/,(?![^(]*[)])/)) {
+          const t = s.trim();
+          const m = t.match(/^(rgba?[(][^)]+[)]) (-?[0-9.]+px) (-?[0-9.]+px) ([0-9.]+px) -?[0-9.]+px$/);
+          if (m && parseFloat(m[4]) > 0) outs.push('drop-shadow(' + m[2] + ' ' + m[3] + ' ' + m[4] + ' ' + m[1] + ')');
+          else kept.push(t);
+        }
+        if (outs.length) {
+          el.style.setProperty('filter', outs.join(' '), 'important');
+          el.style.setProperty('box-shadow', kept.join(', ') || 'none', 'important');
+        }
+      }
+
+      const mask = cs.maskImage && cs.maskImage !== 'none' ? cs.maskImage : cs.webkitMaskImage;
+      if (mask && mask !== 'none' && cs.filter === 'none') el.style.setProperty('filter', 'opacity(1)', 'important');
+    }
+  } catch (e) {}
+  setTimeout(() => { try { window.print(); } catch (e) {} }, 200);
+})();
+</script>
+</body>
+</html>
