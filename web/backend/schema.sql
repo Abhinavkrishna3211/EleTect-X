@@ -77,10 +77,49 @@ create table maintenance (
   created_at timestamptz not null default now()
 );
 
--- Auto-create a profile on signup (default role: public)
+-- 7. Forest-officer access requests. A signup never grants the officer role
+-- directly — it only queues a request here; an admin promotes profiles.role
+-- via approve_officer_request() below.
+create type officer_request_status as enum ('pending', 'approved', 'rejected');
+create table officer_requests (
+  id             bigint generated always as identity primary key,
+  user_id        uuid not null references auth.users on delete cascade,
+  full_name      text not null,
+  department     text not null,
+  designation    text not null,
+  official_email text not null,
+  phone          text,
+  status         officer_request_status not null default 'pending',
+  decided_by     uuid references profiles,
+  decided_at     timestamptz,
+  created_at     timestamptz not null default now()
+);
+-- One outstanding request per user at a time.
+create unique index officer_requests_one_pending_per_user
+  on officer_requests (user_id) where (status = 'pending');
+
+-- Auto-create a profile on signup (default role: public). When signup
+-- metadata marks this as an officer request, also queue a pending row in
+-- officer_requests — the account stays role='public' until an admin approves
+-- it. Runs as SECURITY DEFINER so it works regardless of RLS or whether
+-- email confirmation is enabled (no client-side insert is ever needed).
 create function handle_new_user() returns trigger language plpgsql security definer as $$
 begin
-  insert into profiles (id, full_name) values (new.id, new.raw_user_meta_data->>'full_name');
+  insert into profiles (id, full_name, phone)
+    values (new.id, new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'phone');
+
+  if (new.raw_user_meta_data->>'officer_request')::boolean then
+    insert into officer_requests (user_id, full_name, department, designation, official_email, phone)
+      values (
+        new.id,
+        new.raw_user_meta_data->>'full_name',
+        new.raw_user_meta_data->>'department',
+        new.raw_user_meta_data->>'designation',
+        new.raw_user_meta_data->>'official_email',
+        new.raw_user_meta_data->>'phone'
+      );
+  end if;
+
   return new;
 end; $$;
 create trigger on_auth_user_created after insert on auth.users
@@ -101,11 +140,21 @@ alter table events      enable row level security;
 alter table alerts      enable row level security;
 alter table health      enable row level security;
 alter table maintenance enable row level security;
+alter table officer_requests enable row level security;
 
 -- Profiles: users manage their own; staff can read all; admin can write all
 create policy p_self_rw on profiles for all using (id = auth.uid()) with check (id = auth.uid());
 create policy p_staff_read on profiles for select using (is_staff());
 create policy p_admin_all on profiles for all using (is_admin()) with check (is_admin());
+
+-- Restrict self-service profile updates to non-privileged columns only.
+-- RLS above controls which ROWS a user can touch; this controls which COLUMNS —
+-- role, id, and created_at must stay out of user hands, or a public signup
+-- could grant themselves admin via a direct PATCH request. SECURITY DEFINER
+-- functions (handle_new_user, any future admin-approval function) run as the
+-- function owner, not as `authenticated`, so they are unaffected by this revoke.
+revoke update on profiles from authenticated;
+grant update (full_name, phone, lat, lng, alerts_enabled) on profiles to authenticated;
 
 -- Operational tables: staff read; admin full write. (Public gets aggregates via a view below.)
 create policy n_staff_read on nodes for select using (is_staff());
@@ -119,8 +168,61 @@ create policy h_staff_read on health for select using (is_staff());
 create policy h_admin_all  on health for all using (is_admin()) with check (is_admin());
 create policy m_staff_rw   on maintenance for all using (is_staff()) with check (is_staff());
 
+-- Officer requests: applicant can see their own request's status; admin sees
+-- the full queue. No INSERT/UPDATE policy for authenticated — rows are only
+-- ever written by handle_new_user() and the approve/reject functions below,
+-- all SECURITY DEFINER, so a request can't be self-approved via a direct write.
+create policy or_self_read  on officer_requests for select using (user_id = auth.uid());
+create policy or_admin_all  on officer_requests for all using (is_admin()) with check (is_admin());
+
+-- Admin-only approval actions. SECURITY DEFINER lets these update profiles.role
+-- despite the column-grant restriction above; the is_admin() check inside
+-- guards against a non-admin calling the RPC directly.
+create function approve_officer_request(req_id bigint) returns void
+language plpgsql security definer as $$
+declare target_user uuid;
+begin
+  if not is_admin() then
+    raise exception 'not authorized';
+  end if;
+
+  select user_id into target_user from officer_requests
+    where id = req_id and status = 'pending';
+  if target_user is null then
+    raise exception 'no pending request %', req_id;
+  end if;
+
+  update officer_requests
+    set status = 'approved', decided_by = auth.uid(), decided_at = now()
+    where id = req_id;
+  update profiles set role = 'officer' where id = target_user;
+end; $$;
+grant execute on function approve_officer_request(bigint) to authenticated;
+
+create function reject_officer_request(req_id bigint) returns void
+language plpgsql security definer as $$
+begin
+  if not is_admin() then
+    raise exception 'not authorized';
+  end if;
+
+  update officer_requests
+    set status = 'rejected', decided_by = auth.uid(), decided_at = now()
+    where id = req_id and status = 'pending';
+  if not found then
+    raise exception 'no pending request %', req_id;
+  end if;
+end; $$;
+grant execute on function reject_officer_request(bigint) to authenticated;
+
 -- Public-safe aggregate (no node internals). Readable by anyone authenticated.
-create view public_area_risk as
+-- Deliberately security_invoker = false (the default): this view must bypass
+-- events' staff-only RLS so public/anon users can see the day+count aggregate
+-- on the Stay Safe page. The exposure is bounded by the view's own column
+-- list (day, count only) — no species, location, or node detail leaks through.
+-- Do not "fix" the Supabase Advisor's Security Definer View warning here by
+-- setting security_invoker = true; that would make public users see zero rows.
+create view public_area_risk with (security_invoker = false) as
   select date_trunc('day', ts) as day, count(*) as detections
   from events where priority = 'high' group by 1 order by 1 desc;
 grant select on public_area_risk to authenticated, anon;
