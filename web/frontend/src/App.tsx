@@ -9,7 +9,15 @@ import { Research } from '@/pages/public/Research'
 import { About } from '@/pages/public/About'
 import { Contact } from '@/pages/public/Contact'
 import { StaySafe } from '@/pages/public/StaySafe'
-import { Dashboard } from '@/pages/dashboard/Dashboard'
+import { Login } from '@/pages/auth/Login'
+import { Signup } from '@/pages/auth/Signup'
+import { ForgotPassword } from '@/pages/auth/ForgotPassword'
+import { ResetPassword } from '@/pages/auth/ResetPassword'
+import { ProtectedRoute } from '@/components/ProtectedRoute'
+import { RoleGate } from '@/components/RoleGate'
+import { DashboardIndex } from '@/pages/dashboard/DashboardIndex'
+import { OfficerApprovals } from '@/pages/dashboard/OfficerApprovals'
+import { PlaceholderPanel } from '@/pages/dashboard/PlaceholderPanel'
 
 function App() {
   return (
@@ -25,8 +33,93 @@ function App() {
           <Route path="contact" element={<Contact />} />
           <Route path="stay-safe" element={<StaySafe />} />
         </Route>
-        <Route path="dashboard" element={<DashboardLayout />}>
-          <Route index element={<Dashboard />} />
+
+        <Route path="login" element={<Login />} />
+        <Route path="signup" element={<Signup />} />
+        <Route path="forgot-password" element={<ForgotPassword />} />
+        <Route path="reset-password" element={<ResetPassword />} />
+
+        <Route
+          path="dashboard"
+          element={
+            <ProtectedRoute>
+              <DashboardLayout />
+            </ProtectedRoute>
+          }
+        >
+          <Route index element={<DashboardIndex />} />
+          <Route
+            path="overview"
+            element={
+              <RoleGate roles={['officer', 'admin']}>
+                <PlaceholderPanel title="Sector 7 · Kothamangalam" />
+              </RoleGate>
+            }
+          />
+          <Route
+            path="replay"
+            element={
+              <RoleGate roles={['officer', 'admin']}>
+                <PlaceholderPanel title="Incident replay" />
+              </RoleGate>
+            }
+          />
+          <Route
+            path="network"
+            element={
+              <RoleGate roles={['officer', 'admin']}>
+                <PlaceholderPanel title="Network intelligence" />
+              </RoleGate>
+            }
+          />
+          <Route
+            path="learning"
+            element={
+              <RoleGate roles={['officer', 'admin']}>
+                <PlaceholderPanel title="AI learning" />
+              </RoleGate>
+            }
+          />
+          <Route
+            path="fleet"
+            element={
+              <RoleGate roles={['officer', 'admin']}>
+                <PlaceholderPanel title="Fleet health" />
+              </RoleGate>
+            }
+          />
+          <Route
+            path="planner"
+            element={
+              <RoleGate roles={['officer', 'admin']}>
+                <PlaceholderPanel title="Deployment planner" />
+              </RoleGate>
+            }
+          />
+          <Route
+            path="demo"
+            element={
+              <RoleGate roles={['officer', 'admin']}>
+                <PlaceholderPanel title="Demo mode" />
+              </RoleGate>
+            }
+          />
+          <Route
+            path="officers"
+            element={
+              <RoleGate roles={['admin']}>
+                <OfficerApprovals />
+              </RoleGate>
+            }
+          />
+          <Route
+            path="admin"
+            element={
+              <RoleGate roles={['admin']}>
+                <PlaceholderPanel title="Administration" />
+              </RoleGate>
+            }
+          />
         </Route>
       </Routes>
     </BrowserRouter>
