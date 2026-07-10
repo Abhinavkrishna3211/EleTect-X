@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRealtimeTable } from '@/hooks/useRealtimeTable'
-import { SectorMap, type SectorMapNode } from '@/components/dashboard/SectorMap'
-import { projectNodes, type EventRow, type NodeRow } from '@/lib/dashboard'
+import { LiveMap } from '@/components/dashboard/LiveMap'
+import { geoPoints, toLatLng, type EventRow, type NodeRow } from '@/lib/dashboard'
 import { herdAt, incidentPath, istHM, latestActivation, latestCluster, ms } from '@/lib/incident'
 
 // Wall-clock advance rate of the auto-play head: replay one incident over ~14 s.
 const PLAY_MS = 14_000
 const TICK_MS = 90
+// herdAt() already yields a continuous position, so the marker only needs enough
+// transition to damp the 90 ms stepping of the play head.
+const HERD_MS = 200
 
 function dotColor(e: EventRow): string {
   if (e.corridor?.role === 'deter') return '#e25b4a'
@@ -35,7 +38,7 @@ export function Replay() {
   })
 
   const nodes = useMemo(() => [...nodeRows.values()], [nodeRows])
-  const points = useMemo(() => projectNodes(nodes), [nodes])
+  const points = useMemo(() => geoPoints(nodes), [nodes])
 
   // The incident to replay: the latest coordinated activation, else the latest
   // time-contiguous cluster of detections. Ascending by time either way.
@@ -84,23 +87,14 @@ export function Replay() {
 
   const tMs = window ? window.start + (replayT / 100) * (window.end - window.start) : 0
 
-  const mapNodes: SectorMapNode[] = useMemo(() => {
-    const firedByT = new Set(incident.filter((e) => ms(e.ts) <= tMs && e.node_id).map((e) => e.node_id as string))
-    return nodes
-      .filter((n) => points.has(n.id))
-      .map((n) => ({
-        id: n.id,
-        point: points.get(n.id) as { left: number; top: number },
-        status: firedByT.has(n.id) ? 'alert' : n.status,
-        active: firedByT.has(n.id),
-      }))
-  }, [nodes, points, incident, tMs])
-
-  const herdPoint = useMemo(() => herdAt(incident, points, tMs), [incident, points, tMs])
-  const firedCount = useMemo(
-    () => new Set(incident.filter((e) => ms(e.ts) <= tMs && e.node_id).map((e) => e.node_id)).size,
+  // Nodes that have already fired at the current play head — they pulse on the map.
+  const firedByT = useMemo(
+    () => new Set(incident.filter((e) => ms(e.ts) <= tMs && e.node_id).map((e) => e.node_id as string)),
     [incident, tMs],
   )
+
+  const herdPoint = useMemo(() => herdAt(incident, points, tMs), [incident, points, tMs])
+  const corridor = useMemo(() => path.map(toLatLng), [path])
 
   const speciesLabel = incident.find((e) => e.species)?.species?.toUpperCase() ?? 'DETECTION'
   const subtitle = window
@@ -128,10 +122,17 @@ export function Replay() {
       </div>
 
       <div className="h-[clamp(300px,44vw,440px)]">
-        <SectorMap
-          nodes={mapNodes}
-          herd={window && herdPoint ? { point: herdPoint, count: Math.max(1, firedCount), label: 'HERD' } : null}
-          corridor={path}
+        <LiveMap
+          nodes={nodes}
+          activeNodeIds={firedByT}
+          herd={
+            window && herdPoint
+              ? { lat: herdPoint.top, lng: herdPoint.left, count: Math.max(1, firedByT.size), label: 'HERD' }
+              : null
+          }
+          herdTransitionMs={HERD_MS}
+          corridor={corridor}
+          fit="bounds"
           label="REPLAY"
         />
       </div>

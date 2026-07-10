@@ -1,6 +1,6 @@
 // Shared derivation for the Replay and Corridor views: turn a flat list of
 // `events` into one coherent incident (a herd movement) and the geometry to
-// animate it over the abstract sector map. Movement comes from the node-detection
+// animate it over the sector map. Movement comes from the node-detection
 // sequence (CONTEXT.md §4, no TDOA) — either the explicit coordinated-corridor
 // activation tag, or, absent that, the most recent time-contiguous cluster.
 
