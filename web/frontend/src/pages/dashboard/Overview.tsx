@@ -5,6 +5,7 @@ import { FleetSummaryTiles } from '@/components/dashboard/FleetSummaryTiles'
 import { AlertsFeed } from '@/components/dashboard/AlertsFeed'
 import { DecisionCard } from '@/components/dashboard/DecisionCard'
 import { ConfidenceRadar } from '@/components/dashboard/ConfidenceRadar'
+import { NodeDetailPanel } from '@/components/dashboard/NodeDetailPanel'
 import type { EventRow, NodeRow } from '@/lib/dashboard'
 
 // Live clock in IST, the sector's operating timezone — matches the timestamp
@@ -46,6 +47,12 @@ export function Overview() {
   // The decision card explains the most recent event that carries a fusion pass.
   const decisionEvent = useMemo(() => events.find((e) => e.fusion) ?? null, [events])
 
+  const selectedNode = selectedNodeId ? (nodeRows.get(selectedNodeId) ?? null) : null
+  const selectedNodeEvent = useMemo(
+    () => (selectedNodeId ? (events.find((e) => e.node_id === selectedNodeId) ?? null) : null),
+    [events, selectedNodeId],
+  )
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-baseline gap-3.5">
@@ -68,6 +75,13 @@ export function Overview() {
               <LiveMap nodes={nodes} selectedNodeId={selectedNodeId} onSelect={setSelectedNodeId} />
             )}
           </div>
+          {selectedNode && (
+            <NodeDetailPanel
+              node={selectedNode}
+              latestEvent={selectedNodeEvent}
+              onClose={() => setSelectedNodeId(null)}
+            />
+          )}
         </div>
 
         <div className="flex min-w-0 flex-col gap-4">
