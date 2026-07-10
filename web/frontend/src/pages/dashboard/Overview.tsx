@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRealtimeTable } from '@/hooks/useRealtimeTable'
 import { LiveMap } from '@/components/dashboard/LiveMap'
 import { FleetSummaryTiles } from '@/components/dashboard/FleetSummaryTiles'
-import type { NodeRow } from '@/lib/dashboard'
+import { AlertsFeed } from '@/components/dashboard/AlertsFeed'
+import type { EventRow, NodeRow } from '@/lib/dashboard'
 
 // Live clock in IST, the sector's operating timezone — matches the timestamp
 // beside the title in the design.
@@ -28,10 +29,18 @@ export function Overview() {
   const { rows: nodeRows, loading } = useRealtimeTable<NodeRow>('nodes', 'id', {
     orderBy: { column: 'id', ascending: true },
   })
+  const { rows: eventRows } = useRealtimeTable<EventRow>('events', 'id', {
+    orderBy: { column: 'ts', ascending: false },
+    limit: 20,
+  })
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const clockLabel = useClockLabel()
 
   const nodes = useMemo(() => [...nodeRows.values()], [nodeRows])
+  const events = useMemo(
+    () => [...eventRows.values()].sort((a, b) => b.ts.localeCompare(a.ts)),
+    [eventRows],
+  )
 
   return (
     <div className="flex flex-col gap-4">
@@ -55,6 +64,10 @@ export function Overview() {
               <LiveMap nodes={nodes} selectedNodeId={selectedNodeId} onSelect={setSelectedNodeId} />
             )}
           </div>
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-4">
+          <AlertsFeed events={events} selectedNodeId={selectedNodeId} onSelect={setSelectedNodeId} />
         </div>
       </div>
     </div>
