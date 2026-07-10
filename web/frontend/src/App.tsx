@@ -22,6 +22,7 @@ import { Replay } from '@/pages/dashboard/Replay'
 import { Corridor } from '@/pages/dashboard/Corridor'
 import { Learning } from '@/pages/dashboard/Learning'
 import { Fleet } from '@/pages/dashboard/Fleet'
+import { Planner } from '@/pages/dashboard/Planner'
 import { PlaceholderPanel } from '@/pages/dashboard/PlaceholderPanel'
 
 function App() {
@@ -97,7 +98,7 @@ function App() {
             path="planner"
             element={
               <RoleGate roles={['officer', 'admin']}>
-                <PlaceholderPanel title="Deployment planner" />
+                <Planner />
               </RoleGate>
             }
           />
