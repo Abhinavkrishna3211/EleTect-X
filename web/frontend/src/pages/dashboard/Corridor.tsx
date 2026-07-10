@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRealtimeTable } from '@/hooks/useRealtimeTable'
-import { SectorMap, type SectorMapNode } from '@/components/dashboard/SectorMap'
-import { corridorRoleDisplay, projectNodes, type EventRow, type NodeRow } from '@/lib/dashboard'
+import { LiveMap } from '@/components/dashboard/LiveMap'
+import { corridorRoleDisplay, geoPoints, toLatLng, type EventRow, type NodeRow } from '@/lib/dashboard'
 import { incidentPath, istHM } from '@/lib/incident'
 
 // Time each node holds the herd before the handoff advances (map + card in sync).
 const STEP_MS = 1700
+// The herd hops node-to-node here, so it needs a full ease to read as movement.
+const HERD_MS = 1100
 
 interface Activation {
   id: string
@@ -40,7 +42,7 @@ export function Corridor() {
   })
 
   const nodes = useMemo(() => [...nodeRows.values()], [nodeRows])
-  const points = useMemo(() => projectNodes(nodes), [nodes])
+  const points = useMemo(() => geoPoints(nodes), [nodes])
   const activations = useMemo(() => buildActivations([...eventRows.values()]), [eventRows])
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -67,20 +69,9 @@ export function Corridor() {
 
   const activeNodeId = steps[step]?.node_id ?? null
   const path = useMemo(() => incidentPath(steps, points), [steps, points])
+  const corridor = useMemo(() => path.map(toLatLng), [path])
 
-  const mapNodes: SectorMapNode[] = useMemo(
-    () =>
-      nodes
-        .filter((n) => points.has(n.id))
-        .map((n) => ({
-          id: n.id,
-          point: points.get(n.id) as { left: number; top: number },
-          status: n.id === activeNodeId ? 'alert' : n.status,
-          active: n.id === activeNodeId,
-        })),
-    [nodes, points, activeNodeId],
-  )
-
+  const activeNodeIds = useMemo(() => new Set(activeNodeId ? [activeNodeId] : []), [activeNodeId])
   const herdPoint = activeNodeId ? points.get(activeNodeId) ?? null : null
 
   if (loading) {
@@ -125,10 +116,13 @@ export function Corridor() {
       </div>
 
       <div className="h-[clamp(300px,44vw,440px)]">
-        <SectorMap
-          nodes={mapNodes}
-          herd={herdPoint ? { point: herdPoint, count: steps.length, label: 'HERD → FOREST' } : null}
-          corridor={path}
+        <LiveMap
+          nodes={nodes}
+          activeNodeIds={activeNodeIds}
+          herd={herdPoint ? { lat: herdPoint.top, lng: herdPoint.left, count: steps.length, label: 'HERD → FOREST' } : null}
+          herdTransitionMs={HERD_MS}
+          corridor={corridor}
+          fit="bounds"
           label="SAFE-HERDING CORRIDOR"
         />
       </div>

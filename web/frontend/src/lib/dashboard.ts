@@ -132,37 +132,27 @@ export function modalityLabel(kind: ModalityKind): string {
   return MODALITY_LABEL[kind] ?? kind
 }
 
-// A node's position on the abstract sector map, in percentages of the map box.
+// A generic 2-D point the incident geometry interpolates over (see lib/incident.ts).
+// Carries a node's real position as left = longitude, top = latitude.
 export interface MapPoint {
   left: number
   top: number
 }
 
-// Project real node lat/lng into the abstract sector-map box (percent left/top),
-// north-up. Nodes without a fix are dropped — no invented coordinates, same rule
-// as the live Leaflet map. A margin keeps pins off the very edge; a degenerate
-// (single-point or zero-span) axis falls back to centring so one node still shows.
-export function projectNodes(nodes: NodeRow[], margin = 12): Map<string, MapPoint> {
-  const located = nodes.filter((n) => n.lat != null && n.lng != null)
+// Node positions as MapPoints for the incident math. Nodes without a fix are
+// dropped — no invented coordinates, same rule as the map pins themselves.
+export function geoPoints(nodes: NodeRow[]): Map<string, MapPoint> {
   const out = new Map<string, MapPoint>()
-  if (located.length === 0) return out
-
-  const lats = located.map((n) => n.lat as number)
-  const lngs = located.map((n) => n.lng as number)
-  const minLat = Math.min(...lats)
-  const maxLat = Math.max(...lats)
-  const minLng = Math.min(...lngs)
-  const maxLng = Math.max(...lngs)
-  const spanLat = maxLat - minLat
-  const spanLng = maxLng - minLng
-  const span = margin * 2
-
-  for (const n of located) {
-    const fx = spanLng > 0 ? ((n.lng as number) - minLng) / spanLng : 0.5
-    const fy = spanLat > 0 ? (maxLat - (n.lat as number)) / spanLat : 0.5 // north up
-    out.set(n.id, { left: margin + fx * (100 - span), top: margin + fy * (100 - span) })
+  for (const n of nodes) {
+    if (n.lat == null || n.lng == null) continue
+    out.set(n.id, { left: n.lng, top: n.lat })
   }
   return out
+}
+
+// A MapPoint as a Leaflet [lat, lng] pair.
+export function toLatLng(p: MapPoint): [number, number] {
+  return [p.top, p.left]
 }
 
 // Compact relative time ("40 s ago", "12 m ago", "2 d ago") for last_seen /

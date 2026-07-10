@@ -148,9 +148,29 @@
   background: #070d0a;
   font-family: 'IBM Plex Mono', monospace;
 }
-.et-node-pin {
+.et-node-pin,
+.et-herd-marker {
   background: transparent;
   border: none;
+}
+
+/* Leaflet positions a marker icon with a transform, so transitioning it glides
+   the herd between interpolated positions instead of teleporting. The duration
+   is per-view (--et-herd-ms): Replay's position is already continuous and only
+   needs damping, Corridor's hops node-to-node and needs the full ease. */
+.et-herd-marker {
+  transition: transform var(--et-herd-ms, 0ms) cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Suspended while the map zooms — Leaflet rewrites marker transforms there, and
+   animating that would slide the herd off its true geographic position. */
+.et-no-transition {
+  transition: none !important;
+}
+
+/* Flowing dashes along the corridor polyline Leaflet renders as SVG. */
+.et-corridor-line {
+  animation: et-dash 1.6s linear infinite;
 }
 .leaflet-control-attribution {
   background: rgba(7, 13, 10, 0.7) !important;
