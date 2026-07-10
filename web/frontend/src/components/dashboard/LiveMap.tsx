@@ -19,6 +19,12 @@ const TILE_ATTRIBUTION =
 
 const GOLD = '#E2A13C'
 
+// fitBounds pads around a marker's anchor, but a pin is drawn well past it: the
+// id pill hangs ~27px below and ~17px either side. Pad for the drawn pin, not
+// the point, so an edge node's label is never clipped — and clear the label chip
+// and legend that overlay the corners.
+const PIN_PADDING: [number, number] = [56, 56]
+
 // A node pin styled like SectorMap.dc.html: a glowing status dot with its id
 // below, plus an animated ping ring while the node is alerting or is actively
 // steering the herd. The id sits in a dark pill so it stays legible on the
@@ -149,16 +155,41 @@ export function LiveMap({
   }, [])
 
   // Frame the deployment once the node set resolves (incident views only).
+  //
+  // invalidateSize() first, always. Leaflet caches the container size at L.map()
+  // time and getBoundsZoom() measures against that cache, not the DOM. The map
+  // mounts before the surrounding header has settled, so the cached size is
+  // stale by a layout pass — enough to pick a zoom level one step off in either
+  // direction and push an edge node out of view.
   useEffect(() => {
     const map = mapRef.current
     if (!map || fit !== 'bounds' || located.length === 0) return
     const key = located.map((n) => n.id).join(',')
     if (fittedRef.current === key) return
     fittedRef.current = key
+    map.invalidateSize(false)
     map.fitBounds(
       L.latLngBounds(located.map((n) => [n.lat as number, n.lng as number] as [number, number])),
-      { padding: [48, 48], maxZoom: 15 },
+      { padding: PIN_PADDING, maxZoom: 15 },
     )
+  }, [located, fit])
+
+  // Re-measure on container resize (orientation change, sidebar collapse) and
+  // re-frame, so the fit never outlives the size it was computed against.
+  useEffect(() => {
+    const map = mapRef.current
+    const container = containerRef.current
+    if (!map || !container) return
+    const observer = new ResizeObserver(() => {
+      map.invalidateSize(false)
+      if (fit !== 'bounds' || located.length === 0) return
+      map.fitBounds(
+        L.latLngBounds(located.map((n) => [n.lat as number, n.lng as number] as [number, number])),
+        { padding: PIN_PADDING, maxZoom: 15, animate: false },
+      )
+    })
+    observer.observe(container)
+    return () => observer.disconnect()
   }, [located, fit])
 
   // Reconcile markers against the current node set (add / update / remove).
