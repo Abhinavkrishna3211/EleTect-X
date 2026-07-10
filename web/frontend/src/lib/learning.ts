@@ -9,6 +9,10 @@ import type { EventRow } from './dashboard'
 // colour follows the action entity, never its rank. See scripts/validate_palette.
 const SERIES_COLORS = ['#3987e5', '#199e70', '#c98500', '#e66767']
 const OTHER_COLOR = '#898781'
+// A few actions read wrong if their hue floats: "Blue strobe" in green confuses
+// more than it distinguishes. Pin those to a fixed slot; every other action keeps
+// filling the remaining slots in volume-rank order.
+const PINNED_COLORS: Record<string, string> = { 'Blue strobe': '#3987e5' }
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 const MAX_SERIES = SERIES_COLORS.length
 // A rate from too few encounters is noise, not a trend — such a bucket reads as a
@@ -88,12 +92,25 @@ export function buildTrendModel(events: EventRow[]): TrendModel {
   }
   if (hi < 0) return { weeks: [], series: [], sampleCount: scored.length }
 
+  // Assign hues: honour pinned actions first, then hand the remaining palette
+  // slots to the rest in volume-rank order so nothing collides with a pin.
+  const colorFor = new Map<string, string>()
+  for (const name of seriesNames) {
+    if (name !== 'Other' && PINNED_COLORS[name]) colorFor.set(name, PINNED_COLORS[name])
+  }
+  const freeSlots = SERIES_COLORS.filter((c) => ![...colorFor.values()].includes(c))
+  let slot = 0
+  for (const name of seriesNames) {
+    if (name === 'Other' || colorFor.has(name)) continue
+    colorFor.set(name, freeSlots[slot++] ?? OTHER_COLOR)
+  }
+
   const series: TrendSeries[] = seriesNames.map((name, i) => {
     const points = rawPoints[i].slice(lo, hi + 1)
     const valid = points.filter((p): p is number => p != null)
     return {
       action: name,
-      color: name === 'Other' ? OTHER_COLOR : SERIES_COLORS[i],
+      color: name === 'Other' ? OTHER_COLOR : colorFor.get(name)!,
       points,
       current: valid.length > 0 ? valid[valid.length - 1] : null,
       previous: valid.length > 1 ? valid[valid.length - 2] : null,
