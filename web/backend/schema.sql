@@ -45,6 +45,7 @@ create table events (
   outcome      text,                  -- retreated / no-response / ...
   priority     text default 'normal', -- normal | high
   fusion       jsonb,                 -- per-modality log-odds breakdown (see comment)
+  corridor     jsonb,                 -- coordinated-corridor activation breakdown (see comment)
   created_at   timestamptz not null default now()
 );
 create index on events (node_id, ts desc);
@@ -62,6 +63,23 @@ create index on events (node_id, ts desc);
 comment on column events.fusion is
   'Per-modality log-odds fusion breakdown behind confidence (CONTEXT.md §4). '
   'A modality that did not report is available=false (dropped out), never 0.';
+
+-- Coordinated-corridor activation (CONTEXT.md §4: safe-herding corridors). Movement
+-- is derived from the node-detection SEQUENCE (no TDOA): grouping neighbouring
+-- events into one herd movement and recording each node's role in the handoff is
+-- not derivable from ts alone, so it is stored here. Nullable — an ordinary,
+-- uncoordinated detection leaves this null. Shape (not DB-enforced, typed in the
+-- frontend):
+--   { "activation": "CA-2231",       -- groups all events of one herd movement
+--     "seq": 0,                        -- 0-based order in the handoff sequence
+--     "role": "detect|deter|escort",   -- detect=first sense; deter=village-side
+--                                       --   push; escort=forest-side lane kept quiet
+--     "heading_deg": 42,               -- herd heading from node sequence (no TDOA)
+--     "note": "pre-armed neighbours" } -- step-card action text
+comment on column events.corridor is
+  'Coordinated safe-herding corridor activation breakdown (CONTEXT.md §4). Groups '
+  'neighbour events of one herd movement (activation) with each node''s handoff '
+  'role (detect/deter/escort) and sequence order; null for uncoordinated events.';
 
 -- 4. Alerts sent (audit)
 create table alerts (
