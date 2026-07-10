@@ -23,6 +23,7 @@ import { Corridor } from '@/pages/dashboard/Corridor'
 import { Learning } from '@/pages/dashboard/Learning'
 import { Fleet } from '@/pages/dashboard/Fleet'
 import { Planner } from '@/pages/dashboard/Planner'
+import { Demo } from '@/pages/dashboard/Demo'
 import { PlaceholderPanel } from '@/pages/dashboard/PlaceholderPanel'
 
 function App() {
@@ -106,7 +107,7 @@ function App() {
             path="demo"
             element={
               <RoleGate roles={['officer', 'admin']}>
-                <PlaceholderPanel title="Demo mode" />
+                <Demo />
               </RoleGate>
             }
           />
