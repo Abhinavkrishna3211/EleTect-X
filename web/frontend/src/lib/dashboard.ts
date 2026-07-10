@@ -40,6 +40,32 @@ export interface Fusion {
   modalities: Modality[]
 }
 
+// A node's role in a coordinated safe-herding corridor (CONTEXT.md §4). detect =
+// first to sense the herd; deter = active on the village side to push it back;
+// escort = kept quiet to hold the forest-side escape lane open.
+export type CorridorRole = 'detect' | 'deter' | 'escort'
+
+// Coordinated-corridor activation breakdown on an event (events.corridor). Groups
+// the neighbour events of one herd movement and records this node's handoff role
+// and order. Null on ordinary, uncoordinated detections.
+export interface Corridor {
+  activation: string // groups all events of one herd movement
+  seq: number // 0-based order in the handoff sequence
+  role: CorridorRole
+  heading_deg: number // herd heading derived from node sequence (no TDOA)
+  note: string // step-card action text
+}
+
+const ROLE_DISPLAY: Record<CorridorRole, { label: string; color: string }> = {
+  detect: { label: 'DETECT', color: '#e2a13c' },
+  deter: { label: 'DETER', color: '#e25b4a' },
+  escort: { label: 'ESCORT', color: '#5fa97c' },
+}
+
+export function corridorRoleDisplay(role: CorridorRole): { label: string; color: string } {
+  return ROLE_DISPLAY[role] ?? ROLE_DISPLAY.detect
+}
+
 export interface EventRow {
   id: number
   node_id: string | null
@@ -52,6 +78,7 @@ export interface EventRow {
   outcome: string | null
   priority: string | null // normal | high
   fusion: Fusion | null
+  corridor: Corridor | null
   created_at: string
 }
 
@@ -103,6 +130,39 @@ const MODALITY_LABEL: Record<ModalityKind, string> = {
 
 export function modalityLabel(kind: ModalityKind): string {
   return MODALITY_LABEL[kind] ?? kind
+}
+
+// A node's position on the abstract sector map, in percentages of the map box.
+export interface MapPoint {
+  left: number
+  top: number
+}
+
+// Project real node lat/lng into the abstract sector-map box (percent left/top),
+// north-up. Nodes without a fix are dropped — no invented coordinates, same rule
+// as the live Leaflet map. A margin keeps pins off the very edge; a degenerate
+// (single-point or zero-span) axis falls back to centring so one node still shows.
+export function projectNodes(nodes: NodeRow[], margin = 12): Map<string, MapPoint> {
+  const located = nodes.filter((n) => n.lat != null && n.lng != null)
+  const out = new Map<string, MapPoint>()
+  if (located.length === 0) return out
+
+  const lats = located.map((n) => n.lat as number)
+  const lngs = located.map((n) => n.lng as number)
+  const minLat = Math.min(...lats)
+  const maxLat = Math.max(...lats)
+  const minLng = Math.min(...lngs)
+  const maxLng = Math.max(...lngs)
+  const spanLat = maxLat - minLat
+  const spanLng = maxLng - minLng
+  const span = margin * 2
+
+  for (const n of located) {
+    const fx = spanLng > 0 ? ((n.lng as number) - minLng) / spanLng : 0.5
+    const fy = spanLat > 0 ? (maxLat - (n.lat as number)) / spanLat : 0.5 // north up
+    out.set(n.id, { left: margin + fx * (100 - span), top: margin + fy * (100 - span) })
+  }
+  return out
 }
 
 // Compact relative time ("40 s ago", "12 m ago", "2 d ago") for last_seen /
