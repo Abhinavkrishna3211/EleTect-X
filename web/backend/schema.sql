@@ -44,9 +44,24 @@ create table events (
   action       text,                  -- deterrent chosen
   outcome      text,                  -- retreated / no-response / ...
   priority     text default 'normal', -- normal | high
+  fusion       jsonb,                 -- per-modality log-odds breakdown (see comment)
   created_at   timestamptz not null default now()
 );
 create index on events (node_id, ts desc);
+
+-- Explainable-AI breakdown behind `confidence`. CONTEXT.md §4 fuses the sensors
+-- as L = L_prior + Σ aᵢ wᵢ (ℓᵢ − ℓ₀ᵢ), P = σ(L). `confidence` stays the scalar
+-- fused P; `fusion` records how it was reached so the dashboard can show which
+-- modalities contributed and by how much. Nullable — an event with no cognition
+-- pass renders a reduced card. A modality that did not report is available=false
+-- (dropped out), never 0. Shape (not DB-enforced, typed in the frontend):
+--   { "prior": <log-odds>, "logodds": <fused L; σ(logodds)=confidence>,
+--     "modalities": [ { "kind": "seismic|acoustic|vision", "available": bool,
+--       "weight": w, "logodds": ℓ|null, "baseline": ℓ₀, "contribution": a·w·(ℓ−ℓ₀),
+--       "confidence": σ(ℓ)|null } ] }
+comment on column events.fusion is
+  'Per-modality log-odds fusion breakdown behind confidence (CONTEXT.md §4). '
+  'A modality that did not report is available=false (dropped out), never 0.';
 
 -- 4. Alerts sent (audit)
 create table alerts (
