@@ -18,6 +18,9 @@ import { RoleGate } from '@/components/RoleGate'
 import { DashboardIndex } from '@/pages/dashboard/DashboardIndex'
 import { OfficerApprovals } from '@/pages/dashboard/OfficerApprovals'
 import { Overview } from '@/pages/dashboard/Overview'
+import { Replay } from '@/pages/dashboard/Replay'
+import { Corridor } from '@/pages/dashboard/Corridor'
+import { Learning } from '@/pages/dashboard/Learning'
 import { PlaceholderPanel } from '@/pages/dashboard/PlaceholderPanel'
 
 function App() {
@@ -61,7 +64,7 @@ function App() {
             path="replay"
             element={
               <RoleGate roles={['officer', 'admin']}>
-                <PlaceholderPanel title="Incident replay" />
+                <Replay />
               </RoleGate>
             }
           />
@@ -69,7 +72,7 @@ function App() {
             path="network"
             element={
               <RoleGate roles={['officer', 'admin']}>
-                <PlaceholderPanel title="Network intelligence" />
+                <Corridor />
               </RoleGate>
             }
           />
@@ -77,7 +80,7 @@ function App() {
             path="learning"
             element={
               <RoleGate roles={['officer', 'admin']}>
-                <PlaceholderPanel title="AI learning" />
+                <Learning />
               </RoleGate>
             }
           />
