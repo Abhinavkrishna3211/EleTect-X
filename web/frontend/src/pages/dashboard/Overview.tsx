@@ -4,6 +4,7 @@ import { LiveMap } from '@/components/dashboard/LiveMap'
 import { FleetSummaryTiles } from '@/components/dashboard/FleetSummaryTiles'
 import { AlertsFeed } from '@/components/dashboard/AlertsFeed'
 import { DecisionCard } from '@/components/dashboard/DecisionCard'
+import { ConfidenceRadar } from '@/components/dashboard/ConfidenceRadar'
 import type { EventRow, NodeRow } from '@/lib/dashboard'
 
 // Live clock in IST, the sector's operating timezone — matches the timestamp
@@ -56,7 +57,7 @@ export function Overview() {
 
       <FleetSummaryTiles nodes={nodes} />
 
-      <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(460px,100%),1fr))]">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(min(460px,100%),1fr))]">
         <div className="flex flex-col gap-2.5">
           <div className="h-[clamp(300px,42vw,420px)]">
             {loading ? (
@@ -71,7 +72,14 @@ export function Overview() {
 
         <div className="flex min-w-0 flex-col gap-4">
           <AlertsFeed events={events} selectedNodeId={selectedNodeId} onSelect={setSelectedNodeId} />
-          <DecisionCard event={decisionEvent} />
+          <DecisionCard
+            event={decisionEvent}
+            radar={
+              decisionEvent?.fusion ? (
+                <ConfidenceRadar modalities={decisionEvent.fusion.modalities} />
+              ) : undefined
+            }
+          />
         </div>
       </div>
     </div>
