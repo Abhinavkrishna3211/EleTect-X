@@ -17,6 +17,7 @@ import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { RoleGate } from '@/components/RoleGate'
 import { DashboardIndex } from '@/pages/dashboard/DashboardIndex'
 import { OfficerApprovals } from '@/pages/dashboard/OfficerApprovals'
+import { Overview } from '@/pages/dashboard/Overview'
 import { PlaceholderPanel } from '@/pages/dashboard/PlaceholderPanel'
 
 function App() {
@@ -52,7 +53,7 @@ function App() {
             path="overview"
             element={
               <RoleGate roles={['officer', 'admin']}>
-                <PlaceholderPanel title="Sector 7 · Kothamangalam" />
+                <Overview />
               </RoleGate>
             }
           />
