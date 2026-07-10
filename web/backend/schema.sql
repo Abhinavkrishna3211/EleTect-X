@@ -103,13 +103,18 @@ create unique index officer_requests_one_pending_per_user
 -- officer_requests — the account stays role='public' until an admin approves
 -- it. Runs as SECURITY DEFINER so it works regardless of RLS or whether
 -- email confirmation is enabled (no client-side insert is ever needed).
-create function handle_new_user() returns trigger language plpgsql security definer as $$
+-- search_path is explicit here: this trigger runs as the supabase_auth_admin
+-- role when fired from auth.users, whose default search_path does not
+-- include public, so unqualified table names would fail with
+-- "relation ... does not exist" even though the tables exist.
+create function handle_new_user() returns trigger language plpgsql security definer
+set search_path = public as $$
 begin
-  insert into profiles (id, full_name, phone)
+  insert into public.profiles (id, full_name, phone)
     values (new.id, new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'phone');
 
   if (new.raw_user_meta_data->>'officer_request')::boolean then
-    insert into officer_requests (user_id, full_name, department, designation, official_email, phone)
+    insert into public.officer_requests (user_id, full_name, department, designation, official_email, phone)
       values (
         new.id,
         new.raw_user_meta_data->>'full_name',
@@ -125,12 +130,22 @@ end; $$;
 create trigger on_auth_user_created after insert on auth.users
   for each row execute function handle_new_user();
 
--- Helper: is the current user an officer or admin?
-create function is_staff() returns boolean language sql stable as $$
-  select exists(select 1 from profiles p where p.id = auth.uid() and p.role in ('admin','officer'));
+-- Helper: is the current user an officer or admin? Schema-qualified for the
+-- same reason as handle_new_user() below — don't rely on the caller's search_path.
+-- SECURITY DEFINER is required, not optional: profiles' own RLS policies call
+-- is_staff()/is_admin() to decide readability. If these ran as the invoking
+-- role, their internal "select from profiles" would re-trigger profiles' RLS,
+-- which calls is_staff()/is_admin() again — infinite recursion, surfaced by
+-- Postgres as a stack-depth error (PostgREST reports it as a bare 500). Running
+-- as definer lets the internal lookup bypass RLS entirely, which is safe here
+-- because these functions only ever return a boolean, never raw row data.
+create function is_staff() returns boolean language sql stable security definer
+set search_path = public as $$
+  select exists(select 1 from public.profiles p where p.id = auth.uid() and p.role in ('admin','officer'));
 $$;
-create function is_admin() returns boolean language sql stable as $$
-  select exists(select 1 from profiles p where p.id = auth.uid() and p.role = 'admin');
+create function is_admin() returns boolean language sql stable security definer
+set search_path = public as $$
+  select exists(select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin');
 $$;
 
 -- ---------- RLS ----------
@@ -179,34 +194,36 @@ create policy or_admin_all  on officer_requests for all using (is_admin()) with 
 -- despite the column-grant restriction above; the is_admin() check inside
 -- guards against a non-admin calling the RPC directly.
 create function approve_officer_request(req_id bigint) returns void
-language plpgsql security definer as $$
+language plpgsql security definer
+set search_path = public as $$
 declare target_user uuid;
 begin
   if not is_admin() then
     raise exception 'not authorized';
   end if;
 
-  select user_id into target_user from officer_requests
+  select user_id into target_user from public.officer_requests
     where id = req_id and status = 'pending';
   if target_user is null then
     raise exception 'no pending request %', req_id;
   end if;
 
-  update officer_requests
+  update public.officer_requests
     set status = 'approved', decided_by = auth.uid(), decided_at = now()
     where id = req_id;
-  update profiles set role = 'officer' where id = target_user;
+  update public.profiles set role = 'officer' where id = target_user;
 end; $$;
 grant execute on function approve_officer_request(bigint) to authenticated;
 
 create function reject_officer_request(req_id bigint) returns void
-language plpgsql security definer as $$
+language plpgsql security definer
+set search_path = public as $$
 begin
   if not is_admin() then
     raise exception 'not authorized';
   end if;
 
-  update officer_requests
+  update public.officer_requests
     set status = 'rejected', decided_by = auth.uid(), decided_at = now()
     where id = req_id and status = 'pending';
   if not found then
