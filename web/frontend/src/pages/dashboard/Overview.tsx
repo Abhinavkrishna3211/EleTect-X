@@ -3,6 +3,7 @@ import { useRealtimeTable } from '@/hooks/useRealtimeTable'
 import { LiveMap } from '@/components/dashboard/LiveMap'
 import { FleetSummaryTiles } from '@/components/dashboard/FleetSummaryTiles'
 import { AlertsFeed } from '@/components/dashboard/AlertsFeed'
+import { DecisionCard } from '@/components/dashboard/DecisionCard'
 import type { EventRow, NodeRow } from '@/lib/dashboard'
 
 // Live clock in IST, the sector's operating timezone — matches the timestamp
@@ -41,6 +42,8 @@ export function Overview() {
     () => [...eventRows.values()].sort((a, b) => b.ts.localeCompare(a.ts)),
     [eventRows],
   )
+  // The decision card explains the most recent event that carries a fusion pass.
+  const decisionEvent = useMemo(() => events.find((e) => e.fusion) ?? null, [events])
 
   return (
     <div className="flex flex-col gap-4">
@@ -68,6 +71,7 @@ export function Overview() {
 
         <div className="flex min-w-0 flex-col gap-4">
           <AlertsFeed events={events} selectedNodeId={selectedNodeId} onSelect={setSelectedNodeId} />
+          <DecisionCard event={decisionEvent} />
         </div>
       </div>
     </div>
