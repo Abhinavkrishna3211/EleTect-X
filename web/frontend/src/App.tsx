@@ -21,6 +21,7 @@ import { Overview } from '@/pages/dashboard/Overview'
 import { Replay } from '@/pages/dashboard/Replay'
 import { Corridor } from '@/pages/dashboard/Corridor'
 import { Learning } from '@/pages/dashboard/Learning'
+import { Fleet } from '@/pages/dashboard/Fleet'
 import { PlaceholderPanel } from '@/pages/dashboard/PlaceholderPanel'
 
 function App() {
@@ -88,7 +89,7 @@ function App() {
             path="fleet"
             element={
               <RoleGate roles={['officer', 'admin']}>
-                <PlaceholderPanel title="Fleet health" />
+                <Fleet />
               </RoleGate>
             }
           />
