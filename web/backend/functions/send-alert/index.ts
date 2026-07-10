@@ -59,8 +59,16 @@ async function sendSms(to: string, body: string): Promise<boolean> {
 }
 
 Deno.serve(async (req) => {
-  const payload = await req.json().catch(() => ({}));
+  const payload = await req.json().catch(() => null);
+  // Fail closed. This block is the first thing that runs, before any other
+  // logic, on purpose: a Demo Mode scenario writes real `events` rows, and this
+  // webhook would otherwise SMS every officer and every opted-in resident within
+  // 3 km. An unreadable payload, or any demo-tagged event, must never fan out.
+  // (Demo events are also written priority='normal', so the check below is a
+  // second, independent barrier — but this one is the guarantee.)
+  if (payload === null) return new Response("unreadable payload", { status: 400 });
   const ev = payload.record ?? payload;                       // DB webhook sends {record}
+  if (ev?.media_url === "demo") return new Response("skipped (demo)", { status: 200 });
   if (!ev?.node_id) return new Response("no event", { status: 400 });
   if ((ev.priority ?? "normal") !== "high") return new Response("skipped (not high)", { status: 200 });
 
