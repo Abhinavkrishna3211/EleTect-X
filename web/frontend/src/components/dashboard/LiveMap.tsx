@@ -70,6 +70,20 @@ export interface HerdMarker {
   label: string
 }
 
+// A node the planner proposes but has not deployed — rendered as a ghost pin.
+export interface PlannedNode {
+  lat: number
+  lng: number
+  kind: 'guard' | 'watch'
+}
+
+// The boundary the planner is drawing: ordered vertices, and whether the ring is
+// closed. Rendered as a solid line distinct from the dashed corridor polyline.
+export interface Boundary {
+  points: [number, number][]
+  closed: boolean
+}
+
 interface LiveMapProps {
   nodes: NodeRow[]
   // Pin selection is an Overview affordance; the incident views omit both.
@@ -86,6 +100,20 @@ interface LiveMapProps {
   fit?: 'center' | 'bounds'
   // Header chip + status legend, as on the incident views.
   label?: string
+  // ----- Deployment-planner drawing overlays (all optional; every existing
+  // caller passes none, so the map renders exactly as before). -----
+  // Fires with the clicked [lat, lng]; drives boundary/crossing placement.
+  onMapClick?: (lat: number, lng: number) => void
+  // Boundary being drawn (planner). Solid line + vertex dots.
+  boundary?: Boundary | null
+  // Proposed node layout (planner). Ghost pins: GUARD filled, WATCH hollow.
+  plannedNodes?: PlannedNode[]
+  // Marked boundary crossings (planner) as [lat, lng] pairs.
+  crossings?: [number, number][]
+  // Frame these points once when the signature changes (planner preset load).
+  fitPoints?: [number, number][] | null
+  // CSS cursor for the map surface (e.g. 'crosshair' while drawing).
+  cursor?: string
 }
 
 export function LiveMap({
@@ -98,6 +126,12 @@ export function LiveMap({
   corridor,
   fit = 'center',
   label,
+  onMapClick,
+  boundary = null,
+  plannedNodes,
+  crossings,
+  fitPoints = null,
+  cursor,
 }: LiveMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
@@ -109,11 +143,21 @@ export function LiveMap({
   const herdHtmlRef = useRef<string>('')
   const lineRef = useRef<L.Polyline | null>(null)
   const fittedRef = useRef<string>('')
+  // Planner overlay layers, each a single group reconciled in place.
+  const boundaryRef = useRef<L.LayerGroup | null>(null)
+  const plannedRef = useRef<L.LayerGroup | null>(null)
+  const crossingRef = useRef<L.LayerGroup | null>(null)
+  const fitPointsRef = useRef<string>('')
   // Keep the latest onSelect without re-binding marker handlers each render.
   const onSelectRef = useRef(onSelect)
   useLayoutEffect(() => {
     onSelectRef.current = onSelect
   }, [onSelect])
+  // Same pattern for the map-click handler: keep it current without rebinding.
+  const onMapClickRef = useRef(onMapClick)
+  useLayoutEffect(() => {
+    onMapClickRef.current = onMapClick
+  }, [onMapClick])
 
   // Only nodes with a real fix get a pin — no inventing coordinates.
   const located = useMemo(() => nodes.filter((n) => n.lat != null && n.lng != null), [nodes])
@@ -140,17 +184,25 @@ export function LiveMap({
     }
     map.on('zoomstart', freeze).on('zoomend', thaw)
 
+    // Delegate clicks to the latest handler (planner drawing). No-op otherwise.
+    const click = (e: L.LeafletMouseEvent) => onMapClickRef.current?.(e.latlng.lat, e.latlng.lng)
+    map.on('click', click)
+
     mapRef.current = map
     const markers = markersRef.current
     const pins = pinHtmlRef.current
     return () => {
       map.off('zoomstart', freeze).off('zoomend', thaw)
+      map.off('click', click)
       map.remove()
       mapRef.current = null
       markers.clear()
       pins.clear()
       herdRef.current = null
       lineRef.current = null
+      boundaryRef.current = null
+      plannedRef.current = null
+      crossingRef.current = null
     }
   }, [])
 
@@ -285,12 +337,101 @@ export function LiveMap({
     }
   }, [herd])
 
+  // Boundary line + vertex dots (planner). One layer group, rebuilt on change —
+  // the vertex set is small and edits are user-paced, so no per-vertex diffing.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    boundaryRef.current?.remove()
+    boundaryRef.current = null
+    if (!boundary || boundary.points.length === 0) return
+    const group = L.layerGroup().addTo(map)
+    const ring: [number, number][] = boundary.closed
+      ? [...boundary.points, boundary.points[0]]
+      : boundary.points
+    if (ring.length >= 2) {
+      L.polyline(ring, { color: GOLD, weight: 2.5, opacity: 0.9, interactive: false }).addTo(group)
+    }
+    boundary.points.forEach((p, i) => {
+      const first = i === 0 && !boundary.closed
+      L.circleMarker(p, {
+        radius: first ? 5 : 3.5,
+        color: GOLD,
+        weight: first ? 2 : 1.5,
+        fillColor: first ? '#070D0A' : GOLD,
+        fillOpacity: 1,
+        interactive: false,
+      }).addTo(group)
+    })
+    boundaryRef.current = group
+  }, [boundary])
+
+  // Proposed node layout (planner). Ghost pins: GUARD a filled gold disc, WATCH a
+  // hollow ring — the same colour language as the deployment legend.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    plannedRef.current?.remove()
+    plannedRef.current = null
+    if (!plannedNodes || plannedNodes.length === 0) return
+    const group = L.layerGroup().addTo(map)
+    for (const pn of plannedNodes) {
+      const guard = pn.kind === 'guard'
+      const html = `<span style="display:block;width:12px;height:12px;border-radius:50%;border:2px solid ${GOLD};background:${guard ? GOLD : 'transparent'};box-shadow:0 0 6px rgba(226,161,60,0.6)"></span>`
+      L.marker([pn.lat, pn.lng], {
+        icon: L.divIcon({ html, className: 'et-planned-pin', iconSize: [12, 12], iconAnchor: [6, 6] }),
+        interactive: false,
+        keyboard: false,
+      }).addTo(group)
+    }
+    plannedRef.current = group
+  }, [plannedNodes])
+
+  // Marked boundary crossings (planner) — a red diamond where a herd path meets
+  // the boundary, the points that earn a GUARD role.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    crossingRef.current?.remove()
+    crossingRef.current = null
+    if (!crossings || crossings.length === 0) return
+    const group = L.layerGroup().addTo(map)
+    for (const c of crossings) {
+      const html = `<span style="display:block;width:12px;height:12px;background:#e25b4a;transform:rotate(45deg);border:1.5px solid rgba(7,13,10,0.85);box-shadow:0 0 7px #e25b4a"></span>`
+      L.marker(c, {
+        icon: L.divIcon({ html, className: 'et-crossing-pin', iconSize: [12, 12], iconAnchor: [6, 6] }),
+        interactive: false,
+        keyboard: false,
+        zIndexOffset: 500,
+      }).addTo(group)
+    }
+    crossingRef.current = group
+  }, [crossings])
+
+  // Frame an explicit point set once when its signature changes (planner preset
+  // load). Manual drawing passes none, so the view stays put under the cursor.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !fitPoints || fitPoints.length === 0) return
+    const key = fitPoints.map((p) => `${p[0].toFixed(4)},${p[1].toFixed(4)}`).join('|')
+    if (fitPointsRef.current === key) return
+    fitPointsRef.current = key
+    map.invalidateSize(false)
+    map.fitBounds(L.latLngBounds(fitPoints), { padding: PIN_PADDING, maxZoom: 15 })
+  }, [fitPoints])
+
   return (
     <div
       className="border-brand-fg/10 bg-brand-bg relative h-full w-full overflow-hidden rounded-2xl border"
       style={{ '--et-herd-ms': `${herdTransitionMs}ms` } as React.CSSProperties}
     >
-      <div ref={containerRef} role="application" aria-label="Live sector map" className="h-full w-full" />
+      <div
+        ref={containerRef}
+        role="application"
+        aria-label="Live sector map"
+        className="h-full w-full"
+        style={cursor ? { cursor } : undefined}
+      />
       {label && (
         <>
           <div className="text-brand-fg/85 pointer-events-none absolute top-2.5 right-3 z-500 flex items-center gap-1.5 rounded bg-[rgba(7,13,10,0.72)] px-2 py-1 font-mono text-[9.5px] font-semibold">
