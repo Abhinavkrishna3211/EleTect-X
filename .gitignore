@@ -24,8 +24,9 @@ build/
 !.env.example
 
 # --- Supabase CLI (keep config.toml; ignore generated local state) ---
-web/backend/supabase/.temp/
-web/backend/supabase/.branches/
+# Broad match: the CLI writes .temp/.branches wherever it is run, not just web/backend.
+**/supabase/.temp/
+**/supabase/.branches/
 
 # --- Firmware build ---
 device/mcu/**/build/
