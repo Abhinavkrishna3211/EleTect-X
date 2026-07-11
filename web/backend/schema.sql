@@ -304,11 +304,19 @@ create policy dns_staff_read on demo_node_snapshot for select using (is_staff())
 -- below ever write here, and they run as the function owner.
 
 -- Snapshot-then-mutate, used by every scenario step that touches a node. Internal
--- to the demo RPCs; deliberately not granted to authenticated.
+-- to the demo RPCs; deliberately not granted to authenticated. The is_staff()
+-- check below is a second, independent barrier on top of the revoke — a Day 3
+-- adversarial pass found the revoke alone had drifted out of sync with the live
+-- project at least once, so this function no longer depends on the grant being
+-- correct as its only defense.
 create function demo_touch_node(p_node text, p_status node_status)
 returns void language plpgsql security definer
 set search_path = public as $$
 begin
+  if not is_staff() then
+    raise exception 'not authorized';
+  end if;
+
   insert into demo_node_snapshot (node_id, status, battery_pct, solar_w, last_seen)
     select id, status, battery_pct, solar_w, last_seen from public.nodes where id = p_node
     on conflict (node_id) do nothing;
