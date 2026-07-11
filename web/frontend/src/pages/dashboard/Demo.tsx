@@ -33,6 +33,7 @@ export function Demo() {
   const [log, setLog] = useState<ScenarioLogLine[]>([])
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null)
   const [resetting, setResetting] = useState(false)
+  const [resetError, setResetError] = useState<string | null>(null)
   // Guards a run against a reset (or a second scenario) firing mid-sequence.
   const runToken = useRef(0)
 
@@ -64,8 +65,13 @@ export function Demo() {
     runToken.current++
     setRunning(null)
     setResetting(true)
-    await supabase.rpc('reset_demo_data')
+    setResetError(null)
+    const { error } = await supabase.rpc('reset_demo_data')
     setResetting(false)
+    if (error) {
+      setResetError(error.message)
+      return
+    }
     setLog([])
     setFocusNodeId(null)
   }
@@ -92,6 +98,11 @@ export function Demo() {
           >
             {resetting ? 'Resetting…' : 'Reset demo data'}
           </button>
+          {resetError && (
+            <p className="text-brand-red m-0 w-full font-mono text-[11.5px] font-semibold">
+              Reset failed: {resetError}
+            </p>
+          )}
         </div>
       )}
 
