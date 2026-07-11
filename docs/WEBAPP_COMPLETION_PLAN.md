@@ -44,6 +44,20 @@ The core promise of the product is currently broken in production. Fix that befo
 **Exit criteria:** a real detection event reaches a real inbox/WhatsApp in the live project,
 end to end, with the demo guard proven intact.
 
+**Status: met, 11 Jul.** `send-alert` deployed with a pluggable channel abstraction (email
+primary via Resend, SMS retained but gated behind `CHANNEL_SMS` pending DLT, WhatsApp a
+registered stub). `supabase secrets list` confirmed `SERVICE_ROLE_KEY`, `RESEND_API_KEY`,
+`ALERT_EMAIL_FROM` present. Direct-invoke proof (via `Invoke-RestMethod` — this CLI version,
+2.109.1, has no `functions invoke` subcommand): high-priority event → `sent:1, total:2,
+byChannel:{email:1}`, one `alerts` row `status=sent` (account-owner address, Resend test-mode
+delivers), one `status=failed` (second staff address, expected under Resend's test-mode
+restriction — swap to a verified sending domain before residents rely on this in the field);
+`media_url='demo'` → skipped, zero rows; `priority='normal'` → skipped, zero rows. The
+events→send-alert Database Webhook did not exist yet at audit time — created it
+(`send_alert_on_event`, INSERT only, POST to the function), then proved the real path: a raw
+SQL `insert into events (...)` with no direct function call produced a second email
+automatically. Automatic-trigger path confirmed end to end.
+
 ## Day 2 (Sun) — Auth hardening
 
 CLAUDE.md's deployment bar names this explicitly: Supabase's default auth email sender is
