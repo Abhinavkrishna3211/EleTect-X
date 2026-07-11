@@ -45,7 +45,7 @@ sample as (
     p.id,
     g.ts,
     extract(epoch from (now() - g.ts)) / 86400.0                    as days_ago,
-    greatest(0, sin(pi * (extract(hour from g.ts at time zone 'Asia/Kolkata') - 6) / 12)) as daylight,
+    greatest(0, sin(pi() * (extract(hour from g.ts at time zone 'Asia/Kolkata') - 6) / 12)) as daylight,
     p.solar_peak,
     p.batt_base
   from params p cross join grid g
