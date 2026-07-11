@@ -23,6 +23,10 @@ build/
 .env.*
 !.env.example
 
+# --- Supabase CLI (keep config.toml; ignore generated local state) ---
+web/backend/supabase/.temp/
+web/backend/supabase/.branches/
+
 # --- Firmware build ---
 device/mcu/**/build/
 *.elf
