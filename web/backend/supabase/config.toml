@@ -1,0 +1,14 @@
+# Supabase CLI project config — used only to deploy the edge function.
+# The function's source of truth stays at web/backend/functions/send-alert; the
+# entrypoint override below points the CLI there without moving the file into the
+# default supabase/functions/ layout.
+#
+# Deploy from web/backend:
+#   supabase functions deploy send-alert --project-ref zjgafdozlrhecommmztq --use-api --workdir web/backend
+
+project_id = "zjgafdozlrhecommmztq"
+
+[functions.send-alert]
+enabled = true
+verify_jwt = true
+entrypoint = "../functions/send-alert/index.ts"
