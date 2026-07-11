@@ -24,8 +24,14 @@ export function Signup() {
   const [ofPhone, setOfPhone] = useState('')
   const [ofPass, setOfPass] = useState('')
 
+  // Honeypot: real users never see or fill this field (moved off-screen, not display:none,
+  // since some scripted bots skip fields hidden that way). A filled value means a bot filled
+  // every input it found — reject silently, no error, no network call, don't tip it off.
+  const [hp, setHp] = useState('')
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    if (hp) return
     setError('')
     setSubmitting(true)
 
@@ -95,6 +101,16 @@ export function Signup() {
           </div>
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+            <input
+              type="text"
+              name="company"
+              value={hp}
+              onChange={(e) => setHp(e.target.value)}
+              tabIndex={-1}
+              autoComplete="off"
+              aria-hidden="true"
+              className="absolute left-[-9999px] h-0 w-0 opacity-0"
+            />
             {role === 'resident' ? (
               <>
                 <input
