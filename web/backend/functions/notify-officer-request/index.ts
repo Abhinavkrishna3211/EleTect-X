@@ -43,8 +43,13 @@ Deno.serve(async (req) => {
   const { data: admins } = await db.from("profiles").select("id").eq("role", "admin");
   let notified = 0;
   for (const a of admins ?? []) {
-    const { data: u } = await db.auth.admin.getUserById(a.id);
-    const email = u?.user?.email;
+    let email: string | undefined;
+    try {
+      const { data: u } = await db.auth.admin.getUserById(a.id);
+      email = u?.user?.email;
+    } catch (_e) {
+      continue;   // lookup failed for this admin only; don't 500 and drop the rest of the batch
+    }
     if (!email) continue;
     if (await sendEmail(email, subject, body)) notified++;
   }
