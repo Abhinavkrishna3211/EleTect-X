@@ -1,10 +1,16 @@
-# Supabase CLI project config — used only to deploy the edge function.
-# The function's source of truth stays at web/backend/functions/send-alert; the
-# entrypoint override below points the CLI there without moving the file into the
-# default supabase/functions/ layout.
+# Supabase CLI project config — used only to deploy edge functions.
+# Each function's source of truth stays at web/backend/functions/<name>; the entrypoint
+# override below points the CLI there without moving files into the default
+# supabase/functions/ layout.
 #
-# Deploy from web/backend:
+# Deploy from web/backend (repeat per function, swapping the name):
 #   supabase functions deploy send-alert --project-ref zjgafdozlrhecommmztq --use-api --workdir web/backend
+#   supabase functions deploy notify-officer-request --project-ref zjgafdozlrhecommmztq --use-api --workdir web/backend
+#
+# This file is never pushed with `supabase config push` — that command replaces the entire
+# live project config (Auth, API, etc.), not just functions, and this file doesn't capture
+# the live project's Auth settings. Function entries above are only consumed locally by
+# `functions deploy`.
 
 project_id = "zjgafdozlrhecommmztq"
 
@@ -12,3 +18,8 @@ project_id = "zjgafdozlrhecommmztq"
 enabled = true
 verify_jwt = true
 entrypoint = "../functions/send-alert/index.ts"
+
+[functions.notify-officer-request]
+enabled = true
+verify_jwt = true
+entrypoint = "../functions/notify-officer-request/index.ts"
