@@ -115,6 +115,34 @@ to break the policies.
 **Exit criteria:** a documented, executed adversarial checklist per table/role, not just a read of
 the policy definitions.
 
+**Status: met, 11 Jul.** Built `web/frontend/scripts/day3-rls-adversarial.mjs` — live REST/RPC
+calls against the production project as (1) true anonymous (anon key only) and (2) a throwaway
+signup at each of `public` and `officer` role, not UI clicks. Two clean runs, 30/30 and 10/10 (a
+third run mid-session mixed public- and officer-role results together because the role-promotion
+SQL was run before that execution rather than between sections — a sequencing artifact of manual
+testing, not a regression; the immediately preceding clean run is the real record for public-role
+behaviour). Full result: anon blocked from `profiles`/`nodes`/`events`/`health`/`maintenance`/
+`alerts`/`officer_requests`/`demo_node_snapshot`, anon allowed only on `public_area_risk` (by
+design); `public` role reads only its own `profiles` row, never another user's `phone`/`lat`/`lng`,
+cannot PATCH its own `role` to `admin` (column-grant restriction holds), sees an empty
+`officer_requests` (no request filed), and is rejected by all five RPCs; `officer` correctly reads
+every staff table, cannot write `nodes` directly (admin-only), cannot call
+`approve_officer_request`/`reject_officer_request` (admin-only), and can run Demo Mode
+(`is_staff()`, not admin-gated) — its test-run demo event was cleared via `reset_demo_data()`
+immediately after, no leftover row in production.
+
+One real finding, fixed live: `demo_touch_node()` had no internal `is_staff()` check at all — unlike
+`run_demo_scenario`/`reset_demo_data`, it relied entirely on `revoke execute ... from public,
+authenticated` in `schema.sql` as its only defense. The first live run proved that revoke was not
+actually in effect on the production database (anon called it successfully, HTTP 204), despite the
+statement being correct in source — the grant had drifted out of sync with the file at some point.
+Fixed two ways: re-ran the revoke directly against the live project, and added an `is_staff()` guard
+inside the function body itself (`schema.sql` and `migrations/0001_phase4c.sql` both updated) so it
+no longer depends on the grant alone. Re-verified live afterward — clean rejection. No ADR filed;
+this closes a gap in an existing security-definer function rather than changing an architectural
+decision. Follow-up housekeeping: delete the throwaway `day3-adversarial-*@gmail.com` test account
+from Authentication → Users once convenient — non-urgent, it has no elevated access left.
+
 ## Day 4 (Tue) — `web/ingest` + ChirpStack, proven without hardware
 
 This is the piece that lets the web side be ready the moment a node ships its first uplink —
