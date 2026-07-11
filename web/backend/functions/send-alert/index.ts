@@ -137,6 +137,12 @@ async function deliver(to: Recipient, msg: AlertMessage, eventId: number | null)
     });
     if (ok) return ch.name;
   }
+  // No enabled channel had a reachable address (or every attempt bounced). Record the
+  // terminal outcome so a recipient who received nothing is queryable as `undeliverable`,
+  // distinct from a single channel attempt that was logged `failed` above.
+  await db.from("alerts").insert({
+    event_id: eventId, channel: null, recipient: to.email ?? to.phone ?? to.id, status: "undeliverable",
+  });
   return null;
 }
 
@@ -176,8 +182,14 @@ Deno.serve(async (req) => {
   let sent = 0;
   const byChannel: Record<string, number> = {};
   for (const p of byId.values()) {
-    const { data: u } = await db.auth.admin.getUserById(p.id);
-    const to: Recipient = { id: p.id, phone: p.phone, email: u?.user?.email ?? null };
+    let email: string | null = null;
+    try {
+      const { data: u } = await db.auth.admin.getUserById(p.id);
+      email = u?.user?.email ?? null;
+    } catch (_e) {
+      continue;   // lookup failed for this recipient only; don't 500 and drop the rest of the batch
+    }
+    const to: Recipient = { id: p.id, phone: p.phone, email };
     const via = await deliver(to, msg, ev.id ?? null);
     if (via) { sent++; byChannel[via] = (byChannel[via] ?? 0) + 1; }
   }
