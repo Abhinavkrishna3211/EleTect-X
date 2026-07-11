@@ -612,7 +612,7 @@ begin
       solar_w = s.solar_w, last_seen = s.last_seen
     from demo_node_snapshot s where n.id = s.node_id;
   get diagnostics v_nodes = row_count;
-  delete from demo_node_snapshot;
+  delete from demo_node_snapshot where true;
 
   return jsonb_build_object(
     'events', v_events, 'health', v_health,
