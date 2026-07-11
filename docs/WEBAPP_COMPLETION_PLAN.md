@@ -73,6 +73,26 @@ rate-limited and not meant for production signups.
 **Exit criteria:** a real external email address can sign up, confirm, and reset password without
 hitting Supabase's default sender limits.
 
+**Status: partially met, 11 Jul.** Two of three items landed and are live-provable today: (1)
+`notify-officer-request` — net new, emails every admin the moment an officer signup lands in
+`officer_requests` (nothing previously did this; `OfficerApprovals` was read-only/poll-only) —
+reuses Day 1's Resend secrets, deployed the same way as `send-alert`. (2) The public signup form
+now has a honeypot field silently rejecting bot-shaped submissions, layered under Supabase's
+existing per-IP sign-up rate limit; documented gap: doesn't stop a targeted direct API call, that
+needs Turnstile (deferred, no new external account opened this session).
+
+Item (3), Auth's own SMTP (signup confirmation/password reset/magic link), is **staged but not
+activated**: discovered mid-session that Resend's SMTP relay — unlike its HTTP API used by
+`send-alert` — refuses to send from an unverified domain at all, and the user has none yet.
+Turning SMTP on now with a still-unverified from-address risks breaking the currently-working
+Forgot Password flow for real users, unacceptable for a project in real DFO-adjacent use. Also
+confirmed `supabase config push` pushes the *entire* local `config.toml` with no `config pull` to
+seed it first — our file has never captured the live project's `site_url`/redirect URLs, so a push
+would silently reset them. Auth SMTP is Dashboard-only, documented step by step in
+`web/backend/README.md`'s "Auth transactional email" section, ready to execute the moment a
+domain is verified. The confirmation-email + password-reset live-proof carries forward to a
+follow-up session — not silently rolled into Day 3's scope.
+
 ## Day 3 (Mon) — RLS/RBAC adversarial pass
 
 "RLS/RBAC must hold under real misuse, not just happy-path testing" — CLAUDE.md, verbatim. This
