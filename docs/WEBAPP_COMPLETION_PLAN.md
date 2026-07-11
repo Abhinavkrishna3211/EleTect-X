@@ -143,6 +143,45 @@ this closes a gap in an existing security-definer function rather than changing 
 decision. Follow-up housekeeping: delete the throwaway `day3-adversarial-*@gmail.com` test account
 from Authentication → Users once convenient — non-urgent, it has no elevated access left.
 
+## Pre-Day 4 checkpoint — full-system audit
+
+Requested before starting Day 4, to make sure three days of backend changes hadn't introduced
+regressions elsewhere and that hardware-adjacent work wasn't starting on a shaky base.
+
+**Result: clean.** `device/mcu`, `device/mpu`, and `ml/` are still empty scaffolds (`.gitkeep` +
+`README.md` only) — consistent with `CONTEXT.md`'s sequencing (software first, hardware sourcing in
+progress), reported as N/A rather than failing. `web/frontend` builds clean (`tsc -b && vite build`,
+0 errors) and lints clean (0 errors, 3 dev-only `react-refresh` warnings); one perf advisory (736 kB
+main chunk, over Vite's 500 kB code-split threshold) flagged for before the public site goes live,
+not blocking. `web/backend`'s security-definer sweep confirmed the `demo_touch_node()` bug class
+doesn't recur anywhere else — every definer function gates on `is_staff()`/`is_admin()`
+independently of any grant. No committed secrets, `.gitignore` correct; removed one harmless stray
+untracked `supabase/.temp/` artifact at the repo root and broadened the ignore rule.
+
+Two real (minor) gaps found and fixed, both about alert-pipeline audit completeness rather than a
+live vulnerability:
+
+1. `send-alert`'s `deliver()` silently dropped a recipient with no address on any enabled channel —
+   no `alerts` row at all, only failed sends were logged. Fixed: writes a `status='undeliverable',
+   channel=null` row before returning. **Live-verified**: with `CHANNEL_EMAIL` toggled off (SMS/
+   WhatsApp already off) against a real high-priority event, all recipients correctly logged
+   `undeliverable` — confirmed via direct SQL check against the live `alerts` table, secret restored
+   immediately after, test event deleted.
+2. `getUserById` was unguarded inside both fan-out loops (`send-alert`, `notify-officer-request`); a
+   throw would 500 the handler and silently skip every remaining recipient. Fixed: wrapped
+   per-iteration so one bad lookup skips only that recipient. **Unit-tested** (not live-testable — a
+   nonexistent-but-valid UUID returns `{data:null,error}`, it doesn't throw; only a genuine network/
+   timeout rejection does): `send-alert`'s fan-out logic was extracted into `fanout.ts` for
+   testability (`index.ts` stays the thin HTTP entrypoint), with two passing Deno tests covering the
+   lookup-failure-skips-one-recipient case and the undeliverable-row case. `deno check` against real
+   `supabase-js` types confirmed the refactor was behavior-preserving before it was committed and
+   redeployed. `notify-officer-request`'s equivalent guard is fixed but not yet unit-tested (its
+   logic isn't extracted) — flagged as an optional follow-up, good candidate for Day 6.
+
+Commits: `2e9f520` (chore, `.temp` ignore), `06bfd56` (fix, send-alert undeliverable + guard),
+`26fde56` (fix, notify-officer-request guard), `64a572e` (test, fanout.ts extraction + Deno tests).
+Both edge functions redeployed after the fixes; live proof re-run against the redeployed code.
+
 ## Day 4 (Tue) — `web/ingest` + ChirpStack, proven without hardware
 
 This is the piece that lets the web side be ready the moment a node ships its first uplink —
