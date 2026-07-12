@@ -1,4 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { supabase } from '@/lib/supabase'
+import { deriveAreaRisk, riskDisplay, type AreaRiskRow } from '@/lib/risk'
 
 const howItWorks = [
   { n: '1 · Detection', body: 'The network senses and confirms an animal near your area.' },
@@ -12,6 +14,24 @@ export function StaySafe() {
   const [phone, setPhone] = useState('')
   const [village, setVillage] = useState('')
   const [error, setError] = useState('')
+  const [riskRows, setRiskRows] = useState<AreaRiskRow[] | null>(null)
+
+  // public_area_risk is granted to anon precisely so this page can show a real
+  // figure to a resident who has not signed in. Aggregate counts only.
+  useEffect(() => {
+    let cancelled = false
+    supabase
+      .from('public_area_risk')
+      .select('day, detections')
+      .then(({ data, error }) => {
+        if (!cancelled && !error) setRiskRows((data ?? []) as AreaRiskRow[])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const display = riskRows ? riskDisplay(deriveAreaRisk(riskRows)) : null
 
   return (
     <section className="mx-auto max-w-2xl px-4 py-14 sm:px-6 md:py-24 lg:px-8">
@@ -25,16 +45,24 @@ export function StaySafe() {
       </p>
 
       <div className="border-brand-fg/10 mb-4 flex flex-wrap items-center gap-4.5 rounded-2xl border bg-[#0B0D0B] p-6">
-        <div className="border-brand-green grid h-14.5 w-14.5 shrink-0 place-items-center rounded-full border-2 bg-[rgba(95,169,124,0.12)] text-2xl">
-          🟢
+        <div
+          className={`grid h-14.5 w-14.5 shrink-0 place-items-center rounded-full border-2 text-2xl ${
+            display ? display.border : 'border-brand-fg/20'
+          }`}
+          style={{ background: display?.background }}
+        >
+          {display ? display.dot : '⋯'}
         </div>
         <div className="min-w-50 flex-1">
           <p className="text-brand-fg/55 mb-1 font-mono text-xs font-semibold tracking-[0.12em]">
             CURRENT AREA RISK · KOTHAMANGALAM SECTOR
           </p>
-          <p className="text-brand-green font-sans text-[19px] font-semibold">Low · No wildlife detected near villages</p>
+          <p
+            className={`font-sans text-[19px] font-semibold ${display ? display.color : 'text-brand-fg/45'}`}
+          >
+            {display ? display.label : 'Checking current area status…'}
+          </p>
         </div>
-        <span className="text-brand-fg/40 font-mono text-[11.5px] font-medium">Updated 2 min ago</span>
       </div>
 
       <div className="mb-9 grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3">
