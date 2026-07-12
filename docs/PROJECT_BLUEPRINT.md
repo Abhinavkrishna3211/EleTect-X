@@ -77,38 +77,7 @@ Fable workflow: (1) generate all pages with realistic placeholder data; (2) **ex
 
 **Backend build order:** Supabase project → schema + RLS → seed demo data (so the dashboard looks alive for the contest) → ingest bridge (ChirpStack MQTT → Supabase) → edge function for alert fan-out (WhatsApp/SMS) → OTA metadata table.
 
-## 6. VS Code environment (isolated from your other projects)
-- **Open via `EleTect-X.code-workspace`** (a multi-root workspace) — settings/extensions apply only to this workspace, never globally.
-- **Recommended extensions** are pinned in `.vscode/extensions.json` (VS Code will prompt to install *for this workspace*): Python + Pylance + **Ruff**, C/C++ + **PlatformIO** (STM32), ESLint + **Prettier** + Tailwind (frontend), **GitLens**, **Error Lens**, Markdown All-in-One, YAML/TOML, Docker.
-- **Formatters/linters:** Ruff (Python), Prettier+ESLint (web), clang-format (firmware). `format on save` is set per-language in `.vscode/settings.json` (workspace-scoped).
-- **Testing:** pytest (device/mpu, ml), Vitest (web/frontend), PlatformIO unit tests (device/mcu).
-- **Git/GitHub:** trunk-based + PR template + CI (`.github/workflows/ci.yml`) + branch protection.
-- **CLI tools:** `gh` (GitHub), `supabase` CLI, `pio` (PlatformIO), `ruff`, `pnpm`/`npm`, `mosquitto_sub` (test MQTT).
-
-## 7. Claude Code workflow (max quality, min tokens/limits)
-**Context discipline (biggest token saver):**
-- `CONTEXT.md` + `CLAUDE.md` are small and always loaded; **don't** paste large docs — reference paths.
-- **Load only the module you're touching.** Use the **explorer subagent** (Haiku, read-only) for wide searches so file dumps never enter the main context.
-- **`/compact` after each task; start a fresh session per feature.** Commit, then clear.
-- Keep the working set small: one subsystem per session (device/mcu *or* device/mpu *or* web/frontend).
-
-**Model & effort routing:**
-| Task | Model | Reasoning effort |
-|---|---|---|
-| Boilerplate, tests, commit messages, formatting, log parsing | **Haiku 4.5** | low |
-| ~90% of coding (Python modules, React components, firmware features, refactors) | **Sonnet 5** | medium |
-| Architecture, cross-processor race conditions, hard debugging, AI methodology, fusion/bandit math | **Opus 4.8** | high/max |
-| Marketing/website copy, documentation prose | **Fable 5** | low |
-
-**Loops:**
-- *Implementation:* state the task + acceptance criteria + the one file/module + "follow CONTEXT.md" → implement → run tests → `/compact` → commit.
-- *Review:* run the **reviewer subagent** on the diff before merge (correctness, safety, power/latency, secrets).
-- *Debugging:* reproduce → isolate (logs/tests) → hypothesis → fix → regression test. Escalate to Opus only when stuck.
-- *Task decomposition:* break features into ≤½-day units with explicit acceptance criteria (mirror them as GitHub issues).
-
-**Never** let the model reference itself/AI in code, comments, commits, or docs.
-
-## 8. Week-by-week execution roadmap (today → 30 Aug)
+## 6. Week-by-week execution roadmap (today → 30 Aug)
 
 | Window | Focus | Milestones / exit criteria |
 |---|---|---|

@@ -3,9 +3,14 @@ import { Link, useNavigate } from 'react-router-dom'
 import { AuthLayout, authButtonClass, authErrorMessage, authInputClass } from '@/layouts/AuthLayout'
 import { supabase } from '@/lib/supabase'
 
+// Illustrative role hints only. Nothing here may name an address that actually
+// exists in the project: the Forest Officer entry used to list officer@eletect.in,
+// which is a real officer-role account (the QA scripts sign in as it), so the
+// public login page was handing every visitor a confirmed-valid staff username —
+// half the credential pair, no guessing required. Verify against the real user
+// list before adding an entry here.
 const demoAccounts = [
   { label: 'Admin', email: 'admin@eletect.in' },
-  { label: 'Forest Officer', email: 'officer@eletect.in' },
   { label: 'Public resident', email: 'resident@eletect.in' },
 ]
 

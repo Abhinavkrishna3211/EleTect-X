@@ -3,6 +3,10 @@ CLAUDE.md
 .claude/
 .cursor/
 *.local.md
+docs/internal/
+docs/CLAUDE_CODE_BUILD_BRIEF.md
+docs/FABLE_BRIEF.md
+docs/WEBAPP_EDITS_AND_PLAN.md
 
 # --- Python ---
 __pycache__/
