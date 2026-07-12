@@ -14,9 +14,14 @@ for d in device/mcu device/mpu ml web/frontend web/backend web/ingest hardware/b
 done
 echo "   OK"
 
-echo "==> 3. Confirm dev-tool config stays local (never committed)"
-grep -q '^CLAUDE.md' .gitignore && grep -q '^.claude/' .gitignore && echo "   .gitignore OK" \
-  || echo "   WARNING: add CLAUDE.md and .claude/ to .gitignore"
+echo "==> 3. Confirm local dev-tool config stays local (never committed)"
+# Machine-local tool config and working notes are excluded via .git/info/exclude,
+# which git never commits — so the tracked tree names no local tooling at all.
+if [ -s .git/info/exclude ] && grep -qvE '^\s*(#|$)' .git/info/exclude; then
+  echo "   local excludes configured (.git/info/exclude) — OK"
+else
+  echo "   WARNING: add machine-local tool config + working notes to .git/info/exclude"
+fi
 
 echo "==> 4. Git init + first commit"
 if [ ! -d .git ]; then git init -q; fi

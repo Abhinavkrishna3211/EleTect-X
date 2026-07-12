@@ -1,6 +1,6 @@
 # EleTect X — Project Execution Blueprint
 
-The plan we follow from today to contest submission. Read `CONTEXT.md` first. This document covers: repo architecture, documentation, software architecture, development workflow, backend/dashboard (incl. the time-boxed Fable build), VS Code, the Claude Code workflow, and the week-by-week roadmap.
+The plan we follow from today to contest submission. Read `CONTEXT.md` first. This document covers: repo architecture, documentation, software architecture, development workflow, backend/dashboard (incl. the time-boxed frontend design-prototype build), and the week-by-week roadmap.
 
 ---
 
@@ -13,7 +13,7 @@ The plan we follow from today to contest submission. Read `CONTEXT.md` first. Th
    git checkout -b develop && git push -u origin develop
    ```
 2. **Protect `main`** (GitHub → Settings → Branches → require PR + CI).
-3. **Start the Fable frontend build** (§5) — the Fable window closes **12 Jul**; this is the single most time-critical task.
+3. **Start the frontend design-prototype build** (§5) — that tooling window closes **12 Jul**; this is the single most time-critical task.
 4. Confirm hardware orders (camera B0CQ4QDCXN, geophone, speaker, LEDs, IR, power) per `docs/hardware/bom.md`.
 
 ---
@@ -22,7 +22,7 @@ The plan we follow from today to contest submission. Read `CONTEXT.md` first. Th
 Polyglot monorepo (one repo = one product, atomic cross-cutting changes, one CI). Structure and rationale are in the tree + `docs/README.md`. Key choices:
 - **Monorepo over many repos:** `device/mcu` ↔ `device/mpu` ↔ `web/backend` ↔ `web/frontend` change together; a monorepo keeps them in lockstep and simplifies CI/onboarding.
 - **`docs/` as first-class:** `CONTEXT.md` (canonical) + ADRs (the "why") prevent architecture drift.
-- **Local dev-tool config git-ignored** (`CLAUDE.md`, `.claude/`) → the committed repo reads as pure human engineering.
+- **Local dev-tool config kept out of the tracked tree** (via `.git/info/exclude`, which is not committed) → the repo reads as pure human engineering.
 - **Branch model:** trunk-based — `main` (protected, deployable) ← `develop` ← short-lived `feat/…`, `fix/…`. Conventional Commits → automated changelog/versioning.
 
 ## 2. Documentation
@@ -49,7 +49,7 @@ See `docs/README.md` for the hierarchy and the consolidation map (migrate the re
 Order work by the **critical path to a field-deployable node + a demo**, maximising parallelism.
 
 **Buildable NOW (no missing hardware):**
-- Backend schema + Supabase + ingest + **dashboard/marketing (Fable, §5)** — 100% now.
+- Backend schema + Supabase + ingest + **dashboard/marketing (design prototype, §5)** — 100% now.
 - LoRaWAN stack: ChirpStack + SenseCAP (IN865) + Grove E5 join/uplink (you have E5 + gateway).
 - STM32 skeleton: state machine, power/load-switch control, LoRa uplink, Bridge RPC, actuator GPIO (drive LEDs/amp with what you have: TPA3116 + a test speaker/LED).
 - Geophone front-end **on the bench** using the **ADS1115 + INA333 you already own** as a stand-in ADC to prototype STA/LTA + feature extraction, then port to the STM32 internal ADC when validated. *(ADS1115 stays a bench tool, not in the final node.)*
@@ -61,19 +61,20 @@ Order work by the **critical path to a field-deployable node + a demo**, maximis
 
 **Critical path:** camera+geophone arrival → node integration → bench validation → field test → footage → submission. Everything off the critical path (backend, dashboard, AI training, firmware skeleton) runs in parallel now.
 
-## 5. Backend, dashboard & the Fable build (time-critical — window closes 12 Jul)
+## 5. Backend, dashboard & the design-prototype build (time-critical — window closes 12 Jul)
 
 **Stack (chosen for speed + professionalism + free hosting):** **Supabase** (auth + Postgres + realtime + storage + edge functions) + **React PWA** (Vite/Tailwind/shadcn) + **Vercel** hosting. Rationale: Supabase gives production-grade auth/DB/realtime with almost no backend code (fastest path to a functional, secure dashboard on a deadline); Vercel gives instant professional hosting + CI previews.
 
-**Use Fable to generate the frontend before access expires.** Fable produces the polished React UI fast; you then wire it to Supabase and host on Vercel. Prompt Fable for a **single cohesive product**:
+**Build the visual spec as a design prototype first, then rebuild it for real.** The prototype settles layout, palette, and motion quickly; the production app in `web/frontend/` is then written against it and wired to Supabase. The prototype is committed under `docs/design-reference/` and remains the pixel reference.
 
-Pages to generate (give Fable this brief):
+Scope of the prototype:
+
 - **Public / marketing:** Home (hero: "Protecting farms, forests, and the future"), How It Works, Product / Technology, Impact & Achievements, Field Deployment, Contact, and a clean nav/footer. Modern, high-end, dark-forest palette, subtle motion, mobile-first.
 - **Auth:** Login / role-based (Ranger, Officer, Admin).
 - **Dashboard (ranger-first, dead simple):** Live **map** of nodes (status colours), **Alerts** feed (confirmed events, confidence, thumbnail, direction, acknowledge button), **Node detail** (battery/solar/last-seen/firmware), **Event replay** (timeline + media), **Analytics** (events by time/species/weather; hotspot heatmap), **Maintenance** queue (predictive), **Fleet health**, **Settings/OTA status**.
 - **Design system:** one theme, large tap targets, offline-friendly, "reads like a funded product."
 
-Fable workflow: (1) generate all pages with realistic placeholder data; (2) **export the React code into `web/frontend/`**; (3) replace placeholders with the **Supabase client** (tables: `nodes`, `events`, `health`, `alerts`, `users`); (4) deploy to **Vercel**; (5) point a domain later. Do the *generation + export* before 12 Jul; the Supabase wiring can happen after.
+Workflow: (1) build every page against realistic placeholder data; (2) **rebuild it as a real React app in `web/frontend/`**, matching the prototype; (3) replace placeholders with the **Supabase client** (tables: `nodes`, `events`, `health`, `alerts`, `users`); (4) deploy to **Vercel**; (5) point a domain later. Settle the *design* before 12 Jul; the Supabase wiring happens after.
 
 **Backend build order:** Supabase project → schema + RLS → seed demo data (so the dashboard looks alive for the contest) → ingest bridge (ChirpStack MQTT → Supabase) → edge function for alert fan-out (WhatsApp/SMS) → OTA metadata table.
 
@@ -81,7 +82,7 @@ Fable workflow: (1) generate all pages with realistic placeholder data; (2) **ex
 
 | Window | Focus | Milestones / exit criteria |
 |---|---|---|
-| **Now – 12 Jul** | Repo + **Fable frontend** + backend start | Repo pushed & protected; Fable pages generated + **exported to `web/frontend/`**; Supabase project + schema; hardware orders confirmed |
+| **Now – 12 Jul** | Repo + **frontend design prototype** + backend start | Repo pushed & protected; every page designed + **rebuilt into `web/frontend/`**; Supabase project + schema; hardware orders confirmed |
 | **12 – 21 Jul** | Backend wiring + firmware skeleton + AI bootstrap | Dashboard live on Vercel with seeded data; Supabase auth + RLS; ChirpStack + Grove E5 join/uplink working; STM32 state machine + LoRa uplink + actuator control on bench; vision detector training on public data |
 | **22 Jul – 1 Aug** | Integration as hardware lands | Geophone front-end (INA333→STM32 ADC) + STA/LTA + footfall model; IMX462 capture + IR + detector on device; DFPlayer→TPA3116→horn deterrence; log-odds fusion + bandit loop; end-to-end **detect→confirm→deter→learn** on the bench; **freeze MVP by ~1 Aug** |
 | **1 – 6 Aug** | Hardening + power + enclosure | PETG enclosure assembled; power/solar + protection validated; conformal coat; reliability + power-meter capture; build a spare node |

@@ -4,8 +4,8 @@
  * <image-slot> — user-fillable image placeholder.
  *
  * Drop this into a deck, mockup, or page wherever a design needs an image.
- * You control the slot's shape; it sizes to its container by default. When the search_stock_photos tool
- * is available, prefill the slot by default — write the photo's URL into
+ * You control the slot's shape; it sizes to its container by default. When a stock-photo search is
+ * available, prefill the slot by default — write the photo's URL into
  * src (with credit/credit-href); the user can still fill or replace it
  * by dragging an image file onto it (or clicking to browse). The dropped
  * image persists across reloads via a .image-slots.state.json sidecar —
@@ -36,7 +36,7 @@
  *                crop persists alongside the image in the sidecar.
  *   placeholder  Empty-state caption.                      (default 'Drop an image')
  *   src          Optional initial/fallback image URL. Prefill it with a real
- *                photo via search_stock_photos when that tool is available
+ *                photo via a stock-photo search when one is available
  *                (set credit/credit-href from the result). A user drop
  *                overrides it; clearing the drop reveals src again.
  *   credit       Attribution text shown as a small overlay at the
@@ -99,11 +99,11 @@
   //  - rendered credit links pointing at unsplash.com get the referral
   //    params appended when absent (credit-href values live in page
   //    content that can't be edited after the fact).
-  // Keep the utm_source value in sync with UTM_SOURCE in
-  // platform/web-agent/unsplash.ts — this file is a project-local
-  // artifact and cannot import it (equality is pinned by tests).
+  // Keep the utm_source value in sync with the referral source used
+  // elsewhere in the project — this file is a standalone artifact and
+  // cannot import a shared constant.
   const UNSPLASH_HOMEPAGE_HREF =
-    'https://unsplash.com/?utm_source=claude_design&utm_medium=referral';
+    'https://unsplash.com/?utm_source=eletect_x&utm_medium=referral';
   // Host rule mirrors the hotlink validator that admits Unsplash srcs into
   // pages in the first place (cdn$ in unsplash.ts: apex or any subdomain)
   // — Unsplash+ results serve from plus.unsplash.com, not just images.*,
@@ -133,7 +133,7 @@
         return href;
       }
       if (!u.searchParams.has('utm_source')) {
-        u.searchParams.set('utm_source', 'claude_design');
+        u.searchParams.set('utm_source', 'eletect_x');
       }
       if (!u.searchParams.has('utm_medium')) {
         u.searchParams.set('utm_medium', 'referral');
@@ -375,9 +375,8 @@
     // no credit attribute — rendering the photo uncredited is the terms
     // violation, so the photo must not appear at all.
     // Calm and neutral on purpose (review feedback): the tile informs the
-    // user; the fix instructions are machine-facing (usage docblock, tool
-    // description, and the turn-end scan's bounce copy name the attributes
-    // for the agent).
+    // user; the fix instructions are machine-facing (the usage docblock
+    // above names the attributes).
     '.attr-error{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;' +
     '  justify-content:center;gap:6px;text-align:center;padding:12px;box-sizing:border-box;' +
     '  background:#f2f1ef;color:#6e6c66;user-select:none;' +
@@ -959,10 +958,10 @@
       this.toggleAttribute('data-editable', editable);
       this._sub.style.display = editable ? '' : 'none';
 
-      // Content. The sidecar is also writable by the agent's write_file
-      // tool, so its value isn't guaranteed canvas-originated — only accept
+      // Content. The sidecar is also writable by the host's file-write
+      // bridge, so its value isn't guaranteed canvas-originated — only accept
       // data:image/ URLs from it. The `src` attribute is author-controlled
-      // (Claude wrote it into the HTML) so it passes through unchanged.
+      // (authored directly in the HTML) so it passes through unchanged.
       let stored = this.id ? getSlot(this.id) : this._local;
       if (stored && stored.u && !/^data:image\//i.test(stored.u)) stored = null;
       const srcAttr = this.getAttribute('src') || '';
@@ -983,7 +982,7 @@
       // the photo uncredited is the Unsplash-terms violation itself. The
       // error tile replaces the photo until the credit is written. A
       // user-dropped image is the user's own content and always renders.
-      // Trimmed: credit is agent/user-editable content, and a whitespace-
+      // Trimmed: credit is author/user-editable content, and a whitespace-
       // only value must count as missing — otherwise it would suppress the
       // error tile AND render an empty credit box (no text, no links),
       // exactly the unattributed state this gate exists to prevent.
