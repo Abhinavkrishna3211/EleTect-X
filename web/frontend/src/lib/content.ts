@@ -1,3 +1,5 @@
+import { BellRing, Eye, Network, Siren, Sun, Waves } from 'lucide-react'
+
 // Shared copy and image data for the public marketing site.
 // Mirrors the structure of the design reference's renderVals() data block.
 
@@ -184,32 +186,32 @@ export const otherWildlife = [
 
 export const techPillars = [
   {
-    icon: '🌍',
+    icon: Waves,
     title: 'Senses through the ground and sound',
     body: 'Detection begins before the animal is visible, footfall vibration and acoustic signatures work in rain, fog, and total darkness.',
   },
   {
-    icon: '👁',
+    icon: Eye,
     title: 'Night-capable AI vision',
     body: 'A second, independent confirmation step eliminates the false alarms that destroy trust in traditional systems.',
   },
   {
-    icon: '🎲',
+    icon: Siren,
     title: 'Adaptive, non-habituating deterrence',
     body: 'Light and sound patterns change every encounter and never repeat. The system verifies the animal actually left, and learns what works.',
   },
   {
-    icon: '🕸',
+    icon: Network,
     title: 'Networked intelligence',
     body: 'Nodes coordinate to open safe corridors and steer herds away from villages, shared awareness, not isolated gadgets.',
   },
   {
-    icon: '📡',
+    icon: BellRing,
     title: 'Instant human early-warning',
     body: 'Officers and opted-in residents are alerted within seconds, SMS, WhatsApp, email, or push, chosen by configuration.',
   },
   {
-    icon: '☀️',
+    icon: Sun,
     title: 'Fully offline, solar-powered',
     body: 'Every node detects, decides, and deters with no internet at all. Connectivity adds coordination; it is never required to act.',
   },

@@ -57,12 +57,13 @@ interface DecisionCardProps {
   event: EventRow | null
   // Slot for the confidence radar, added alongside the fused summary.
   radar?: React.ReactNode
+  className?: string
 }
 
-export function DecisionCard({ event, radar }: DecisionCardProps) {
+export function DecisionCard({ event, radar, className = '' }: DecisionCardProps) {
   if (!event || !event.fusion) {
     return (
-      <div className="border-brand-fg/10 rounded-2xl border bg-[#0B0D0B] p-4.5">
+      <div className={`border-brand-fg/10 rounded-2xl border bg-[#0B0D0B] p-4.5 ${className}`}>
         <h3 className="m-0 font-sans text-sm font-semibold">Why the AI acted</h3>
         <p className="text-brand-fg/40 m-0 mt-3 font-mono text-[12px]">
           No fused decision to explain yet.
@@ -80,7 +81,7 @@ export function DecisionCard({ event, radar }: DecisionCardProps) {
   const fusedPct = fused != null ? Math.round(fused * 100) : null
 
   return (
-    <div className="border-brand-fg/10 rounded-2xl border bg-[#0B0D0B] p-4.5">
+    <div className={`border-brand-fg/10 rounded-2xl border bg-[#0B0D0B] p-4.5 ${className}`}>
       <div className="mb-3.5 flex flex-wrap items-center justify-between gap-2.5">
         <h3 className="m-0 font-sans text-sm font-semibold">Why the AI acted · event {event.id}</h3>
         {event.outcome && (

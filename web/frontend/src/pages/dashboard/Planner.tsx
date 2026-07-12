@@ -169,59 +169,78 @@ export function Planner() {
         </p>
       </div>
 
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          onClick={() => setMode('draw')}
-          disabled={closed}
-          className={`rounded-full border px-3.5 py-1.5 font-sans text-[12.5px] font-semibold transition-colors disabled:opacity-40 ${
-            mode === 'draw' ? 'border-brand-gold text-brand-gold bg-[rgba(226,161,60,0.1)]' : 'border-brand-fg/15 text-brand-fg/60 hover:text-brand-fg'
-          }`}
-        >
-          Draw boundary
-        </button>
-        <button
-          onClick={() => setMode('cross')}
-          disabled={!closed}
-          className={`rounded-full border px-3.5 py-1.5 font-sans text-[12.5px] font-semibold transition-colors disabled:opacity-40 ${
-            mode === 'cross' ? 'border-brand-red text-brand-red bg-[rgba(226,91,74,0.1)]' : 'border-brand-fg/15 text-brand-fg/60 hover:text-brand-fg'
-          }`}
-        >
-          Mark crossings
-        </button>
-        {mode === 'draw' && !closed && points.length >= 3 && (
+      {/* Toolbar. Two labelled groups, boxed. It used to be one flat row of eight
+          pills split by a thin "·", so "Village boundary" (load a preset shape) sat
+          beside "Clear" (destroy your work) with nothing to say they were different
+          kinds of action. */}
+      <div className="flex flex-wrap items-stretch gap-2.5">
+        <div className="border-brand-fg/10 flex flex-wrap items-center gap-2 rounded-xl border bg-[#0B0D0B] px-3 py-2.5">
+          <span className="text-brand-fg/35 mr-0.5 font-mono text-[9.5px] font-semibold tracking-[0.1em]">
+            DRAWING
+          </span>
           <button
-            onClick={() => {
-              setClosed(true)
-              setMode('cross')
-            }}
-            className="border-brand-green text-brand-green rounded-full border bg-[rgba(95,169,124,0.1)] px-3.5 py-1.5 font-sans text-[12.5px] font-semibold"
+            onClick={() => setMode('draw')}
+            disabled={closed}
+            className={`rounded-full border px-3.5 py-1.5 font-sans text-[12.5px] font-semibold transition-colors disabled:opacity-40 ${
+              mode === 'draw'
+                ? 'border-brand-gold text-brand-gold bg-[rgba(226,161,60,0.1)]'
+                : 'border-brand-fg/15 text-brand-fg/60 hover:text-brand-fg'
+            }`}
           >
-            Close boundary
+            Draw boundary
           </button>
-        )}
-        <button
-          onClick={undo}
-          className="border-brand-fg/15 text-brand-fg/60 hover:text-brand-fg rounded-full border px-3.5 py-1.5 font-sans text-[12.5px] font-semibold"
-        >
-          Undo
-        </button>
-        <button
-          onClick={clearAll}
-          className="border-brand-fg/15 text-brand-fg/60 hover:text-brand-fg rounded-full border px-3.5 py-1.5 font-sans text-[12.5px] font-semibold"
-        >
-          Clear
-        </button>
-        <span className="text-brand-fg/25 mx-1">·</span>
-        {PRESETS.map((p) => (
           <button
-            key={p.label}
-            onClick={() => loadPreset(p.ring)}
-            className="border-brand-fg/15 text-brand-fg/60 hover:text-brand-fg rounded-full border px-3.5 py-1.5 font-sans text-[12.5px] font-semibold"
+            onClick={() => setMode('cross')}
+            disabled={!closed}
+            className={`rounded-full border px-3.5 py-1.5 font-sans text-[12.5px] font-semibold transition-colors disabled:opacity-40 ${
+              mode === 'cross'
+                ? 'border-brand-red text-brand-red bg-[rgba(226,91,74,0.1)]'
+                : 'border-brand-fg/15 text-brand-fg/60 hover:text-brand-fg'
+            }`}
           >
-            {p.label}
+            Mark crossings
           </button>
-        ))}
+          {mode === 'draw' && !closed && points.length >= 3 && (
+            <button
+              onClick={() => {
+                setClosed(true)
+                setMode('cross')
+              }}
+              className="border-brand-green text-brand-green rounded-full border bg-[rgba(95,169,124,0.1)] px-3.5 py-1.5 font-sans text-[12.5px] font-semibold"
+            >
+              Close boundary
+            </button>
+          )}
+          <button
+            onClick={undo}
+            className="border-brand-fg/15 text-brand-fg/60 hover:text-brand-fg rounded-full border px-3.5 py-1.5 font-sans text-[12.5px] font-semibold transition-colors"
+          >
+            Undo
+          </button>
+          {/* Destructive, so it reads red rather than sitting in the row looking like
+              every other pill. */}
+          <button
+            onClick={clearAll}
+            className="border-brand-red/30 text-brand-red/80 hover:border-brand-red hover:text-brand-red rounded-full border px-3.5 py-1.5 font-sans text-[12.5px] font-semibold transition-colors"
+          >
+            Clear
+          </button>
+        </div>
+
+        <div className="border-brand-fg/10 flex flex-wrap items-center gap-2 rounded-xl border bg-[#0B0D0B] px-3 py-2.5">
+          <span className="text-brand-fg/35 mr-0.5 font-mono text-[9.5px] font-semibold tracking-[0.1em]">
+            PRESET SHAPE
+          </span>
+          {PRESETS.map((p) => (
+            <button
+              key={p.label}
+              onClick={() => loadPreset(p.ring)}
+              className="border-brand-fg/15 text-brand-fg/60 hover:text-brand-fg rounded-full border px-3.5 py-1.5 font-sans text-[12.5px] font-semibold transition-colors"
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="h-[clamp(320px,46vw,460px)]">
@@ -254,9 +273,11 @@ export function Planner() {
               border="rgba(226,161,60,0.3)"
               bg="rgba(226,161,60,0.05)"
             />
+            {/* Separator is a slash, not a middot: "0 · 40" at tile size reads as the
+                decimal 0.40, which is exactly how it was being misread. */}
             <Tile
-              value={`${estimate.guardCount} · ${estimate.watchCount}`}
-              label="GUARD · WATCH"
+              value={`${estimate.guardCount} / ${estimate.watchCount}`}
+              label="GUARD / WATCH"
               hint={estimate.hasCrossings ? 'guard at crossings' : 'mark crossings for guard'}
               color="#5FA97C"
               border="rgba(95,169,124,0.3)"

@@ -13,11 +13,18 @@ const SECTOR_ZOOM = 13
 // steered away from. Free, no API key. The labels_under variant paints place
 // labels beneath Leaflet's overlay panes, so pins, the corridor line and the
 // herd marker are never crossed by a road name.
-const TILE_URL = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_labels_under/{z}/{x}/{y}{r}.png'
+const TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
 const TILE_ATTRIBUTION =
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
 
 const GOLD = '#E2A13C'
+// Planner marker language, one colour+shape per meaning:
+//   GUARD  — filled gold disc   (a node at a marked crossing)
+//   WATCH  — hollow green ring  (a node filling the span between crossings)
+//   VERTEX — small white dot    (a corner YOU drew, not a node)
+//   CROSSING — red diamond      (a herd path you marked)
+const PLANNER_GREEN = '#5FA97C'
+const PLANNER_VERTEX = '#E9EDE6'
 
 // fitBounds pads around a marker's anchor, but a pin is drawn well past it: the
 // id pill hangs ~27px below and ~17px either side. Pad for the drawn pin, not
@@ -134,6 +141,10 @@ export function LiveMap({
   cursor,
 }: LiveMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  // The planner is the only caller that passes a boundary or proposed nodes, so the
+  // legend can switch itself rather than every call site passing a mode flag.
+  const isPlanner = Boolean(boundary) || (plannedNodes?.length ?? 0) > 0 || (crossings?.length ?? 0) > 0
+
   const mapRef = useRef<L.Map | null>(null)
   const markersRef = useRef<Map<string, L.Marker>>(new Map())
   // Last rendered pin html per node. Re-setting an identical icon would swap the
@@ -356,9 +367,9 @@ export function LiveMap({
       const first = i === 0 && !boundary.closed
       L.circleMarker(p, {
         radius: first ? 5 : 3.5,
-        color: GOLD,
+        color: PLANNER_VERTEX,
         weight: first ? 2 : 1.5,
-        fillColor: first ? '#070D0A' : GOLD,
+        fillColor: first ? '#070D0A' : PLANNER_VERTEX,
         fillOpacity: 1,
         interactive: false,
       }).addTo(group)
@@ -377,9 +388,12 @@ export function LiveMap({
     const group = L.layerGroup().addTo(map)
     for (const pn of plannedNodes) {
       const guard = pn.kind === 'guard'
-      const html = `<span style="display:block;width:12px;height:12px;border-radius:50%;border:2px solid ${GOLD};background:${guard ? GOLD : 'transparent'};box-shadow:0 0 6px rgba(226,161,60,0.6)"></span>`
+      const size = guard ? 14 : 11
+      const html = guard
+        ? `<span style="display:block;width:14px;height:14px;border-radius:50%;border:2px solid ${GOLD};background:${GOLD};box-shadow:0 0 8px rgba(226,161,60,0.75)"></span>`
+        : `<span style="display:block;width:11px;height:11px;border-radius:50%;border:2px solid ${PLANNER_GREEN};background:transparent;box-shadow:0 0 5px rgba(95,169,124,0.5)"></span>`
       L.marker([pn.lat, pn.lng], {
-        icon: L.divIcon({ html, className: 'et-planned-pin', iconSize: [12, 12], iconAnchor: [6, 6] }),
+        icon: L.divIcon({ html, className: 'et-planned-pin', iconSize: [size, size], iconAnchor: [size / 2, size / 2] }),
         interactive: false,
         keyboard: false,
       }).addTo(group)
@@ -438,20 +452,57 @@ export function LiveMap({
             <span className="bg-brand-green inline-block h-1.75 w-1.75 rounded-full" />
             {label}
           </div>
-          <div className="text-brand-fg/85 pointer-events-none absolute bottom-2.5 left-3 z-500 flex flex-wrap gap-3 rounded bg-[rgba(7,13,10,0.72)] px-2 py-1 font-mono text-[9px] font-medium">
-            <span>
-              <span className="bg-brand-green mr-1 inline-block h-1.75 w-1.75 rounded-full" />
-              HEALTHY
-            </span>
-            <span>
-              <span className="bg-brand-yellow mr-1 inline-block h-1.75 w-1.75 rounded-full" />
-              ATTENTION
-            </span>
-            <span>
-              <span className="bg-brand-red mr-1 inline-block h-1.75 w-1.75 rounded-full" />
-              ALERT
-            </span>
-          </div>
+          {/* The legend has to explain the markers actually on screen. On the planner
+              the health legend was meaningless — it described node status while the
+              map was showing GUARD/WATCH proposals, drawn corners and crossings, four
+              marker types it never mentioned (three of which used to be gold). */}
+          {isPlanner ? (
+            <div className="text-brand-fg/85 pointer-events-none absolute bottom-2.5 left-3 z-500 flex flex-wrap gap-x-3 gap-y-1 rounded bg-[rgba(7,13,10,0.8)] px-2 py-1.5 font-mono text-[9px] font-medium">
+              <span className="flex items-center gap-1">
+                <span
+                  className="inline-block h-2.5 w-2.5 rounded-full"
+                  style={{ background: GOLD, border: `1.5px solid ${GOLD}` }}
+                />
+                GUARD NODE
+              </span>
+              <span className="flex items-center gap-1">
+                <span
+                  className="inline-block h-2.5 w-2.5 rounded-full"
+                  style={{ background: 'transparent', border: `1.5px solid ${PLANNER_GREEN}` }}
+                />
+                WATCH NODE
+              </span>
+              <span className="flex items-center gap-1">
+                <span
+                  className="inline-block h-1.75 w-1.75 rounded-full"
+                  style={{ background: PLANNER_VERTEX }}
+                />
+                YOUR BOUNDARY CORNER
+              </span>
+              <span className="flex items-center gap-1">
+                <span
+                  className="inline-block h-2 w-2"
+                  style={{ background: '#e25b4a', transform: 'rotate(45deg)' }}
+                />
+                CROSSING
+              </span>
+            </div>
+          ) : (
+            <div className="text-brand-fg/85 pointer-events-none absolute bottom-2.5 left-3 z-500 flex flex-wrap gap-3 rounded bg-[rgba(7,13,10,0.72)] px-2 py-1 font-mono text-[9px] font-medium">
+              <span>
+                <span className="bg-brand-green mr-1 inline-block h-1.75 w-1.75 rounded-full" />
+                HEALTHY
+              </span>
+              <span>
+                <span className="bg-brand-yellow mr-1 inline-block h-1.75 w-1.75 rounded-full" />
+                ATTENTION
+              </span>
+              <span>
+                <span className="bg-brand-red mr-1 inline-block h-1.75 w-1.75 rounded-full" />
+                ALERT
+              </span>
+            </div>
+          )}
         </>
       )}
     </div>

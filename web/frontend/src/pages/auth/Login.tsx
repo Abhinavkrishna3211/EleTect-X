@@ -3,17 +3,11 @@ import { Link, useNavigate } from 'react-router-dom'
 import { AuthLayout, authButtonClass, authErrorMessage, authInputClass } from '@/layouts/AuthLayout'
 import { supabase } from '@/lib/supabase'
 
-// Illustrative role hints only. Nothing here may name an address that actually
-// exists in the project: the Forest Officer entry used to list officer@eletect.in,
-// which is a real officer-role account (the QA scripts sign in as it), so the
-// public login page was handing every visitor a confirmed-valid staff username —
-// half the credential pair, no guessing required. Verify against the real user
-// list before adding an entry here.
-const demoAccounts = [
-  { label: 'Admin', email: 'admin@eletect.in' },
-  { label: 'Public resident', email: 'resident@eletect.in' },
-]
-
+// No demo-account list here, deliberately. A public login page that names accounts
+// hands a visitor half of a credential pair for free — and one of the entries that
+// used to sit here (officer@eletect.in) was a real, officer-role account in the
+// production project. Judge/demo logins are issued privately instead; see
+// scripts/seed-judge-accounts.mjs. Do not reintroduce this section.
 export function Login() {
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
@@ -37,7 +31,7 @@ export function Login() {
   return (
     <AuthLayout>
       <h1 className="m-0 mb-1.5 font-serif text-[30px] font-normal">Dashboard login</h1>
-      <p className="text-brand-fg/55 m-0 mb-6 font-sans text-sm">Supabase auth · email + password</p>
+      <p className="text-brand-fg/55 m-0 mb-6 font-sans text-sm">Sign in to continue</p>
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
         <input
           type="email"
@@ -66,28 +60,7 @@ export function Login() {
         </Link>
       </p>
 
-      <div className="my-5.5 flex items-center gap-3">
-        <span className="bg-brand-fg/10 h-px flex-1" />
-        <span className="text-brand-fg/40 font-mono text-[11px] font-semibold tracking-[0.12em]">
-          DEMO ACCOUNTS
-        </span>
-        <span className="bg-brand-fg/10 h-px flex-1" />
-      </div>
-      <div className="flex flex-col gap-2">
-        {demoAccounts.map((d) => (
-          <button
-            key={d.email}
-            type="button"
-            onClick={() => setEmail(d.email)}
-            className="border-brand-fg/12 hover:border-brand-gold flex min-h-12 items-center justify-between rounded-xl border bg-[rgba(15,29,20,0.5)] px-4 py-3.25 transition-colors"
-          >
-            <span className="font-sans text-sm font-semibold">{d.label}</span>
-            <span className="text-brand-fg/45 font-mono text-xs font-medium">{d.email}</span>
-          </button>
-        ))}
-      </div>
-
-      <p className="text-brand-fg/40 m-0 mt-4.5 text-center font-sans text-[13px]">
+      <p className="text-brand-fg/40 m-0 mt-6 text-center font-sans text-[13px]">
         <Link to="/">← Back to site</Link>
       </p>
       <p className="text-brand-fg/55 m-0 mt-3.5 text-center font-sans text-sm">

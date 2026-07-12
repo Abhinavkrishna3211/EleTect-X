@@ -1,4 +1,12 @@
+import { useState } from 'react'
 import { relativeTime, type EventRow } from '@/lib/dashboard'
+
+// The feed used to render every fetched event flat — 20 rows at ~76px, which on a
+// 390px phone was 1510px, 59% of the whole Overview page, and pushed the decision
+// card ("Why the AI acted") below all of it. An officer in the field had to scroll
+// past the entire history to reach the reasoning for the detection in front of them.
+// Default to the most recent few; the rest are one tap away, never dropped.
+const COLLAPSED_COUNT = 5
 
 // Rough species → glyph map for the feed. Unknown species fall back to a generic
 // marker; this is a visual affordance only, never load-bearing.
@@ -37,13 +45,19 @@ interface AlertsFeedProps {
   events: EventRow[]
   selectedNodeId: string | null
   onSelect: (id: string) => void
+  className?: string
 }
 
-export function AlertsFeed({ events, selectedNodeId, onSelect }: AlertsFeedProps) {
+export function AlertsFeed({ events, selectedNodeId, onSelect, className = '' }: AlertsFeedProps) {
+  const [expanded, setExpanded] = useState(false)
   const highCount = events.filter((e) => e.priority === 'high').length
 
+  const hasMore = events.length > COLLAPSED_COUNT
+  const visible = expanded || !hasMore ? events : events.slice(0, COLLAPSED_COUNT)
+  const hiddenCount = events.length - visible.length
+
   return (
-    <div className="border-brand-fg/10 overflow-hidden rounded-2xl border bg-[#0B0D0B]">
+    <div className={`border-brand-fg/10 overflow-hidden rounded-2xl border bg-[#0B0D0B] ${className}`}>
       <div className="border-brand-fg/8 flex items-center justify-between border-b px-4.5 py-3.5">
         <h3 className="m-0 font-sans text-sm font-semibold">Alerts</h3>
         <span className="text-brand-red font-mono text-[11px] font-semibold">
@@ -57,7 +71,7 @@ export function AlertsFeed({ events, selectedNodeId, onSelect }: AlertsFeedProps
         </p>
       ) : (
         <div className="flex flex-col">
-          {events.map((e) => {
+          {visible.map((e) => {
             const high = e.priority === 'high'
             const active = e.node_id != null && e.node_id === selectedNodeId
             return (
@@ -89,6 +103,16 @@ export function AlertsFeed({ events, selectedNodeId, onSelect }: AlertsFeedProps
               </button>
             )
           })}
+
+          {hasMore && (
+            <button
+              onClick={() => setExpanded((v) => !v)}
+              aria-expanded={expanded}
+              className="border-brand-fg/8 text-brand-fg/60 hover:text-brand-fg hover:bg-brand-fg/4 min-h-11 border-t px-4.5 py-3 font-mono text-[11.5px] font-semibold tracking-[0.08em] transition-colors"
+            >
+              {expanded ? 'SHOW LESS' : `SHOW ALL ${events.length} (${hiddenCount} MORE)`}
+            </button>
+          )}
         </div>
       )}
     </div>

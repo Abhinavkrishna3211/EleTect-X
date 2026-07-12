@@ -47,9 +47,7 @@ const Demo = lazy(() => import('@/pages/dashboard/Demo').then((m) => ({ default:
 const OfficerApprovals = lazy(() =>
   import('@/pages/dashboard/OfficerApprovals').then((m) => ({ default: m.OfficerApprovals })),
 )
-const PlaceholderPanel = lazy(() =>
-  import('@/pages/dashboard/PlaceholderPanel').then((m) => ({ default: m.PlaceholderPanel })),
-)
+const Admin = lazy(() => import('@/pages/dashboard/Admin').then((m) => ({ default: m.Admin })))
 
 // Matches ProtectedRoute's own loading state, so a chunk fetch and a session
 // check look like one continuous load rather than two different spinners.
@@ -159,7 +157,7 @@ function App() {
               path="admin"
               element={
                 <RoleGate roles={['admin']}>
-                  <PlaceholderPanel title="Administration" />
+                  <Admin />
                 </RoleGate>
               }
             />

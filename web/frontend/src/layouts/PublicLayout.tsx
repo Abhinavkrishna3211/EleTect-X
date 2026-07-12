@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { navLinks } from '@/lib/content'
+import { useScrollReveal } from '@/hooks/useScrollReveal'
 
 export function PublicLayout() {
   const [navOpen, setNavOpen] = useState(false)
   const location = useLocation()
+  useScrollReveal()
 
   return (
     <div className="bg-brand-bg text-brand-fg min-h-screen">
