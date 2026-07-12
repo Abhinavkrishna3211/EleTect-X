@@ -66,7 +66,7 @@ export function StaySafe() {
         </div>
       </div>
 
-      <div className="mb-9 grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3">
+      <div className="mb-9 grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3" data-reveal-stagger>
         {howItWorks.map((s) => (
           <div key={s.n} className="border-brand-fg/9 rounded-xl border bg-brand-panel/35 p-5 transition-all hover:border-brand-gold/40 hover:-translate-y-1">
             <p className="mb-1.5 font-sans text-[15px] font-semibold">{s.n}</p>

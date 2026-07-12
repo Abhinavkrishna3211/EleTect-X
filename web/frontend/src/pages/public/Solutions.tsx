@@ -62,7 +62,7 @@ export function Solutions() {
           The same sensing and adaptive deterrence protects crops from smaller, faster, and more frequent visitors,
           safely, without harming any animal.
         </p>
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3.5">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3.5" data-reveal-stagger>
           {otherWildlife.map((w) => (
             <div
               key={w.name}

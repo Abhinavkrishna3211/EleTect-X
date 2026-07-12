@@ -20,7 +20,7 @@ export function Deployments() {
         Illustrative sector view. Exact node locations withheld for wildlife protection.
       </p>
 
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-3.5">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-3.5" data-reveal-stagger>
         {deployPhases.map((d) => (
           <div
             key={d.title}

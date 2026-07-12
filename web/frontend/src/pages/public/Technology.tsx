@@ -25,7 +25,7 @@ export function Technology() {
       {/* PILLARS */}
       <section className="bg-brand-bg">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 md:py-24 lg:px-8">
-          <div className="mb-15 grid grid-cols-[repeat(auto-fit,minmax(290px,1fr))] gap-3.5">
+          <div className="mb-15 grid grid-cols-[repeat(auto-fit,minmax(290px,1fr))] gap-3.5" data-reveal-stagger>
             {techPillars.map((t) => (
               <div
                 key={t.title}
@@ -45,7 +45,7 @@ export function Technology() {
           <h2 className="mb-7 max-w-[22ch] font-serif text-[clamp(26px,3.4vw,40px)] leading-[1.15] font-normal">
             One platform, purpose-built hardware.
           </h2>
-          <div className="mb-16 grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-4">
+          <div className="mb-16 grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-4" data-reveal-stagger>
             {products.map((p) =>
               p.placeholder ? (
                 <div

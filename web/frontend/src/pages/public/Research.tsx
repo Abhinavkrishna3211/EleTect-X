@@ -12,7 +12,7 @@ export function Research() {
         record for scientists and the Forest Department.
       </p>
 
-      <div className="mb-13 grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-3.5">
+      <div className="mb-13 grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-3.5" data-reveal-stagger>
         {researchCards.map((r) => (
           <div
             key={r.title}
