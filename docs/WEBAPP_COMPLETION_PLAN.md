@@ -1,5 +1,10 @@
 # EleTect X — Web App Completion Plan (post-Phase 4c → deploy-ready)
 
+> **CLOSED — 12 Jul 2026.** All seven days met; the app is live at <https://eletect.vercel.app>.
+> Read the **Closeout** section at the end first: it carries the three things that still block a real
+> DFO deployment (chiefly a **verified Resend sending domain** — alerts currently reach only the
+> account owner). This file is now a record, not a live plan.
+
 Where this fits: the web build order, steps 1–5 (scaffold through dashboard
 modules) are done — that's Phase 2 through Phase 4c, each with a QA screenshot set under
 `docs/qa/`. This document carries the remaining steps (6–8) plus the gaps a live-project audit
@@ -499,6 +504,60 @@ screenshots, every interaction assertion), including deep links straight to `/da
    afterwards so no demo rows linger in production — plus one real alert through the Day 1 pipeline.
 5. Add the CSP, verified against the live origin.
 
+**Status: met, 12 Jul.** Deployed and regression-tested against the live production URL,
+**<https://eletect.vercel.app>**.
+
+**Deployment sanity, verified against the live origin (not assumed from config):** the site serves
+HTTP 200; a deep link straight to `/dashboard/fleet` also returns 200 rather than 404, proving the
+SPA rewrite is actually in effect (this is the failure `vercel.json` exists to prevent under
+`BrowserRouter`); all five security headers are present on the response
+(`X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, HSTS);
+and — the check worth doing rather than assuming — every JS chunk served by the live site was
+scanned for its baked-in Supabase host, confirming the deployed bundle points at the **same
+production project** the tests query (`zjgafdozlrhecommmztq`), not a stale or dev project.
+
+**Automated regression, green:** `QA_BASE_URL=https://eletect.vercel.app node
+scripts/qa-day5-responsive.mjs` → **91 screenshots, every route × every role (anonymous, resident,
+officer, admin) × mobile/tablet/desktop, every interaction assertion passing, exit 0.** That also
+discharges "every role can log in on the live URL": the script signs in as each of the four and
+fails hard if any cannot.
+
+**Demo Mode, end to end on the live site:** the `confirmed_elephant` scenario ran from the real
+browser against production. `S7-06` was polled *during* the run and observed moving
+`online → alert → online` — the map visibly reacts, and the node returns itself to `online` on
+retreat, which is the scenario's own story rather than a leak. Every demo-tagged event was written
+`priority='normal'` (the safety barrier that means a demo can never page a village, independent of
+`send-alert`'s own guard). `reset_demo_data()` then cleared **every** demo row (verified by direct
+SQL, not by reading the UI), restored `S7-06` to its true prior status, and left
+`demo_node_snapshot` empty.
+
+**Alert pipeline, end to end on production:** a real high-priority `events` row (`media_url=null`,
+`priority='high'` — what an actual node uplink looks like) was inserted with **no direct function
+call**. The Database Webhook fired `send-alert` automatically, which fanned out and wrote `alerts`
+rows: **one `channel=email, status=sent`** to the account-owner address, i.e. a real email left the
+system. The test event and its `alerts` rows were deleted immediately afterwards.
+
+**Production left clean, verified:** zero demo-tagged events, zero orphaned `alerts` rows, zero
+alerts referencing the (re-deleted) seed accounts, `demo_node_snapshot` empty. The four seed accounts
+were re-created for the run and deleted again afterwards, verified gone with cascades — the same
+re-seed → test → delete loop the local pass uses, because those accounts must not exist between
+runs.
+
+### 🚩 The one thing blocking real DFO use — read this before onboarding anyone
+
+The alert fan-out **works**, but under Resend's test-mode restriction **only the account-owner
+address can actually receive mail**. The live run made this concrete: of the recipients the fan-out
+selected, `abhinav123krish@gmail.com` got `status=sent`, while `officer@eletect.in` and the opted-in
+resident got `status=failed` (Resend refused them), each followed by a terminal
+`status=undeliverable, channel=null` row. That double row is *by design*, not a bug — `failed` means
+one channel attempt bounced, `undeliverable` means that person received nothing at all — and it is
+exactly the audit trail the pre-Day-4 fix added so a silently-dropped recipient is queryable.
+
+So today the system is honest about failing, but it **is** failing for everyone except the owner.
+Against this file's own deployment bar — *"alerts must reach the right person"* — that is the gap.
+**Verify a sending domain in Resend and set `ALERT_EMAIL_FROM` to it before a single real officer or
+resident is onboarded.** Everything else in the pipeline is proven; this is the last hop.
+
 ---
 
 ## Explicit risks / things that can slip
@@ -513,3 +572,69 @@ screenshots, every interaction assertion), including deep links straight to `/da
   provisioning are hardware-arrival-gated work, not web-app work, and shouldn't block this plan.
 - If a day's exit criteria isn't met, don't silently roll it into the next day's scope — add a
   dated note here so slippage is visible instead of invisible.
+
+---
+
+## Closeout — 12 Jul
+
+**Every day's exit criteria is met.** Day 1 (alerts deliver), Day 2 (auth hardening — *partially*,
+see below), Day 3 (RLS/RBAC adversarial pass), Day 4 (`web/ingest` proven hardware-free), Day 5
+(seed + responsive/interactive pass), Day 6 (Vitest + CI), Day 7 (deployed + live regression). The
+app is live at <https://eletect.vercel.app>, `main` and `develop` are in sync on GitHub, CI runs
+lint + typecheck + 117 unit tests on every PR, and the full 91-shot QA matrix passes against
+production.
+
+This file is now closed. Everything below is what did **not** finish, carried forward rather than
+quietly dropped.
+
+### Blocking a real DFO deployment (do these before onboarding anyone)
+
+1. **Verified sending domain (Resend).** *The* blocker. Alerts reach only the account owner today;
+   every other recipient logs `failed` → `undeliverable`. See the Day 7 flag above. Nothing else in
+   the alert path is unproven — this is the last hop, and it is the difference between "the pipeline
+   works" and "a forest officer is actually told."
+2. **Day 2's Auth SMTP, still staged and not activated.** Signup confirmation, password reset, and
+   magic links still go through Supabase's rate-limited default sender. This was blocked on the same
+   thing as (1) — Resend's SMTP relay refuses to send from an unverified domain — so **verifying one
+   domain unblocks both**. Steps are written out in `web/backend/README.md` ("Auth transactional
+   email"); it is Dashboard-only. Do not `supabase config push` to achieve it: that pushes the entire
+   local `config.toml`, which has never captured the live project's `site_url`/redirect URLs and
+   would silently reset them.
+3. **Branch protection on `main` is not enabled.** A direct push to `main` succeeded on 12 Jul, which
+   would have been rejected had it been on. So the CI job wired up on Day 6 currently gates nothing —
+   a red build can still land on `main`. Enable it in GitHub → Settings → Branches, requiring the
+   `web-frontend` check. `PROJECT_BLUEPRINT.md` §0 has listed this as a day-one action since the start.
+
+### Known gaps, not blocking
+
+- **DLT registration status: still unfilled.** Nobody has recorded the actual application/approval
+  state with the SMS provider. Until then SMS stays gated behind `CHANNEL_SMS=off` and email carries
+  delivery. Record the real answer here rather than leaving it an assumption.
+- **No CSP on the deployed site.** Deliberate: a correct policy must name the project's own Supabase
+  origin *and* the CARTO tile CDN, and a wrong one fails silently (blank map tiles, dead auth). Add it
+  against the live origin now that one exists, and verify by loading the dashboard, not by reading the
+  header.
+- **Residents can only opt in by holding an account.** The consequence of the Day 5 Stay Safe
+  decision, and the right default (signup + email confirmation *is* the consent record). If field use
+  shows residents will not create accounts, that is the moment to design an anonymous opt-in with real
+  verification — not before.
+- **`notify-officer-request` has no unit tests.** Its `getUserById` guard is fixed but unverified,
+  because unlike `send-alert` its fan-out logic was never extracted into a testable module. The same
+  `fanout.ts` extraction plus two Deno tests closes it.
+- **`scripts/qa-phase3-screenshots.mjs` hardcodes a password** (`qa-test-pass-123`). Low severity —
+  the accounts it creates only ever get the `public` role and none currently exist — but it should
+  move to the `QA_SEED_PASSWORD`-from-`.env.local` pattern the Day 5 scripts use.
+- **`S7-08` has sat in `alert` since 10 Jul** with no backing event and a stale `last_seen`. It is
+  seed state, not demo residue (confirmed 12 Jul), but on a live dashboard it reads as an alert that
+  never resolves. Worth cleaning before anyone is shown the production site.
+- **The `14 Hz` demo log line still lives in the production database.** `schema.sql` and the migration
+  both say `22 Hz` now (per ADR 0001 §2), but `run_demo_scenario`'s body only updates when its DDL is
+  re-applied. Re-apply before any demo where that log text is read aloud.
+
+### Operational note for whoever runs QA next
+
+`scripts/qa-day5-responsive.mjs` signs in as seeded officer and resident accounts that are
+**deliberately deleted after every run** — one of them holds the `officer` role in the production
+project and must not persist. The loop is therefore: `node scripts/seed-day5-profiles.mjs` → run the
+pass → delete the accounts again. The seed script is idempotent and rotates the password on re-run;
+`QA_SEED_PASSWORD` and `QA_ADMIN_*` live in the gitignored `.env.local`, never in the repo.
