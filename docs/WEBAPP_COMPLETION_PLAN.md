@@ -147,6 +147,21 @@ no longer depends on the grant alone. Re-verified live afterward — clean rejec
 this closes a gap in an existing security-definer function rather than changing an architectural
 decision. Follow-up housekeeping: delete the throwaway Day 3 test account from Authentication → Users.
 
+**Correction (12 Jul): item 2's premise above is wrong.** It says the demo RPCs "already
+`revoke execute ... from public` in schema.sql". They do not — **`schema.sql` contains exactly one
+`revoke`, and it is for `demo_touch_node`**. `run_demo_scenario` and `reset_demo_data` have never had
+one, so on the live database `PUBLIC`, `anon` and `authenticated` all still hold `EXECUTE` on them
+(confirmed by reading `pg_proc.proacl` directly on 12 Jul). The same is true of
+`approve_officer_request` / `reject_officer_request`.
+
+**This is not a live vulnerability, and the system is not exposed**: every one of these functions
+gates on `is_staff()` / `is_admin()` internally, and a true-anonymous call to each was re-tested live
+on 12 Jul and rejected with `not authorized`. The guard — which is what Day 3's own fix concluded was
+the right defense — is doing the work. What is missing is the *second* layer: anon can reach the
+function body at all, rather than being stopped at the grant. See the closeout for the hardening
+note. The lesson repeats Day 3's: the claim was written from the intent of the code, not from a query
+against the database.
+
 **Correction (12 Jul): the claim above that this account had "no elevated access left" was wrong.**
 When it was deleted during the Day 5/6/7 cleanup it was still `role=officer` — promoted during the
 officer-role section of the adversarial run and never demoted — so it could read every staff table
@@ -382,9 +397,8 @@ pass, delete again.
   that prompted this audit — those accounts only ever get the `public` role, which reads nothing but
   its own profile row, and none currently exist in the project. Still worth moving to the same
   `QA_SEED_PASSWORD`-from-`.env.local` pattern the Day 5 scripts now use.
-- **The live database still serves the old `14 Hz` demo log line**, because `run_demo_scenario`'s
-  body is only updated by re-applying the DDL. Re-apply before any demo where that log text is read
-  aloud.
+- ~~The live database still serves the old `14 Hz` demo log line.~~ **Resolved 12 Jul** — the live
+  `run_demo_scenario` now says `22 Hz`; see the closeout.
 - **Seed-account credentials are env-only, never committed.** The seed script originally hardcoded a
   shared password. That is a committed secret: these accounts live in the *production* project and
   `officer.approved.seed` held the **officer** role, which reads every staff table — so a public repo
@@ -605,8 +619,44 @@ quietly dropped.
    a red build can still land on `main`. Enable it in GitHub → Settings → Branches, requiring the
    `web-frontend` check. `PROJECT_BLUEPRINT.md` §0 has listed this as a day-one action since the start.
 
+### Applied directly to the production database, 12 Jul
+
+Both were source-only fixes until now — a file change does not alter a deployed Postgres function or
+a live row. Run through `supabase db query --linked` (Management API; no DB password, and **not**
+`config push`, which would have reset the live `site_url`).
+
+- **`run_demo_scenario`'s `14 Hz` → `22 Hz` is now live.** Rather than replaying `schema.sql`'s
+  version of the function wholesale — a live definer function has drifted from source before, which
+  is exactly the `demo_touch_node` bug — the fix read the **current live** definition with
+  `pg_get_functiondef()`, replaced only that one string literal, and executed the result (which
+  `pg_get_functiondef` emits as `CREATE OR REPLACE FUNCTION`). So nothing else about the function
+  could change. Verified after: `position('14 Hz' …) = 0`, `position('22 Hz' …) = 1585`, and
+  `SECURITY DEFINER`, the `search_path` setting, the owner, and the internal `is_staff()` guard all
+  intact.
+- **Phantom node `S7-08` deleted.** It was **not in `seed-4b.sql` at all** (which defines exactly
+  eight nodes: S7-02/04/05/06/07/09/11/12) and carried **zero health, zero events, zero maintenance**
+  rows, while every real seeded node has ~170 health and ~30 events. It was a leftover from a
+  superseded seed iteration, sitting on the live map in a permanent `alert` with nothing behind it —
+  so "restore its resting state" had no correct answer; the seed's intent is that it does not exist.
+  Nothing referenced it, so there was nothing to cascade. Confirmed on the live dashboard afterwards:
+  the ALERT tile reads **0** (was 1), the map shows the eight seeded pins, and it is gone from the
+  Fleet roster.
+- **Left in place on purpose:** `4f3030e129cfeb14` ("node-test-01"), the Day 4 ChirpStack ingest test
+  device. It has null coordinates so it draws no map pin, and it is the live proof that the
+  ChirpStack → `web/ingest` → Supabase path works. Revisit before a DFO demo if a stray test device
+  in the fleet roster looks unprofessional.
+
 ### Known gaps, not blocking
 
+- **Defense-in-depth on the definer RPCs: add the missing `revoke`s.** As corrected in the Day 3
+  section above, `anon` currently holds `EXECUTE` on `run_demo_scenario`, `reset_demo_data`,
+  `approve_officer_request` and `reject_officer_request` (and still on `demo_touch_node`, whose Day 3
+  revoke named `public, authenticated` but not `anon`). The internal `is_staff()`/`is_admin()` guards
+  reject every one of them — re-verified live 12 Jul — so this is a hardening item, not a hole. The
+  correct fix is `revoke execute … from public, anon` on all five, **keeping `authenticated`** on
+  `run_demo_scenario` and `reset_demo_data`: staff call those two straight from the browser as the
+  `authenticated` role, so revoking there would break Demo Mode. Apply to `schema.sql` **and** the
+  live database together — a source-only change is precisely the drift this file keeps catching.
 - **DLT registration status: still unfilled.** Nobody has recorded the actual application/approval
   state with the SMS provider. Until then SMS stays gated behind `CHANNEL_SMS=off` and email carries
   delivery. Record the real answer here rather than leaving it an assumption.
@@ -624,12 +674,8 @@ quietly dropped.
 - **`scripts/qa-phase3-screenshots.mjs` hardcodes a password** (`qa-test-pass-123`). Low severity —
   the accounts it creates only ever get the `public` role and none currently exist — but it should
   move to the `QA_SEED_PASSWORD`-from-`.env.local` pattern the Day 5 scripts use.
-- **`S7-08` has sat in `alert` since 10 Jul** with no backing event and a stale `last_seen`. It is
-  seed state, not demo residue (confirmed 12 Jul), but on a live dashboard it reads as an alert that
-  never resolves. Worth cleaning before anyone is shown the production site.
-- **The `14 Hz` demo log line still lives in the production database.** `schema.sql` and the migration
-  both say `22 Hz` now (per ADR 0001 §2), but `run_demo_scenario`'s body only updates when its DDL is
-  re-applied. Re-apply before any demo where that log text is read aloud.
+*(The stale `S7-08` alert state and the `14 Hz` demo log line were both listed here and are now
+resolved against the live database — see "Applied directly to the production database" above.)*
 
 ### Operational note for whoever runs QA next
 
