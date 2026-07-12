@@ -357,10 +357,26 @@ pass, delete again.
 
 **Carried, not silently dropped:**
 
-- **`officer@eletect.in` is an `officer`-role account of unclear provenance** (created 10 Jul, no
-  `full_name`, never named in this plan). It was left untouched because it was not in the deletion
-  list, but an officer-role login reads every staff table. Confirm whether it is a real staff account
-  or another leftover test login, and delete it if it is the latter.
+- **`officer@eletect.in` is the deliberate staff QA login — keep it, do not delete.** Provenance
+  resolved 12 Jul: created 10 Jul, **signed in 11 Jul** (so it is in active use, not abandoned),
+  email confirmed, `role=officer` set manually (`officer_requests` is empty — it never went through
+  the approval flow), and `user_metadata` carries only `email_verified`, with no `full_name` or
+  `phone`. That rules out the Phase 3 signup-test artifact, which the script creates as
+  `qa-resident-*@example.com` *with* a name and phone. It is the `QA_STAFF_EMAIL` the phase4c QA
+  scripts sign in as, it is named in `docs/qa/phase4a/NOTES.md`, and it is listed on the login page
+  itself (`pages/auth/Login.tsx`'s `demoAccounts`). Deleting it would break the existing QA scripts.
+- **The login page advertises a valid officer-role username to every visitor.** `Login.tsx`'s
+  `demoAccounts` lists `admin@eletect.in`, `officer@eletect.in`, and `resident@eletect.in` as
+  role hints. Only `officer@eletect.in` actually exists — and it is a real, `officer`-role account in
+  the *production* project, so the public login page hands an attacker a confirmed-valid staff
+  username for free (half the credential pair, no guessing needed). Harmless while the app is a demo;
+  it should not survive into the DFO deployment. Either drop the demo-account hints before launch or
+  point them at accounts that do not exist in production.
+- **`scripts/qa-phase3-screenshots.mjs` hardcodes a password** (`qa-test-pass-123`, line 57) for the
+  throwaway `qa-resident-*@example.com` signups it creates. Lower severity than the seed-account case
+  that prompted this audit — those accounts only ever get the `public` role, which reads nothing but
+  its own profile row, and none currently exist in the project. Still worth moving to the same
+  `QA_SEED_PASSWORD`-from-`.env.local` pattern the Day 5 scripts now use.
 - **The live database still serves the old `14 Hz` demo log line**, because `run_demo_scenario`'s
   body is only updated by re-applying the DDL. Re-apply before any demo where that log text is read
   aloud.
