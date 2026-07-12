@@ -386,7 +386,7 @@ begin
       perform demo_touch_node('S7-06', 'alert');
       v_log := jsonb_build_array(
         jsonb_build_object('time', v_hm, 'dot', c_gold,
-          'text', 'S7-06 ground vibration trigger. Footfall signature at 14 Hz, neighbours pre-armed.'));
+          'text', 'S7-06 ground vibration trigger. Footfall signature at 22 Hz, neighbours pre-armed.'));
 
     elsif p_step = 2 then
       insert into events (node_id, species, confidence, direction_deg, media_url, action, priority, fusion)
