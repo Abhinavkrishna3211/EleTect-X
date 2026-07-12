@@ -140,8 +140,14 @@ Fixed two ways: re-ran the revoke directly against the live project, and added a
 inside the function body itself (`schema.sql` and `migrations/0001_phase4c.sql` both updated) so it
 no longer depends on the grant alone. Re-verified live afterward — clean rejection. No ADR filed;
 this closes a gap in an existing security-definer function rather than changing an architectural
-decision. Follow-up housekeeping: delete the throwaway `day3-adversarial-*@gmail.com` test account
-from Authentication → Users once convenient — non-urgent, it has no elevated access left.
+decision. Follow-up housekeeping: delete the throwaway Day 3 test account from Authentication → Users.
+
+**Correction (12 Jul): the claim above that this account had "no elevated access left" was wrong.**
+When it was deleted during the Day 5/6/7 cleanup it was still `role=officer` — promoted during the
+officer-role section of the adversarial run and never demoted — so it could read every staff table
+(`nodes`, `events`, `health`, `maintenance`) for a full day after being written off as harmless. It
+is now deleted and verified gone. The lesson is not "delete test accounts sooner" but "do not record
+a privilege claim without checking it": the note was written from intent, not from a query.
 
 ## Pre-Day 4 checkpoint — full-system audit
 
@@ -338,19 +344,32 @@ one is a data-honesty defect that the pass could not have caught:
    production database, verified by direct service-role query between clicks, with the seed fixture
    restored afterwards.
 
+**Throwaway accounts deleted from the production project, 12 Jul.** All five are gone and *verified*
+gone against a fresh `listUsers` read rather than trusting the delete call's return: the four
+`*.seed@eletect-x.test` accounts and the Day 3 adversarial probe. `profiles` and `officer_requests`
+both cascade off `auth.users`, and the dependent rows were confirmed cleared too. Two accounts remain
+— the admin (`abhinav123krish@gmail.com`) and `officer@eletect.in`.
+
+Consequence to know before re-running QA: `scripts/qa-day5-responsive.mjs` signs in as the seeded
+officer and resident, so it **cannot run until `scripts/seed-day5-profiles.mjs` is re-run** to
+recreate them. That is by design — the accounts should not exist between QA passes. Re-seed, run the
+pass, delete again.
+
 **Carried, not silently dropped:**
 
+- **`officer@eletect.in` is an `officer`-role account of unclear provenance** (created 10 Jul, no
+  `full_name`, never named in this plan). It was left untouched because it was not in the deletion
+  list, but an officer-role login reads every staff table. Confirm whether it is a real staff account
+  or another leftover test login, and delete it if it is the latter.
 - **The live database still serves the old `14 Hz` demo log line**, because `run_demo_scenario`'s
   body is only updated by re-applying the DDL. Re-apply before any demo where that log text is read
   aloud.
-- **Seed-account credentials are env-only, and the accounts must be deleted before the repo goes
-  public.** The seed script originally hardcoded a shared password. That is a committed secret: these
-  accounts live in the *production* project and `officer.approved.seed` holds the **officer** role,
-  which reads every staff table — so a public repo (which the Robu/Hackster submissions imply) would
-  have handed anyone a working forest-officer login. Both scripts now take `QA_SEED_PASSWORD` from the
-  gitignored `.env.local`, the script rotates the password on re-run (so a leaked one can be revoked),
-  and the live accounts have been rotated off the previously-hardcoded value. Still delete them from
-  Authentication → Users before publishing, along with Day 3's leftover `day3-adversarial-*` account.
+- **Seed-account credentials are env-only, never committed.** The seed script originally hardcoded a
+  shared password. That is a committed secret: these accounts live in the *production* project and
+  `officer.approved.seed` held the **officer** role, which reads every staff table — so a public repo
+  (which the Robu/Hackster submissions imply) would have handed anyone a working forest-officer login.
+  Both scripts now take `QA_SEED_PASSWORD` from the gitignored `.env.local`, and re-running the seed
+  rotates the password so a leaked one can be revoked.
 - **Residents can only opt in by holding an account.** This is the deliberate consequence of the
   decision above, not an oversight: there is no phone-only, no-account opt-in path. If real field use
   shows residents will not create accounts, that is the moment to design an anonymous opt-in with a
