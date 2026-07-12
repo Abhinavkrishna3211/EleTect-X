@@ -1,10 +1,4 @@
-import { team } from '@/lib/content'
-
-const recognition = [
-  'IEEE IAS CMD Humanitarian Award 2025',
-  'Amarnath Raja Humanitarian Technology Award 2025',
-  'Field deployment in progress with the Kerala Forest Department',
-]
+import { awards, team } from '@/lib/content'
 
 export function About() {
   return (
@@ -36,16 +30,19 @@ export function About() {
       </div>
 
       <h2 className="mb-5 font-serif text-[clamp(24px,3vw,34px)] font-normal">Recognition</h2>
-      <ul className="flex flex-col gap-2.5">
-        {recognition.map((r) => (
-          <li
-            key={r}
-            className="border-brand-fg/10 rounded-xl border bg-brand-panel/40 px-4.5 py-4 font-sans text-[14.5px] font-semibold transition-colors hover:border-brand-gold/40"
+      <div className="flex flex-col gap-3" data-reveal-stagger>
+        {awards.map((a) => (
+          <div
+            key={a.label}
+            className="border-brand-fg/12 bg-brand-bg/40 flex items-center gap-3 rounded-xl border px-4.5 py-4 transition-all hover:border-brand-gold/40 hover:-translate-y-1"
           >
-            {r}
-          </li>
+            <span className="border-brand-gold/25 text-brand-gold grid h-9 w-9 shrink-0 place-items-center rounded-lg border bg-[rgba(226,161,60,0.08)]">
+              <a.icon size={17} strokeWidth={1.75} aria-hidden />
+            </span>
+            <span className="font-sans text-[14.5px] font-semibold">{a.label}</span>
+          </div>
         ))}
-      </ul>
+      </div>
     </section>
   )
 }
