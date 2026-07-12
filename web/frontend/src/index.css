@@ -58,6 +58,17 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* Keyboard focus. Previously this fell through to each browser's default outline,
+   which on this near-black surface is easy to lose entirely — and inputs opted out
+   of it altogether (focus:outline-none), leaving only a border-colour change. One
+   gold ring, everywhere, so tabbing through the site is always traceable.
+   :focus-visible (not :focus) keeps the ring off mouse clicks. */
+:where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-brand-gold);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 :root {
   --background: #070d0a;
   --foreground: #e9ede6;

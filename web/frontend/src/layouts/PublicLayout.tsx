@@ -23,7 +23,9 @@ export function PublicLayout() {
                 end={l.href === '/'}
                 className={({ isActive }) =>
                   `font-sans text-[13.5px] font-medium tracking-wide transition-colors ${
-                    isActive ? 'text-brand-gold' : 'text-brand-fg/70 hover:text-brand-fg'
+                    isActive
+                      ? 'text-brand-gold'
+                      : 'text-brand-fg/70 hover:text-brand-fg hover:underline hover:underline-offset-4 hover:decoration-brand-gold/60'
                   }`
                 }
               >
@@ -96,13 +98,13 @@ export function PublicLayout() {
               <span className="text-brand-fg/40 font-mono text-[11.5px] font-semibold tracking-[0.14em]">
                 PLATFORM
               </span>
-              <Link to="/technology" className="text-brand-fg/70 font-sans text-[13.5px] font-medium hover:text-brand-fg">
+              <Link to="/technology" className="text-brand-fg/70 font-sans text-[13.5px] font-medium transition-colors hover:text-brand-fg hover:underline hover:underline-offset-4 hover:decoration-brand-gold/60">
                 Technology
               </Link>
-              <Link to="/solutions" className="text-brand-fg/70 font-sans text-[13.5px] font-medium hover:text-brand-fg">
+              <Link to="/solutions" className="text-brand-fg/70 font-sans text-[13.5px] font-medium transition-colors hover:text-brand-fg hover:underline hover:underline-offset-4 hover:decoration-brand-gold/60">
                 Solutions
               </Link>
-              <Link to="/deployments" className="text-brand-fg/70 font-sans text-[13.5px] font-medium hover:text-brand-fg">
+              <Link to="/deployments" className="text-brand-fg/70 font-sans text-[13.5px] font-medium transition-colors hover:text-brand-fg hover:underline hover:underline-offset-4 hover:decoration-brand-gold/60">
                 Deployments
               </Link>
             </div>
@@ -110,13 +112,13 @@ export function PublicLayout() {
               <span className="text-brand-fg/40 font-mono text-[11.5px] font-semibold tracking-[0.14em]">
                 COMPANY
               </span>
-              <Link to="/research" className="text-brand-fg/70 font-sans text-[13.5px] font-medium hover:text-brand-fg">
+              <Link to="/research" className="text-brand-fg/70 font-sans text-[13.5px] font-medium transition-colors hover:text-brand-fg hover:underline hover:underline-offset-4 hover:decoration-brand-gold/60">
                 Research
               </Link>
-              <Link to="/about" className="text-brand-fg/70 font-sans text-[13.5px] font-medium hover:text-brand-fg">
+              <Link to="/about" className="text-brand-fg/70 font-sans text-[13.5px] font-medium transition-colors hover:text-brand-fg hover:underline hover:underline-offset-4 hover:decoration-brand-gold/60">
                 About
               </Link>
-              <Link to="/contact" className="text-brand-fg/70 font-sans text-[13.5px] font-medium hover:text-brand-fg">
+              <Link to="/contact" className="text-brand-fg/70 font-sans text-[13.5px] font-medium transition-colors hover:text-brand-fg hover:underline hover:underline-offset-4 hover:decoration-brand-gold/60">
                 Contact
               </Link>
             </div>
@@ -124,10 +126,10 @@ export function PublicLayout() {
               <span className="text-brand-fg/40 font-mono text-[11.5px] font-semibold tracking-[0.14em]">
                 FOR RESIDENTS
               </span>
-              <Link to="/stay-safe" className="text-brand-fg/70 font-sans text-[13.5px] font-medium hover:text-brand-fg">
+              <Link to="/stay-safe" className="text-brand-fg/70 font-sans text-[13.5px] font-medium transition-colors hover:text-brand-fg hover:underline hover:underline-offset-4 hover:decoration-brand-gold/60">
                 Stay Safe
               </Link>
-              <Link to="/dashboard" className="text-brand-fg/70 font-sans text-[13.5px] font-medium hover:text-brand-fg">
+              <Link to="/dashboard" className="text-brand-fg/70 font-sans text-[13.5px] font-medium transition-colors hover:text-brand-fg hover:underline hover:underline-offset-4 hover:decoration-brand-gold/60">
                 Dashboard
               </Link>
             </div>

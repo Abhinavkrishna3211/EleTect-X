@@ -8,7 +8,33 @@ const repoRoot = path.resolve(__dirname, '..', '..', '..')
 const outDir = path.join(repoRoot, 'docs', 'qa', 'phase3')
 fs.mkdirSync(outDir, { recursive: true })
 
+// Same .env.local parse the other QA scripts use, so the password is set once.
+const envPath = path.join(__dirname, '..', '.env.local')
+const envVars = fs.existsSync(envPath)
+  ? Object.fromEntries(
+      fs
+        .readFileSync(envPath, 'utf8')
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l && !l.startsWith('#') && l.includes('='))
+        .map((l) => {
+          const i = l.indexOf('=')
+          return [l.slice(0, i), l.slice(i + 1)]
+        }),
+    )
+  : {}
+
 const baseUrl = process.env.QA_BASE_URL || 'http://localhost:5183'
+
+// Never hardcode this. The signups below are throwaway `public`-role accounts, so
+// a leak is far less serious than the seed script's officer-role account — but a
+// committed credential is a committed credential, and this file is public.
+const SEED_PASSWORD = process.env.QA_SEED_PASSWORD || envVars.QA_SEED_PASSWORD
+
+if (!SEED_PASSWORD || SEED_PASSWORD.length < 16) {
+  console.error('Set QA_SEED_PASSWORD (>= 16 chars) in the environment or web/frontend/.env.local.')
+  process.exit(1)
+}
 
 const viewports = [
   { tag: 'desktop', width: 1440, height: 900 },
@@ -54,7 +80,7 @@ async function shootStaticFlows(browser) {
 async function shootResidentFlow(browser) {
   const stamp = Date.now()
   const email = `qa-resident-${stamp}@example.com`
-  const password = 'qa-test-pass-123'
+  const password = SEED_PASSWORD
 
   for (const vp of viewports) {
     const page = await browser.newPage({ viewport: { width: vp.width, height: vp.height } })

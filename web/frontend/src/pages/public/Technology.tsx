@@ -29,7 +29,7 @@ export function Technology() {
             {techPillars.map((t) => (
               <div
                 key={t.title}
-                className="border-brand-fg/9 rounded-2xl border bg-[linear-gradient(160deg,rgba(15,29,20,0.5),rgba(11,13,11,0.2))] p-6.5"
+                className="border-brand-fg/9 rounded-2xl border bg-[linear-gradient(160deg,rgba(15,29,20,0.5),rgba(11,13,11,0.2))] p-6.5 transition-all hover:border-brand-gold/40 hover:-translate-y-1"
               >
                 <div className="mb-3.5 text-2xl">{t.icon}</div>
                 <h3 className="mb-2.5 font-sans text-lg font-semibold">{t.title}</h3>
