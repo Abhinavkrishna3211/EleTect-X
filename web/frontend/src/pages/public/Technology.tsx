@@ -1,3 +1,5 @@
+import { Plus } from 'lucide-react'
+
 import { IMG, products, techPillars } from '@/lib/content'
 
 export function Technology() {
@@ -52,7 +54,7 @@ export function Technology() {
                   key={p.id}
                   className="border-brand-fg/20 bg-brand-fg/1.5 flex min-h-70 flex-col items-start justify-center gap-2.5 rounded-[18px] border-[1.5px] border-dashed p-7"
                 >
-                  <span className="text-2xl opacity-60">➕</span>
+                  <Plus className="text-brand-fg opacity-60" size={24} strokeWidth={1.75} aria-hidden />
                   <p className="text-brand-fg/40 font-mono text-[11.5px] font-semibold tracking-[0.14em]">{p.tag}</p>
                   <h3 className="text-brand-fg/55 font-serif text-[22px] leading-none font-normal">{p.name}</h3>
                   <p className="text-brand-fg/45 font-sans text-sm leading-relaxed">{p.body}</p>
