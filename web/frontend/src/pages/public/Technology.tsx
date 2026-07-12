@@ -31,7 +31,9 @@ export function Technology() {
                 key={t.title}
                 className="border-brand-fg/9 rounded-2xl border bg-[linear-gradient(160deg,rgba(15,29,20,0.5),rgba(11,13,11,0.2))] p-6.5 transition-all hover:border-brand-gold/40 hover:-translate-y-1"
               >
-                <div className="mb-3.5 text-2xl">{t.icon}</div>
+                <div className="border-brand-gold/25 text-brand-gold mb-3.5 grid h-11 w-11 place-items-center rounded-xl border bg-[rgba(226,161,60,0.08)]">
+                  <t.icon size={20} strokeWidth={1.75} aria-hidden />
+                </div>
                 <h3 className="mb-2.5 font-sans text-lg font-semibold">{t.title}</h3>
                 <p className="text-brand-fg/65 font-sans text-[14.5px] leading-relaxed">{t.body}</p>
               </div>

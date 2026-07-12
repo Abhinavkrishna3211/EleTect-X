@@ -84,8 +84,11 @@ export function Overview() {
           )}
         </div>
 
+        {/* On a phone the decision card comes FIRST: it explains the detection the
+            officer is looking at, and behind a flat alert list it was the last thing
+            reachable. On desktop the feed leads, as designed — the column sits beside
+            the map with room for both. */}
         <div className="flex min-w-0 flex-col gap-4">
-          <AlertsFeed events={events} selectedNodeId={selectedNodeId} onSelect={setSelectedNodeId} />
           <DecisionCard
             event={decisionEvent}
             radar={
@@ -93,6 +96,13 @@ export function Overview() {
                 <ConfidenceRadar modalities={decisionEvent.fusion.modalities} />
               ) : undefined
             }
+            className="order-1 md:order-2"
+          />
+          <AlertsFeed
+            events={events}
+            selectedNodeId={selectedNodeId}
+            onSelect={setSelectedNodeId}
+            className="order-2 md:order-1"
           />
         </div>
       </div>

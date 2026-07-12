@@ -1,4 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
+import {
+  BatteryCharging,
+  History,
+  Map as MapIcon,
+  MoreHorizontal,
+  Network,
+  PlayCircle,
+  Ruler,
+  TrendingUp,
+  UserCheck,
+  Users,
+  type LucideIcon,
+} from 'lucide-react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '@/lib/auth'
 
@@ -12,22 +25,22 @@ interface Tab {
   id: string
   label: string
   short: string
-  icon: string
+  icon: LucideIcon
 }
 
 const staffTabs: Tab[] = [
-  { id: 'overview', label: 'Overview', short: 'MAP', icon: '🗺️' },
-  { id: 'replay', label: 'Replay', short: 'REPLAY', icon: '⏪' },
-  { id: 'network', label: 'Corridor', short: 'CORRIDOR', icon: '🕸️' },
-  { id: 'learning', label: 'Learning', short: 'LEARNING', icon: '📈' },
-  { id: 'fleet', label: 'Fleet', short: 'FLEET', icon: '🔋' },
-  { id: 'planner', label: 'Planner', short: 'PLANNER', icon: '📐' },
-  { id: 'demo', label: 'Demo Mode', short: 'DEMO', icon: '▶️' },
+  { id: 'overview', label: 'Overview', short: 'MAP', icon: MapIcon },
+  { id: 'replay', label: 'Replay', short: 'REPLAY', icon: History },
+  { id: 'network', label: 'Corridor', short: 'CORRIDOR', icon: Network },
+  { id: 'learning', label: 'Learning', short: 'LEARNING', icon: TrendingUp },
+  { id: 'fleet', label: 'Fleet', short: 'FLEET', icon: BatteryCharging },
+  { id: 'planner', label: 'Planner', short: 'PLANNER', icon: Ruler },
+  { id: 'demo', label: 'Demo Mode', short: 'DEMO', icon: PlayCircle },
 ]
 
 const adminOnlyTabs: Tab[] = [
-  { id: 'officers', label: 'Officer Approvals', short: 'OFFICERS', icon: '🛂' },
-  { id: 'admin', label: 'Admin', short: 'ADMIN', icon: '⚙️' },
+  { id: 'officers', label: 'Officer Approvals', short: 'OFFICERS', icon: UserCheck },
+  { id: 'admin', label: 'Admin', short: 'ADMIN', icon: Users },
 ]
 
 // Four fit across a 390px viewport alongside the More button without crowding
@@ -83,7 +96,7 @@ function MoreSheet({ tabs, onClose }: { tabs: Tab[]; onClose: () => void }) {
               }`
             }
           >
-            <span className="text-[17px]">{t.icon}</span>
+            <t.icon size={18} strokeWidth={1.75} aria-hidden />
             {t.label}
           </NavLink>
         ))}
@@ -159,7 +172,7 @@ export function DashboardLayout() {
                   }`
                 }
               >
-                <span className="text-[15px]">{t.icon}</span>
+                <t.icon size={17} strokeWidth={1.75} aria-hidden />
                 {t.label}
               </NavLink>
             ))}
@@ -175,7 +188,7 @@ export function DashboardLayout() {
         <nav className="border-brand-fg/10 fixed right-0 bottom-0 left-0 z-55 flex justify-around border-t bg-[rgba(9,12,10,0.96)] px-1 py-1.5 backdrop-blur-md md:hidden">
           {barTabs.map((t) => (
             <NavLink key={t.id} to={`/dashboard/${t.id}`} className={({ isActive }) => mobileLinkClass(isActive)}>
-              <span className="text-[19px]">{t.icon}</span>
+              <t.icon size={20} strokeWidth={1.75} aria-hidden />
               <span className="font-mono text-[9.5px] font-semibold tracking-[0.04em]">{t.short}</span>
             </NavLink>
           ))}
@@ -187,7 +200,7 @@ export function DashboardLayout() {
               aria-haspopup="dialog"
               className={mobileLinkClass(moreOpen || overflowActive)}
             >
-              <span className="text-[19px]">⋯</span>
+              <MoreHorizontal size={20} strokeWidth={1.75} aria-hidden />
               <span className="font-mono text-[9.5px] font-semibold tracking-[0.04em]">MORE</span>
             </button>
           )}
