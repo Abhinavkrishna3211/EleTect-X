@@ -10,11 +10,30 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
       - run: pip install ruff
+      # device/mpu and ml/ are still empty scaffolds; keep this advisory until
+      # there is Python to actually lint.
       - run: ruff check device/mpu ml scripts || true
-  lint-web:
+
+  web-frontend:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/frontend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: "20" }
-      - run: echo "web/frontend lint placeholder"
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      # `build` is `tsc -b && vite build`, so this is the typecheck gate too.
+      - run: npm run build
+      - run: npm run test
+
+# The Playwright suites (scripts/qa-*.mjs) are deliberately NOT run here. They
+# drive a real browser against a live Supabase project with real staff logins —
+# in CI that would mean production credentials in GitHub secrets and every PR
+# writing to the production database. They stay a local pre-deploy gate; the
+# hermetic Vitest suite over src/lib is what guards every PR.
