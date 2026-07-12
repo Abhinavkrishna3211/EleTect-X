@@ -1,4 +1,4 @@
-import { BellRing, Eye, Network, Siren, Sun, Waves } from 'lucide-react'
+import { Award, BellRing, Eye, Medal, Network, Siren, Sprout, Sun, Waves } from 'lucide-react'
 
 // Shared copy and image data for the public marketing site.
 // Mirrors the structure of the design reference's renderVals() data block.
@@ -323,7 +323,7 @@ export const team = [
 ]
 
 export const awards = [
-  { icon: '🏅', label: 'IEEE IAS CMD Humanitarian Award 2025' },
-  { icon: '🏅', label: 'Amarnath Raja Humanitarian Technology Award 2025' },
-  { icon: '🌿', label: 'Field deployment in progress, Kerala Forest Department' },
+  { icon: Award, label: 'IEEE IAS CMD Humanitarian Award 2025' },
+  { icon: Medal, label: 'Amarnath Raja Humanitarian Technology Award 2025' },
+  { icon: Sprout, label: 'Field deployment in progress, Kerala Forest Department' },
 ]

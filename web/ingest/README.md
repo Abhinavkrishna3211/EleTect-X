@@ -43,3 +43,19 @@ mosquitto_pub -h localhost -t "application/<APPLICATION_ID>/device/<DEV_EUI>/eve
 Replace `<APPLICATION_ID>` and `<DEV_EUI>` with the values from the ChirpStack
 UI. This does not require a real join or radio uplink - it proves the bridge's
 MQTT-to-Supabase path independent of firmware.
+
+**Clean up after yourself when testing against the production project.** The
+bridge upserts a `nodes` row for every device it hears from, by design - that is
+how a real node registers itself on first uplink. A synthetic uplink therefore
+creates a real node row, and it then shows up on the Fleet and Overview screens
+with a raw DevEUI instead of an `S7-XX` id, no firmware version, and stale
+telemetry. `node-test-01` (`4f3030e129cfeb14`) lived on the production dashboard
+for exactly this reason until it was removed on 12 Jul. `events` and `health`
+cascade off `nodes`, so one delete is enough:
+
+```sql
+delete from nodes where id = '<DEV_EUI>';
+```
+
+Prefer a local Supabase project for this test; if you must use production, delete
+the node afterwards.

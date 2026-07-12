@@ -1,3 +1,5 @@
+import { BatteryLow, CloudRain, Crosshair, Network, ShieldOff, Siren, type LucideIcon } from 'lucide-react'
+
 // Demo Mode scenario catalog — client-side metadata only. The log text and every
 // written row come back from run_demo_scenario() (web/backend/schema.sql); this
 // file only knows the fixed whitelist, step counts, and which node to focus the
@@ -15,7 +17,7 @@ export interface ScenarioDef {
   id: ScenarioId
   label: string
   dur: string
-  icon: string
+  icon: LucideIcon
   // Total steps — must match the `v_total` case in run_demo_scenario exactly.
   totalSteps: number
   // Node(s) the map should frame while this scenario runs, in step order.
@@ -27,7 +29,7 @@ export const SCENARIOS: ScenarioDef[] = [
     id: 'confirmed_elephant',
     label: 'Confirmed elephant · deterrent fires',
     dur: '3 steps · ~9 s',
-    icon: '🐘',
+    icon: Siren,
     totalSteps: 3,
     focusNodes: ['S7-06'],
   },
@@ -35,7 +37,7 @@ export const SCENARIOS: ScenarioDef[] = [
     id: 'sensor_dropout',
     label: 'Camera blinded by rain · holds',
     dur: '2 steps · ~6 s',
-    icon: '🌧️',
+    icon: CloudRain,
     totalSteps: 2,
     focusNodes: ['S7-05'],
   },
@@ -43,7 +45,7 @@ export const SCENARIOS: ScenarioDef[] = [
     id: 'corridor_handoff',
     label: 'Coordinated corridor handoff',
     dur: '5 steps · ~15 s',
-    icon: '🕸️',
+    icon: Network,
     totalSteps: 5,
     focusNodes: ['S7-12', 'S7-06', 'S7-07', 'S7-05', 'S7-09'],
   },
@@ -51,7 +53,7 @@ export const SCENARIOS: ScenarioDef[] = [
     id: 'declined_livestock',
     label: 'Cattle, not elephant · declines to act',
     dur: '2 steps · ~6 s',
-    icon: '🐄',
+    icon: ShieldOff,
     totalSteps: 2,
     focusNodes: ['S7-02'],
   },
@@ -59,7 +61,7 @@ export const SCENARIOS: ScenarioDef[] = [
     id: 'fleet_degradation',
     label: 'Solar decline · maintenance raised',
     dur: '3 steps · ~9 s',
-    icon: '🔋',
+    icon: BatteryLow,
     totalSteps: 3,
     focusNodes: ['S7-11'],
   },
@@ -67,7 +69,7 @@ export const SCENARIOS: ScenarioDef[] = [
     id: 'poaching_acoustic',
     label: 'Gunshot signature · silent alert',
     dur: '3 steps · ~9 s',
-    icon: '🎯',
+    icon: Crosshair,
     totalSteps: 3,
     focusNodes: ['S7-09'],
   },

@@ -49,6 +49,32 @@ function segments(points: (number | null)[], n: number): string[] {
   return segs
 }
 
+// Place the end-of-line labels so they never sit on top of each other. Two series
+// that converge to the same rate (78% and 78%) resolve to the identical y, which is
+// exactly where a direct label is most useful and was least readable. Walk them in y
+// order and push each one down until it clears the previous by LABEL_GAP, then, if
+// the stack has run past the bottom of the plot, shift the whole run back up so it
+// stays inside the chart rather than spilling under the x-axis.
+const LABEL_GAP = 11
+
+interface EndLabel {
+  action: string
+  color: string
+  v: number
+  y: number
+}
+
+function layoutEndLabels(labels: EndLabel[]): EndLabel[] {
+  const sorted = [...labels].sort((a, b) => a.y - b.y)
+  for (let i = 1; i < sorted.length; i++) {
+    const gap = sorted[i].y - sorted[i - 1].y
+    if (gap < LABEL_GAP) sorted[i].y = sorted[i - 1].y + LABEL_GAP
+  }
+  const overflow = sorted.length > 0 ? sorted[sorted.length - 1].y - Y1 : 0
+  if (overflow > 0) for (const l of sorted) l.y = Math.max(Y0, l.y - overflow)
+  return sorted
+}
+
 function lastValid(points: (number | null)[]): { i: number; v: number } | null {
   for (let i = points.length - 1; i >= 0; i--) {
     const v = points[i]
@@ -61,6 +87,13 @@ export function LearningTrendChart({ weeks, series }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const [hover, setHover] = useState<{ index: number; px: number; width: number } | null>(null)
   const n = weeks.length
+
+  const endLabels = layoutEndLabels(
+    series.flatMap((s) => {
+      const lv = lastValid(s.points)
+      return lv ? [{ action: s.action, color: s.color, v: lv.v, y: yFor(lv.v) }] : []
+    }),
+  )
 
   function onMove(e: React.MouseEvent) {
     const svg = svgRef.current
@@ -141,24 +174,25 @@ export function LearningTrendChart({ weeks, series }: Props) {
           )),
         )}
 
-        {/* end-of-line direct labels (muted ink, identity via proximity) */}
-        {series.map((s) => {
-          const lv = lastValid(s.points)
-          if (!lv) return null
-          return (
-            <text
-              key={`lbl-${s.action}`}
-              x={X1 + 6}
-              y={yFor(lv.v) + 3.5}
-              fontFamily="'IBM Plex Mono',monospace"
-              fontSize={10}
-              fontWeight={600}
-              fill={INK_MUTED}
-            >
-              {Math.round(lv.v * 100)}%
-            </text>
-          )
-        })}
+        {/* End-of-line direct labels. Two things were wrong when series converge:
+            the labels sat at yFor(value), so equal final values (78% and 78%)
+            printed on top of each other; and they were all muted ink, which relies
+            on "identity via proximity" — exactly what stops working when the lines
+            meet. Labels now take their series colour, and are nudged apart to keep a
+            minimum vertical gap. */}
+        {endLabels.map((l) => (
+          <text
+            key={`lbl-${l.action}`}
+            x={X1 + 6}
+            y={l.y + 3.5}
+            fontFamily="'IBM Plex Mono',monospace"
+            fontSize={10}
+            fontWeight={600}
+            fill={l.color}
+          >
+            {Math.round(l.v * 100)}%
+          </text>
+        ))}
 
         {/* hovered-bucket markers (surface ring separates overlaps) */}
         {hover &&

@@ -121,7 +121,15 @@ export function Demo() {
               }`}
               style={{ minHeight: 44 }}
             >
-              <div className="mb-2.5 text-[22px]">{s.icon}</div>
+              <div
+                className={`mb-2.5 grid h-10 w-10 place-items-center rounded-xl border ${
+                  active
+                    ? 'border-brand-gold/40 text-brand-gold bg-[rgba(226,161,60,0.12)]'
+                    : 'border-brand-fg/12 text-brand-fg/70 bg-brand-fg/4'
+                }`}
+              >
+                <s.icon size={19} strokeWidth={1.75} aria-hidden />
+              </div>
               <p className="text-brand-fg m-0 font-sans text-[14px] font-semibold">{s.label}</p>
               <p className="text-brand-fg/45 m-0 mt-1 font-mono text-[11.5px] font-medium">
                 {active ? 'Running…' : s.dur}
