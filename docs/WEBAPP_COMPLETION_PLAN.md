@@ -251,7 +251,9 @@ blocks on it.
 **Exit criteria:** a `docs/qa/webapp-final` screenshot set covering every route × every role ×
 every breakpoint, with every visual/interaction bug found in that pass fixed and re-shot.
 
-**Status: met for officer/resident/anonymous, 12 Jul; admin role pending credentials.**
+**Status: met, 12 Jul.** Full matrix green — **91 screenshots**, every route × every role
+(anonymous, resident, officer, admin) × mobile/tablet/desktop, every interaction assertion passing,
+script exits 0.
 
 **Item 1's premise was wrong, and is corrected rather than silently dropped.** The plan assumed the
 alerts feed and replay "show broken image states" without seeded `event-media` thumbnails. They do
@@ -319,12 +321,25 @@ one is a data-honesty defect that the pass could not have caught:
    ~14 Hz previously assumed) while `migrations/0001_phase4c.sql` still said `14 Hz`. Same
    schema-vs-migration drift class as Day 3's `demo_touch_node` grant bug. Both files now agree.
 
+6. **`StaySafe`'s opt-in form collected contact details and dropped them.** It set local React state
+   and showed a "You're covered" confirmation — no Supabase write, no row anywhere. A resident who
+   opted in through the public page was told they were covered and was not, which is the worst
+   possible failure for a safety product. Fixed per an explicit scope decision: **no new anonymous
+   opt-in table and no separate verification flow** — signed-out visitors are routed to `/signup`
+   (signup + email confirmation *is* the consent record) and collect nothing, while signed-in
+   visitors get a toggle writing the same `profiles.alerts_enabled` flag `send-alert` actually fans
+   out on. That write now lives once, in `hooks/useAlertsOptIn.ts`, consumed by both `StaySafe` and
+   `ResidentView` rather than duplicated. The hook also surfaces a failed update, which
+   `ResidentView`'s toggle previously swallowed — silently leaving the switch showing a promise the
+   backend never recorded. The page's SMS-specific copy is now channel-neutral, matching Day 1's
+   reality (email live, SMS gated behind `CHANNEL_SMS` pending DLT).
+   **Live-proved**, not just typechecked: signed-out collects no phone input and its CTA routes to
+   `/signup`; signed-in toggling flips `profiles.alerts_enabled` `false → true → false` in the
+   production database, verified by direct service-role query between clicks, with the seed fixture
+   restored afterwards.
+
 **Carried, not silently dropped:**
-- **Admin role unshot.** The only admin in the project is the account owner's own, so the two
-  admin-only routes (`/dashboard/officers`, `/dashboard/admin`) are not yet in the screenshot set and
-  the officer-approvals click-reachability assertion has not run against a real admin session. The
-  script reads `QA_ADMIN_EMAIL`/`QA_ADMIN_PASSWORD` from the gitignored `.env.local` and exits 2
-  ("INCOMPLETE") without them rather than reporting a false pass. Run it once those are set.
+
 - **The live database still serves the old `14 Hz` demo log line**, because `run_demo_scenario`'s
   body is only updated by re-applying the DDL. Re-apply before any demo where that log text is read
   aloud.
@@ -336,13 +351,10 @@ one is a data-honesty defect that the pass could not have caught:
   gitignored `.env.local`, the script rotates the password on re-run (so a leaked one can be revoked),
   and the live accounts have been rotated off the previously-hardcoded value. Still delete them from
   Authentication → Users before publishing, along with Day 3's leftover `day3-adversarial-*` account.
-- **`StaySafe`'s SMS opt-in form does not persist anything.** It sets local React state and shows a
-  "You're covered" confirmation — no Supabase write, no row anywhere. A resident who signs up through
-  the public page is told they are covered and is not. Separately, the page's copy promises SMS
-  throughout, while Day 1 established SMS is gated off behind `CHANNEL_SMS` pending DLT and **email**
-  is the live channel. Not fixed here because making it real is a feature decision (which table, what
-  verification, what consent record), not a QA fix — but it is a promise the product does not
-  currently keep, and it should not go live to residents in this state.
+- **Residents can only opt in by holding an account.** This is the deliberate consequence of the
+  decision above, not an oversight: there is no phone-only, no-account opt-in path. If real field use
+  shows residents will not create accounts, that is the moment to design an anonymous opt-in with a
+  real verification and consent record — not before.
 
 ## Day 6 (Thu) — Automated tests
 
