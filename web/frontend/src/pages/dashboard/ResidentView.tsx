@@ -1,16 +1,15 @@
 import { useEffect, useState } from 'react'
-import { useAuth } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
+import { useAlertsOptIn } from '@/hooks/useAlertsOptIn'
 import { deriveAreaRisk, recentActivity, riskDisplay, type AreaRiskRow } from '@/lib/risk'
 
 type LoadState = 'loading' | 'ready' | 'error'
 
 export function ResidentView() {
-  const { profile, refreshProfile } = useAuth()
-  const [saving, setSaving] = useState(false)
+  // Same opt-in write the Stay Safe page uses — one path to alerts_enabled.
+  const { enabled: alertsOn, saving, error: saveError, setEnabled } = useAlertsOptIn()
   const [rows, setRows] = useState<AreaRiskRow[]>([])
   const [state, setState] = useState<LoadState>('loading')
-  const alertsOn = profile?.alerts_enabled ?? false
 
   useEffect(() => {
     let cancelled = false
@@ -32,14 +31,6 @@ export function ResidentView() {
       cancelled = true
     }
   }, [])
-
-  async function toggleAlerts() {
-    if (!profile) return
-    setSaving(true)
-    await supabase.from('profiles').update({ alerts_enabled: !alertsOn }).eq('id', profile.id)
-    await refreshProfile()
-    setSaving(false)
-  }
 
   const risk = deriveAreaRisk(rows)
   const display = riskDisplay(risk)
@@ -112,7 +103,7 @@ export function ResidentView() {
 
       <div className="border-brand-fg/10 rounded-[18px] border bg-[#0B0D0B] p-6">
         <button
-          onClick={toggleAlerts}
+          onClick={() => setEnabled(!alertsOn)}
           disabled={saving}
           aria-pressed={alertsOn}
           className="flex min-h-11 w-full items-center justify-between gap-3.5 bg-transparent p-0 disabled:opacity-60"
@@ -137,6 +128,7 @@ export function ResidentView() {
             />
           </span>
         </button>
+        {saveError && <p className="text-brand-red m-0 mt-3 font-sans text-[13px] font-medium">{saveError}</p>}
       </div>
 
       <p className="text-brand-fg/40 m-0 font-sans text-[12.5px] leading-relaxed">
