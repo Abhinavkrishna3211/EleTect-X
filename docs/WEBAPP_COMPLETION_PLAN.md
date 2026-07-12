@@ -200,6 +200,41 @@ directly answers "pave the way to connect to the platform before hardware arrive
 **Exit criteria:** a simulated LoRaWAN uplink travels ChirpStack → `web/ingest` → Supabase →
 dashboard live update, with zero physical hardware involved.
 
+**Status: met, 12 Jul.** ChirpStack stood up locally via Docker Compose (`chirpstack-docker`
+quickstart, kept as a sibling directory outside this repo), region confirmed IN865 (already listed
+in the default `enabled_regions`, no edit needed beyond swapping every `eu868` reference in
+`docker-compose.yml` to `in865` for the gateway-bridge topic templates and Basic Station config
+file). Tenant/device profile (IN865, LoRaWAN 1.0.3, OTAA)/application/device provisioned in the
+ChirpStack UI as throwaway test fixtures. Built `web/ingest` (`src/mqtt.ts`, `src/uplink.ts`,
+`src/supabase.ts`) — subscribes to `application/{id}/device/+/event/up`, upserts a `nodes` row per
+sending device, writes `health` when the payload carries battery/solar/temp, writes `events` when
+it carries `species`. `web/ingest/test-uplink.json` is a committed synthetic-uplink fixture for
+future hardware-free testing (see `web/ingest/README.md`).
+
+Two real bugs found and fixed en route, both local-dev-environment issues rather than `web/ingest`
+code defects: (1) running `web/ingest` natively on Windows and connecting to the broker through
+Docker's host-to-container port forward (`localhost:1883`) never delivered broker-pushed `PUBLISH`
+packets, even though the connection, subscription (`SUBACK`, granted QoS 0), and keepalive
+(`PINGREQ`/`PINGRESP`) all worked — confirmed via `mqtt.js` packet-level tracing
+(`packetreceive`/`packetsend`) that zero `PUBLISH` packets ever arrived, while `mosquitto_sub` run
+directly inside the container received the same message immediately. Fixed by containerizing
+`web/ingest` (`web/ingest/Dockerfile`) and running it attached to the same Docker network as
+mosquitto (`--network chirpstack-stack_default`, `MQTT_URL=mqtt://mosquitto:1883`), bypassing the
+host port forward entirely. (2) Once transport was fixed, `mosquitto_pub -m '<json>'` invoked from
+PowerShell through `docker exec` was silently stripping the double quotes out of the JSON payload
+before it ever reached the broker — confirmed via `mosquitto_sub -v` showing unquoted keys on the
+wire. Fixed by publishing from a file (`mosquitto_pub -f`) via `docker cp`, sidestepping PowerShell's
+argument-quoting entirely.
+
+Live-proof: `test-uplink.json` published to
+`application/230a40b7-fb1f-4f32-b9ae-3ca51a280e8e/device/4f3030e129cfeb14/event/up` →
+`web/ingest` logged `Logged elephant event from 4f3030e129cfeb14 (confidence=0.85)` → confirmed via
+direct SQL query against the live `eletect-x` Supabase project: `events` row `id=254`,
+`node_id='4f3030e129cfeb14'`, `species='elephant'`, `confidence=0.85`, `direction_deg=45`,
+`priority='normal'` — exact match to the published payload. Real gateway/node DevEUI/AppEUI/AppKey
+provisioning stays tracked separately as hardware-arrival-gated work per item 4 above; nothing here
+blocks on it.
+
 ## Day 5 (Wed) — Seed completeness + full responsive/interactive pass
 
 1. Extend seed data to cover what's thin: `profiles` (a realistic mix of admin/officer/public
@@ -215,6 +250,99 @@ dashboard live update, with zero physical hardware involved.
 
 **Exit criteria:** a `docs/qa/webapp-final` screenshot set covering every route × every role ×
 every breakpoint, with every visual/interaction bug found in that pass fixed and re-shot.
+
+**Status: met for officer/resident/anonymous, 12 Jul; admin role pending credentials.**
+
+**Item 1's premise was wrong, and is corrected rather than silently dropped.** The plan assumed the
+alerts feed and replay "show broken image states" without seeded `event-media` thumbnails. They do
+not — *nothing in the frontend renders `media_url` as an image at all*. `AlertsFeed.tsx` uses emoji
+species glyphs (`SPECIES_ICON`), `Replay.tsx` has no media element, and the only `media_url`
+reference outside the type definition is `Demo.tsx`'s `media_url === 'demo'` filter. There is no
+broken state to fix, so no `event-media` bucket was created and no thumbnails were seeded. Event-media
+rendering is a real feature, but it belongs with the hardware that will actually produce snapshots,
+not with this QA pass.
+
+`scripts/seed-day5-profiles.mjs` ran clean: four throwaway accounts (`*.seed@eletect-x.test`, shared
+password, no confirmation email sent so Supabase's rate-limited default sender is untouched) — a
+pending officer request, an approved officer, a resident with alerts on and a Sector-7 location, and
+an unengaged resident with alerts off. **Verified rather than assumed**: `handle_new_user()` *does*
+fire for admin-API-created users and reads `officer_request` out of `user_metadata` — confirmed by a
+direct query showing the `officer_requests` row landed with `status=pending`, so the approvals screen
+has real data behind it instead of shooting empty.
+
+Built `web/frontend/scripts/qa-day5-responsive.mjs` — 62 screenshots into `docs/qa/webapp-final/`
+across mobile (390×844), tablet (820×1180) and desktop (1440×900), for anonymous (8 public + 4 auth
+routes), officer (7 routes), and resident (1). 820 and 390 are chosen to straddle Tailwind's `md`
+(768px), which is where `DashboardLayout` swaps the sidebar for the bottom bar. Alongside the shots it
+asserts what a screenshot cannot see: **click-reachability** of every role-permitted route per
+breakpoint, RoleGate redirects, ≥44×44px tap targets, Escape-closes-the-sheet, focus acceptance, and
+zero horizontal overflow. Re-run against the *production build* (`vite preview`) as well as dev, both
+green.
+
+Five real bugs found and fixed. Two were found by reading before the pass ran, two by the pass itself,
+one is a data-honesty defect that the pass could not have caught:
+
+1. **Dashboard routes unreachable on mobile** (`layouts/DashboardLayout.tsx`). The desktop sidebar is
+   `hidden … md:flex` and derived from `staffTabs`/`adminOnlyTabs`; below `md`, navigation came from
+   two *separate* hardcoded arrays hand-truncated to five entries. They had drifted: an **officer on a
+   phone could not reach Learning or Planner**, and an **admin on a phone could not reach Corridor,
+   Learning, Planner, or — worst — the admin-only officer-approval queue**. An admin approving a
+   pending officer signup from a phone is precisely the field scenario this app exists for. Fixed by
+   deriving the mobile bar from the same tab definitions (one source of truth) and spilling the
+   overflow into a "More" sheet (Escape-dismissable, focus moved into the panel) rather than
+   truncating routes away. The click-reachability assertion is what proves it and what stops the
+   regression recurring.
+2. **Horizontal overflow on every dashboard route at 390px** (`DashboardLayout.tsx` header).
+   `scrollWidth` was 402px against a 390px viewport — the whole dashboard scrolled sideways on a
+   phone. Cause: the header's right-hand group (user label + Sign out) had a `truncate` label that
+   could never engage, because a flex item will not shrink below its content width without
+   `min-w-0`. Fixed on both the group and the label. This was invisible until the pass stopped using
+   Playwright's `isMobile` emulation, which reports a layout viewport taller and wider than the
+   screenshot and was masking the overflow entirely — worth remembering: `isMobile: true` hides this
+   class of bug.
+3. **`ResidentView` fabricated its data** (`pages/dashboard/ResidentView.tsx`). The only screen a
+   `public`-role user ever sees was rendering a hardcoded `recentAlerts` array ("Elephants moved back
+   to forest: all clear", "Yesterday 22:10") and a hardcoded "🟢 Low: no wildlife near villages"
+   banner. Under this file's own deployment bar — real residents depending on this for real
+   conflict alerts — a resident-facing screen that invents an all-clear is a correctness failure, not
+   a polish item. Now derives both from the `public_area_risk` view, with honest loading/error/empty
+   states. Because that view is deliberately aggregate-only (`day`, `detections` — no species, node,
+   or coordinates leak to the public role, by design in `schema.sql`), the fix shows real *counts* per
+   day and says so explicitly ("Counts only. Exact location and direction are sent to you directly in
+   an alert, never shown here") rather than inventing per-alert detail the role is not entitled to
+   read. New pure module `lib/risk.ts` holds the derivation, unit-tested on Day 6.
+4. **`StaySafe` had the same fabricated banner** (`pages/public/StaySafe.tsx`) — hardcoded "Low · No
+   wildlife detected near villages" and "Updated 2 min ago" on the *public marketing* page. Wired to
+   the same `public_area_risk` view (which already grants `select` to `anon` for exactly this).
+5. **Migration drift** — `schema.sql` carried the demo scenario's corrected seismic signature
+   (`22 Hz`, per ADR 0001 §2: published seismology puts elephant footfall at ~24 Hz mean, not the
+   ~14 Hz previously assumed) while `migrations/0001_phase4c.sql` still said `14 Hz`. Same
+   schema-vs-migration drift class as Day 3's `demo_touch_node` grant bug. Both files now agree.
+
+**Carried, not silently dropped:**
+- **Admin role unshot.** The only admin in the project is the account owner's own, so the two
+  admin-only routes (`/dashboard/officers`, `/dashboard/admin`) are not yet in the screenshot set and
+  the officer-approvals click-reachability assertion has not run against a real admin session. The
+  script reads `QA_ADMIN_EMAIL`/`QA_ADMIN_PASSWORD` from the gitignored `.env.local` and exits 2
+  ("INCOMPLETE") without them rather than reporting a false pass. Run it once those are set.
+- **The live database still serves the old `14 Hz` demo log line**, because `run_demo_scenario`'s
+  body is only updated by re-applying the DDL. Re-apply before any demo where that log text is read
+  aloud.
+- **Seed-account credentials are env-only, and the accounts must be deleted before the repo goes
+  public.** The seed script originally hardcoded a shared password. That is a committed secret: these
+  accounts live in the *production* project and `officer.approved.seed` holds the **officer** role,
+  which reads every staff table — so a public repo (which the Robu/Hackster submissions imply) would
+  have handed anyone a working forest-officer login. Both scripts now take `QA_SEED_PASSWORD` from the
+  gitignored `.env.local`, the script rotates the password on re-run (so a leaked one can be revoked),
+  and the live accounts have been rotated off the previously-hardcoded value. Still delete them from
+  Authentication → Users before publishing, along with Day 3's leftover `day3-adversarial-*` account.
+- **`StaySafe`'s SMS opt-in form does not persist anything.** It sets local React state and shows a
+  "You're covered" confirmation — no Supabase write, no row anywhere. A resident who signs up through
+  the public page is told they are covered and is not. Separately, the page's copy promises SMS
+  throughout, while Day 1 established SMS is gated off behind `CHANNEL_SMS` pending DLT and **email**
+  is the live channel. Not fixed here because making it real is a feature decision (which table, what
+  verification, what consent record), not a QA fix — but it is a promise the product does not
+  currently keep, and it should not go live to residents in this state.
 
 ## Day 6 (Thu) — Automated tests
 
@@ -234,6 +362,43 @@ when I click through it" and "solid."
 **Exit criteria:** `npm run test` passes locally and in CI; a broken `lib/` function or a
 role-routing regression fails the build instead of surfacing in the field.
 
+**Status: met, 12 Jul.** Vitest was not merely unused — it was **not installed at all**
+(`package.json` listed `playwright` but no `vitest`, despite the blueprint naming it). Installed
+`vitest` + `@vitest/coverage-v8`, added `test` / `test:watch` scripts and a `test` block in
+`vite.config.ts` (`environment: 'node'` — the suite covers pure derivations, so no jsdom dependency
+is dragged into CI).
+
+**117 tests across 6 modules**, all green: `lib/planner.ts` (geometry + the CONTEXT.md §6 rules —
+including the load-bearing invariant that *no adjacent pair of planned nodes may ever exceed the
+150 m spacing maximum*, which is a coverage hole in the field rather than a rounding detail),
+`lib/fleet.ts` (maintenance rules, trend slopes, `compareVersions`' `v1.10.0 > v1.9.0` trap,
+gap-vs-zero handling — a day with no telemetry must read as a gap, never as a flat battery),
+`lib/incident.ts` (cluster gap boundaries, path de-duplication, herd interpolation and clamping),
+`lib/dashboard.ts` (`sigmoid`/`fusedConfidence` — ADR 0001 §6's `P = σ(L)` surfacing in the UI —
+plus the rule that unknown confidence stays `null` and is never rendered as a fabricated 0%),
+`lib/learning.ts` (weekly bucketing, the min-sample rule that stops one lucky retreat plotting as a
+100%-effective deterrent, pinned series colours), and the new `lib/risk.ts`.
+
+**The suite was mutation-checked, not just run.** Dropping `evaluateRules`' battery-critical floor
+from 20% to 5% makes the suite fail (`× flags battery below the 20% floor as critical`) — confirming
+the tests would actually catch a regression rather than merely passing alongside one.
+
+**CI** (`.github/workflows/ci.yml`): the `lint-web` job whose entire body was
+`echo "web/frontend lint placeholder"` is replaced by a real `web-frontend` job — `npm ci` →
+`npm run lint` → `npm run build` (which is `tsc -b && vite build`, so it is the typecheck gate too) →
+`npm run test`. `lint-python` keeps its `|| true` for now: `device/mpu` and `ml/` are still empty
+scaffolds, so tightening it would gate on nothing.
+
+**Playwright is deliberately not in CI.** It drives a real browser against a live Supabase project
+with real staff logins; in GitHub Actions that would mean production credentials in repo secrets and
+every PR writing to the production database. It stays a local pre-deploy gate, and
+`scripts/qa-day5-responsive.mjs` *is* that gate — it already logs in as each role and asserts every
+dashboard route renders, so a second, thinner smoke script would only duplicate it.
+
+**Still open (was flagged optional):** `notify-officer-request`'s `getUserById` guard remains
+untested, because unlike `send-alert` its fan-out logic is not extracted into a testable module. The
+same `fanout.ts` extraction plus two Deno tests would close it.
+
 ## Day 7 (Fri) — Deploy + final review
 
 1. Vercel project, environment variables set through Vercel's dashboard (never committed —
@@ -246,6 +411,46 @@ role-routing regression fails the build instead of surfacing in the field.
 
 **Exit criteria:** `eletect-x.vercel.app` (or the chosen domain) is the live, production app —
 not a preview deploy — passing the same regression checklist as local dev.
+
+**Status: prepared, 12 Jul; the account-linked deploy itself is the remaining step.**
+
+**Bundle split (was the pre-Day-4 audit's deferred perf advisory).** The main chunk was **740 kB**
+(209 kB gzip), over Vite's 500 kB threshold, and it contained the entire ranger dashboard — Leaflet
+included — which every anonymous visitor to the marketing site downloaded to read a page that
+renders none of it. `App.tsx` now route-splits with `React.lazy` + `Suspense` (Home and Login stay
+eager: they are the two pages a cold visitor actually lands on). Result: main chunk **263 kB**
+(83 kB gzip), warning gone, with Leaflet (157 kB) and Supabase (204 kB) in chunks the marketing site
+never fetches. The `Suspense` fallback deliberately matches `ProtectedRoute`'s existing loading state
+so a chunk fetch and a session check read as one load, not two spinners.
+
+**`web/frontend/vercel.json`** — `framework: vite`, build `npm run build`, output `dist`, and the
+catch-all rewrite `/(.*)` → `/index.html` **without which a hard refresh on `/dashboard/fleet` 404s**
+(this is `BrowserRouter`, not hash routing). Plus `X-Content-Type-Options`, `Referrer-Policy`,
+`X-Frame-Options: DENY`, `Permissions-Policy`, HSTS, and immutable caching on `/assets/*`.
+
+**No CSP is shipped, on purpose.** A correct one has to allow the project's own Supabase origin
+(env-specific) plus the CARTO tile CDN (`*.basemaps.cartocdn.com`), and a static `vercel.json` CSP
+with the wrong origins fails *silently* — blank map tiles, dead auth — which is exactly the failure
+mode not worth risking on a live DFO-facing deploy. Add it as a post-deploy hardening step, verified
+against the real URL.
+
+**Verified locally against the production build, not just dev**: `vite preview` serving the real
+`dist/` output against the production Supabase project passes the entire Day 5 QA pass (62
+screenshots, every interaction assertion), including deep links straight to `/dashboard/*`.
+
+**Deploy runbook (account-linked, so it is the owner's step):**
+1. Vercel → New Project → import this repo → **Root Directory: `web/frontend`**. `vercel.json` supplies
+   the rest; do not override the build command.
+2. Environment variables, set in Vercel's dashboard (Production scope), **never committed**:
+   `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` — the **anon** key only. The service-role key must
+   never reach a Vite build: everything prefixed `VITE_` is inlined into client JS and is public.
+   `.env.local` is gitignored and stays that way.
+3. Deploy to **production**, not a preview.
+4. Then re-run the regression against the live URL:
+   `QA_BASE_URL=https://<the-domain> node scripts/qa-day5-responsive.mjs` (with `QA_ADMIN_*` set, so
+   the admin role is covered this time), plus Demo Mode end to end — and call `reset_demo_data()`
+   afterwards so no demo rows linger in production — plus one real alert through the Day 1 pipeline.
+5. Add the CSP, verified against the live origin.
 
 ---
 
