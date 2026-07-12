@@ -392,11 +392,9 @@ pass, delete again.
   username for free (half the credential pair, no guessing needed). Harmless while the app is a demo;
   it should not survive into the DFO deployment. Either drop the demo-account hints before launch or
   point them at accounts that do not exist in production.
-- **`scripts/qa-phase3-screenshots.mjs` hardcodes a password** (`qa-test-pass-123`, line 57) for the
-  throwaway `qa-resident-*@example.com` signups it creates. Lower severity than the seed-account case
-  that prompted this audit — those accounts only ever get the `public` role, which reads nothing but
-  its own profile row, and none currently exist in the project. Still worth moving to the same
-  `QA_SEED_PASSWORD`-from-`.env.local` pattern the Day 5 scripts now use.
+- ~~`scripts/qa-phase3-screenshots.mjs` hardcodes a password.~~ **Fixed 12 Jul** — it now reads
+  `QA_SEED_PASSWORD` from the gitignored `.env.local`, same pattern as the Day 5 scripts. No
+  hardcoded credential remains in any tracked script.
 - ~~The live database still serves the old `14 Hz` demo log line.~~ **Resolved 12 Jul** — the live
   `run_demo_scenario` now says `22 Hz`; see the closeout.
 - **Seed-account credentials are env-only, never committed.** The seed script originally hardcoded a
@@ -614,10 +612,58 @@ quietly dropped.
    email"); it is Dashboard-only. Do not `supabase config push` to achieve it: that pushes the entire
    local `config.toml`, which has never captured the live project's `site_url`/redirect URLs and
    would silently reset them.
-3. **Branch protection on `main` is not enabled.** A direct push to `main` succeeded on 12 Jul, which
-   would have been rejected had it been on. So the CI job wired up on Day 6 currently gates nothing —
-   a red build can still land on `main`. Enable it in GitHub → Settings → Branches, requiring the
-   `web-frontend` check. `PROJECT_BLUEPRINT.md` §0 has listed this as a day-one action since the start.
+3. **Branch protection on `main`: deferred by design until the repo goes public (target 16 Aug 2026,
+   ~1 week before the Robu deadline).** Not an oversight — an accepted, dated risk.
+
+   It **cannot** be enabled today: GitHub gates branch protection *and* rulesets behind Pro for
+   private repositories. Both REST endpoints return
+   `403 "Upgrade to GitHub Pro or make this repository public"`, and the web UI is gated identically,
+   so this is not a CLI limitation and there is no workaround short of paying or publishing. Until
+   then `main` accepts direct pushes and the Day 6 CI job gates nothing — a red build can land on
+   `main`. Work accordingly: run `npm run lint && npm run build && npm run test` before pushing to
+   `main`, because nothing else will.
+
+   The `web-frontend` check **is** registered and passing on `main`, so it is ready to be required the
+   moment protection becomes available. Run both commands together on publication day:
+
+   ```bash
+   gh repo edit Abhinavkrishna3211/EleTect-X --visibility public --accept-visibility-change-consequences
+   gh api -X PUT repos/Abhinavkrishna3211/EleTect-X/branches/main/protection \
+     -H "Accept: application/vnd.github+json" --input - <<'JSON'
+   {
+     "required_status_checks": { "strict": true, "contexts": ["web-frontend"] },
+     "enforce_admins": true,
+     "required_pull_request_reviews": { "dismiss_stale_reviews": true, "required_approving_review_count": 0 },
+     "restrictions": null,
+     "allow_force_pushes": false,
+     "allow_deletions": false,
+     "required_linear_history": true
+   }
+   JSON
+   ```
+
+   `enforce_admins: true` matters — without it the rule does not apply to the repo owner, and a direct
+   push to `main` would still succeed. Verify afterwards by attempting one and confirming it is
+   rejected. (`PROJECT_BLUEPRINT.md` §0 has listed branch protection as a day-one action; the reason it
+   never happened is the plan gate, now documented rather than left mysterious.)
+
+### Post-closeout fixes, 12 Jul
+
+- **Hover/focus affordances.** The premise that interactive elements showed "zero visual change on
+  hover" turned out to be true only in part — measured on the live site by diffing computed styles
+  before and after hover, nav links *did* shift colour (70% → 100% opacity), buttons *did* lighten
+  (`#E2A13C → #EDBE6F`), and inputs *did* tint their border gold on focus. The real gap was
+  **cards: 76 of them across every public page, with no hover response at all.** They now use the
+  affordance the codebase had already established on the Home/Solutions/Technology feature cards
+  (gold border + a 4px lift) rather than a newly invented one. Nav and footer links additionally gain
+  an underline, because a 70→100% opacity shift alone is a weak signal on this palette. Keyboard
+  focus previously fell through to each browser's default outline — easy to lose entirely on a
+  near-black surface, and inputs opted out of it altogether via `focus:outline-none` — so a single
+  gold `:focus-visible` ring is now defined globally in `index.css`. All verified by measuring
+  computed styles on the built output, not by eye.
+- **`qa-phase3-screenshots.mjs` no longer hardcodes a password**; it reads `QA_SEED_PASSWORD` from the
+  gitignored `.env.local`, the same pattern as the Day 5 scripts.
+- **anon/PUBLIC `EXECUTE` revoked on the definer RPCs** — see below.
 
 ### Applied directly to the production database, 12 Jul
 
@@ -648,15 +694,20 @@ a live row. Run through `supabase db query --linked` (Management API; no DB pass
 
 ### Known gaps, not blocking
 
-- **Defense-in-depth on the definer RPCs: add the missing `revoke`s.** As corrected in the Day 3
-  section above, `anon` currently holds `EXECUTE` on `run_demo_scenario`, `reset_demo_data`,
-  `approve_officer_request` and `reject_officer_request` (and still on `demo_touch_node`, whose Day 3
-  revoke named `public, authenticated` but not `anon`). The internal `is_staff()`/`is_admin()` guards
-  reject every one of them — re-verified live 12 Jul — so this is a hardening item, not a hole. The
-  correct fix is `revoke execute … from public, anon` on all five, **keeping `authenticated`** on
-  `run_demo_scenario` and `reset_demo_data`: staff call those two straight from the browser as the
-  `authenticated` role, so revoking there would break Demo Mode. Apply to `schema.sql` **and** the
-  live database together — a source-only change is precisely the drift this file keeps catching.
+- ~~Defense-in-depth on the definer RPCs.~~ **Done, 12 Jul.** `revoke execute … from public, anon`
+  applied to all five (`run_demo_scenario`, `reset_demo_data`, `approve_officer_request`,
+  `reject_officer_request`, `demo_touch_node`) — on the **live database and in `schema.sql` together**,
+  plus `migrations/0002_revoke_anon_rpc_execute.sql`, so this does not become the source-vs-live drift
+  this file keeps catching. `authenticated` deliberately **keeps** `EXECUTE` on the four
+  browser-called RPCs: staff run Demo Mode and admins work the approval queue as that role, and
+  revoking there would have broken both. `demo_touch_node` is internal-only (invoked by the definer
+  functions, which run as the owner) so it needs no role grant at all.
+
+  The proof this actually closed a layer: an anonymous call now fails with
+  **`permission denied for function`** (stopped at the grant, before the body) where it previously
+  failed with `not authorized` (stopped by the guard, inside the body). All four re-tested live as
+  true-anonymous. Demo Mode re-verified end to end from the live dashboard afterwards — scenario runs,
+  writes rows, `Reset demo data` clears them, zero permission errors in the browser console.
 - **DLT registration status: still unfilled.** Nobody has recorded the actual application/approval
   state with the SMS provider. Until then SMS stays gated behind `CHANNEL_SMS=off` and email carries
   delivery. Record the real answer here rather than leaving it an assumption.
