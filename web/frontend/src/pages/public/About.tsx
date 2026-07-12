@@ -23,7 +23,7 @@ export function About() {
       </p>
 
       <h2 className="mb-6 font-serif text-[clamp(24px,3vw,34px)] font-normal">Team</h2>
-      <div className="mb-13 grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3.5">
+      <div className="mb-13 grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3.5" data-reveal-stagger>
         {team.map((m) => (
           <div key={m.name} className="border-brand-fg/9 rounded-2xl border bg-[#0B0D0B] p-6.5 transition-all hover:border-brand-gold/40 hover:-translate-y-1">
             <div className="mb-4 grid h-16 w-16 place-items-center rounded-full bg-[linear-gradient(140deg,#2F5E3F,#0F1D14)]">

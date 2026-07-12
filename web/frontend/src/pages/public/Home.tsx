@@ -51,7 +51,7 @@ export function Home() {
           <h2 className="mb-10 max-w-[24ch] font-serif text-[clamp(28px,3.6vw,44px)] leading-[1.15] font-normal">
             Human-wildlife conflict is now an official disaster in Kerala.
           </h2>
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,220px),1fr))] gap-3">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,220px),1fr))] gap-3" data-reveal-stagger>
             {stats.map((s) => (
               <div
                 key={s.label}
@@ -83,11 +83,11 @@ export function Home() {
           <p className="text-brand-fg/68 mb-11 max-w-[60ch] font-sans text-base leading-relaxed">
             Every node runs fully offline on solar power. No internet is needed to detect, decide, or deter.
           </p>
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-3.5">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-3.5" data-reveal-stagger>
             {steps.map((st) => (
               <div
                 key={st.n}
-                className="border-brand-fg/9 hover:border-brand-gold/45 rounded-2xl border bg-[linear-gradient(160deg,rgba(15,29,20,0.55),rgba(11,13,11,0.3))] p-6"
+                className="border-brand-fg/9 hover:border-brand-gold/45 rounded-2xl border bg-[linear-gradient(160deg,rgba(15,29,20,0.55),rgba(11,13,11,0.3))] p-6 transition-all hover:-translate-y-1"
               >
                 <div className="mb-2.5 flex items-baseline gap-2.5">
                   <span className="text-brand-gold font-mono text-xs font-semibold">{st.n}</span>
@@ -186,12 +186,12 @@ export function Home() {
               All solutions →
             </Link>
           </div>
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-3.5">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-3.5" data-reveal-stagger>
             {solutionCards.map((s) => (
               <Link
                 key={s.title}
                 to="/solutions"
-                className="border-brand-fg/9 hover:border-brand-gold/50 bg-brand-bg-alt text-brand-fg block overflow-hidden rounded-2xl border"
+                className="border-brand-fg/9 hover:border-brand-gold/50 bg-brand-bg-alt text-brand-fg block overflow-hidden rounded-2xl border transition-all hover:-translate-y-1"
               >
                 <div
                   className="h-37.5 bg-cover bg-center bg-[#0F1D14]"
@@ -218,11 +218,11 @@ export function Home() {
               Awarded for humanitarian technology
             </h2>
           </div>
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3" data-reveal-stagger>
             {awards.map((a) => (
               <div
                 key={a.label}
-                className="border-brand-fg/12 bg-brand-bg/40 flex items-center gap-3 rounded-xl border px-4.5 py-4 transition-colors hover:border-brand-gold/40"
+                className="border-brand-fg/12 bg-brand-bg/40 flex items-center gap-3 rounded-xl border px-4.5 py-4 transition-all hover:border-brand-gold/40 hover:-translate-y-1"
               >
                 <span className="border-brand-gold/25 text-brand-gold grid h-9 w-9 shrink-0 place-items-center rounded-lg border bg-[rgba(226,161,60,0.08)]">
                   <a.icon size={17} strokeWidth={1.75} aria-hidden />
