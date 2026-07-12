@@ -24,7 +24,7 @@ export function Deployments() {
         {deployPhases.map((d) => (
           <div
             key={d.title}
-            className="border-brand-fg/9 rounded-2xl border p-6"
+            className="border-brand-fg/9 rounded-2xl border p-6 transition-all hover:border-brand-gold/40 hover:-translate-y-1"
             style={{ background: d.bg }}
           >
             <p

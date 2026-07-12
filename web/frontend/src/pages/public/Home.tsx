@@ -222,7 +222,7 @@ export function Home() {
             {awards.map((a) => (
               <div
                 key={a.label}
-                className="border-brand-fg/12 bg-brand-bg/40 flex items-center gap-3 rounded-xl border px-4.5 py-4"
+                className="border-brand-fg/12 bg-brand-bg/40 flex items-center gap-3 rounded-xl border px-4.5 py-4 transition-colors hover:border-brand-gold/40"
               >
                 <span className="text-xl">{a.icon}</span>
                 <span className="font-sans text-[14.5px] font-semibold">{a.label}</span>

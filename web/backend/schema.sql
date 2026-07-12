@@ -249,6 +249,12 @@ begin
     where id = req_id;
   update public.profiles set role = 'officer' where id = target_user;
 end; $$;
+-- Supabase grants EXECUTE on public-schema functions to anon+authenticated by
+-- default, so the grant below is not enough on its own: anon must be revoked
+-- explicitly, or an anonymous caller reaches the function body and is stopped
+-- only by the internal guard. `authenticated` KEEPS execute — staff call this
+-- straight from the dashboard as that role.
+revoke execute on function approve_officer_request(bigint) from public, anon;
 grant execute on function approve_officer_request(bigint) to authenticated;
 
 create function reject_officer_request(req_id bigint) returns void
@@ -266,6 +272,7 @@ begin
     raise exception 'no pending request %', req_id;
   end if;
 end; $$;
+revoke execute on function reject_officer_request(bigint) from public, anon;
 grant execute on function reject_officer_request(bigint) to authenticated;
 
 -- Public-safe aggregate (no node internals). Readable by anyone authenticated.
@@ -322,7 +329,10 @@ begin
     on conflict (node_id) do nothing;
   update public.nodes set status = p_status, last_seen = now() where id = p_node;
 end; $$;
-revoke execute on function demo_touch_node(text, node_status) from public, authenticated;
+-- Internal only: invoked by the SECURITY DEFINER scenarios below, which run as the
+-- function owner, so no role needs a grant here. `anon` was missing from this list
+-- and did still hold EXECUTE on the live database (found 12 Jul) — it is included now.
+revoke execute on function demo_touch_node(text, node_status) from public, anon, authenticated;
 
 -- Runs one step of one demo scenario and returns the log lines it produced.
 --
@@ -591,6 +601,7 @@ begin
     'done',     p_step >= v_total,
     'log',      v_log);
 end; $$;
+revoke execute on function run_demo_scenario(text, int) from public, anon;
 grant execute on function run_demo_scenario(text, int) to authenticated;
 
 -- Clears only demo-tagged rows and puts every touched node back to the exact
@@ -626,6 +637,7 @@ begin
     'events', v_events, 'health', v_health,
     'maintenance', v_maint, 'nodes_restored', v_nodes);
 end; $$;
+revoke execute on function reset_demo_data() from public, anon;
 grant execute on function reset_demo_data() to authenticated;
 
 -- Realtime for the dashboard. `maintenance` joins so the Fleet queue updates live.

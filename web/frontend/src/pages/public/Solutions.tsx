@@ -98,7 +98,7 @@ export function Solutions() {
               {corridorSteps.map((c) => (
                 <div
                   key={c.node}
-                  className="border-brand-fg/9 bg-brand-panel/35 rounded-xl border px-4.5 py-4"
+                  className="border-brand-fg/9 bg-brand-panel/35 rounded-xl border px-4.5 py-4 transition-colors hover:border-brand-gold/40"
                 >
                   <p className="text-brand-gold mb-1 font-mono text-xs font-bold tracking-[0.08em]">{c.node}</p>
                   <p className="text-brand-fg/70 font-sans text-sm leading-relaxed">{c.action}</p>
