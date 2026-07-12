@@ -224,7 +224,9 @@ export function Home() {
                 key={a.label}
                 className="border-brand-fg/12 bg-brand-bg/40 flex items-center gap-3 rounded-xl border px-4.5 py-4 transition-colors hover:border-brand-gold/40"
               >
-                <span className="text-xl">{a.icon}</span>
+                <span className="border-brand-gold/25 text-brand-gold grid h-9 w-9 shrink-0 place-items-center rounded-lg border bg-[rgba(226,161,60,0.08)]">
+                  <a.icon size={17} strokeWidth={1.75} aria-hidden />
+                </span>
                 <span className="font-sans text-[14.5px] font-semibold">{a.label}</span>
               </div>
             ))}

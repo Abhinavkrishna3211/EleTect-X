@@ -10,7 +10,7 @@ export function Contact() {
     <section className="mx-auto max-w-xl px-4 py-14 sm:px-6 md:py-24 lg:px-8">
       <p className="text-brand-green mb-2.5 font-mono text-xs font-semibold tracking-[0.18em]">CONTACT</p>
       <h1 className="mb-3.5 font-serif text-[clamp(34px,5vw,56px)] leading-[1.08] font-normal">
-        For Forest Departments, researchers &amp; partners.
+        For Forest Departments, farmers, researchers and partners.
       </h1>
       <p className="text-brand-fg/70 mb-9 font-sans text-base leading-relaxed">
         Tell us about your site, we'll respond within two working days.
