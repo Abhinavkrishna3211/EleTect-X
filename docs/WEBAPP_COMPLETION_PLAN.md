@@ -1,6 +1,6 @@
 # EleTect X — Web App Completion Plan (post-Phase 4c → deploy-ready)
 
-Where this fits: `CLAUDE_CODE_BUILD_BRIEF.md`'s build order, steps 1–5 (scaffold through dashboard
+Where this fits: the web build order, steps 1–5 (scaffold through dashboard
 modules) are done — that's Phase 2 through Phase 4c, each with a QA screenshot set under
 `docs/qa/`. This document carries the remaining steps (6–8) plus the gaps a live-project audit
 surfaced along the way, sequenced for a one-week push. `CONTEXT.md` and `PROJECT_BLUEPRINT.md`
@@ -60,7 +60,7 @@ automatically. Automatic-trigger path confirmed end to end.
 
 ## Day 2 (Sun) — Auth hardening
 
-CLAUDE.md's deployment bar names this explicitly: Supabase's default auth email sender is
+The project's deployment bar names this explicitly: Supabase's default auth email sender is
 rate-limited and not meant for production signups.
 
 1. Configure a real transactional email provider (Resend/Postmark/SendGrid) for Supabase Auth's
@@ -95,7 +95,7 @@ follow-up session — not silently rolled into Day 3's scope.
 
 ## Day 3 (Mon) — RLS/RBAC adversarial pass
 
-"RLS/RBAC must hold under real misuse, not just happy-path testing" — CLAUDE.md, verbatim. This
+"RLS/RBAC must hold under real misuse, not just happy-path testing" — the deployment bar, verbatim. This
 hasn't had a dedicated adversarial pass yet; QA so far has been role-correct logins, not attempts
 to break the policies.
 

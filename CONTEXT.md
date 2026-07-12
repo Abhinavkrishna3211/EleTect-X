@@ -59,4 +59,4 @@ Measurable > vibes · explainable AI · low power · robustness · maintainabili
 Architecture frozen. Hardware being sourced (BOM in `docs/hardware/`). Available now: UNO Q, Grove LoRa-E5, TPA3116, INMP441, INA333, ADS1115. Arriving: camera, geophone, speaker, LEDs, IR. Software/dashboard/AI can start immediately (see `docs/PROJECT_BLUEPRINT.md`).
 
 ## 10. Deadlines
-Robu submission **23 Aug** · Hackster submission **30 Aug** · Field test **early–mid Aug** · Fable frontend build window **closes 12 Jul**.
+Robu submission **23 Aug** · Hackster submission **30 Aug** · Field test **early–mid Aug** · Frontend design-prototype window **closes 12 Jul**.

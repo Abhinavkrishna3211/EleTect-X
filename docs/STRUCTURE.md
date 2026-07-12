@@ -22,7 +22,7 @@ EleTect-X/
 ├─ docs/                        # CONTEXT.md (canonical) + architecture/hardware/decisions/deployment/…
 ├─ deployment/ scripts/ tests/
 ├─ README.md  CONTEXT.md  LICENSE  .vscode/  .github/  EleTect-X.code-workspace
-└─ (local, git-ignored: CLAUDE.md  .claude/)
+└─ (local, git-ignored: editor/tool config + local working notes)
 ```
 
 ## Why these changes (per request)
