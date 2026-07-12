@@ -1,19 +1,20 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
+import { useAlertsOptIn } from '@/hooks/useAlertsOptIn'
 import { deriveAreaRisk, riskDisplay, type AreaRiskRow } from '@/lib/risk'
 
+// The channel is whatever send-alert has enabled — email today, SMS once DLT
+// registration clears. The copy stays channel-neutral rather than promising SMS
+// the backend does not currently send.
 const howItWorks = [
   { n: '1 · Detection', body: 'The network senses and confirms an animal near your area.' },
-  { n: '2 · Alert in seconds', body: 'You get an SMS with direction and simple safety guidance.' },
+  { n: '2 · Alert in seconds', body: 'You are alerted with direction and simple safety guidance.' },
   { n: '3 · All clear', body: "When the animal returns to the forest, you're told it's safe." },
 ]
 
 export function StaySafe() {
-  const [optedIn, setOptedIn] = useState(false)
-  const [smsEnabled, setSmsEnabled] = useState(false)
-  const [phone, setPhone] = useState('')
-  const [village, setVillage] = useState('')
-  const [error, setError] = useState('')
+  const { signedIn, enabled, saving, error, setEnabled } = useAlertsOptIn()
   const [riskRows, setRiskRows] = useState<AreaRiskRow[] | null>(null)
 
   // public_area_risk is granted to anon precisely so this page can show a real
@@ -40,8 +41,8 @@ export function StaySafe() {
         Know before you step outside.
       </h1>
       <p className="text-brand-fg/70 mb-9 font-sans text-base leading-relaxed">
-        If EleTect detects a wild animal near a village, opted-in residents get an SMS within seconds, direction,
-        distance band, and what to do. No app needed.
+        If EleTect detects a wild animal near a village, opted-in residents are alerted within seconds —
+        direction, distance band, and what to do.
       </p>
 
       <div className="border-brand-fg/10 mb-4 flex flex-wrap items-center gap-4.5 rounded-2xl border bg-[#0B0D0B] p-6">
@@ -74,72 +75,65 @@ export function StaySafe() {
         ))}
       </div>
 
-      {!optedIn ? (
+      {/* Signed out: send them to signup rather than collecting a phone number
+          here. There is no anonymous opt-in store, and a form that accepts
+          contact details and drops them tells the resident they are covered when
+          nothing was recorded. Signup + email confirmation is the consent record. */}
+      {!signedIn ? (
         <div className="border-brand-gold/35 rounded-[18px] border bg-[rgba(226,161,60,0.05)] p-7">
-          <h2 className="mb-1.5 font-serif text-[26px] font-normal">Enable SMS alerts</h2>
+          <h2 className="mb-1.5 font-serif text-[26px] font-normal">Get safety alerts</h2>
           <p className="text-brand-fg/65 mb-5.5 font-sans text-sm leading-relaxed">
-            Free for residents of covered areas.
+            Free for residents of covered areas. Create an account and turn alerts on — that is all it takes.
           </p>
-          <form
-            className="flex flex-col gap-3.5"
-            onSubmit={(e) => {
-              e.preventDefault()
-              if (!phone.trim()) {
-                setError('Enter a phone number to continue.')
-                return
-              }
-              setError('')
-              setOptedIn(true)
-            }}
+          <Link
+            to="/signup"
+            className="bg-brand-gold hover:bg-brand-gold-hover flex min-h-12 items-center justify-center rounded-full px-6 py-4 font-sans text-[15px] font-semibold text-[#0B140E]"
           >
-            <input
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="Phone number (+91…)"
-              type="tel"
-              className="border-brand-fg/15 text-brand-fg placeholder:text-brand-fg/40 min-h-11 rounded-xl border bg-[#0B0D0B] px-4 py-3.5 text-[15px]"
-            />
-            <input
-              value={village}
-              onChange={(e) => setVillage(e.target.value)}
-              placeholder="Village / panchayat (optional)"
-              className="border-brand-fg/15 text-brand-fg placeholder:text-brand-fg/40 min-h-11 rounded-xl border bg-[#0B0D0B] px-4 py-3.5 text-[15px]"
-            />
-            <button
-              type="button"
-              onClick={() => setSmsEnabled((v) => !v)}
-              className="border-brand-fg/15 flex min-h-13 items-center justify-between gap-3.5 rounded-xl border bg-[#0B0D0B] px-4 py-3.5"
-            >
-              <span className="text-brand-fg text-left font-sans text-[14.5px] font-semibold">
-                SMS alerts for detections near me
-              </span>
-              <span
-                className={`relative h-6.5 w-11.5 shrink-0 rounded-full transition-colors ${smsEnabled ? 'bg-brand-green' : 'bg-brand-fg/20'}`}
-              >
-                <span
-                  className={`bg-brand-fg absolute top-0.75 h-5 w-5 rounded-full transition-all ${smsEnabled ? 'left-6' : 'left-0.75'}`}
-                />
-              </span>
-            </button>
-            {error && <p className="text-brand-red font-sans text-[13px] font-medium">{error}</p>}
-            <button
-              type="submit"
-              className="bg-brand-gold hover:bg-brand-gold-hover min-h-12 rounded-full py-4 font-sans text-[15px] font-semibold text-[#0B140E]"
-            >
-              Sign me up
-            </button>
-            <p className="text-brand-fg/45 font-sans text-[12.5px] leading-relaxed">
-              By signing up you consent to receive safety SMS from EleTect. Your number and location are used only
-              for alerts, never shared or sold. Opt out anytime by replying STOP.
-            </p>
-          </form>
+            Create an account
+          </Link>
+          <p className="text-brand-fg/45 mt-3.5 font-sans text-[12.5px] leading-relaxed">
+            Already have one?{' '}
+            <Link to="/login" className="text-brand-gold underline underline-offset-2">
+              Sign in
+            </Link>{' '}
+            and turn on alerts. Your contact details and location are used only to alert you, never shared or
+            sold, and you can turn alerts off at any time.
+          </p>
         </div>
       ) : (
-        <div className="border-brand-green/40 rounded-[18px] border bg-[rgba(95,169,124,0.08)] p-8 text-center">
-          <div className="mb-3 text-3xl">✅</div>
-          <h3 className="mb-2 font-serif text-2xl leading-none font-normal">You're covered.</h3>
-          <p className="text-brand-fg/65 font-sans text-[14.5px] leading-relaxed">
-            Safety alerts enabled for {phone}. Reply STOP to any message to opt out.
+        <div className="border-brand-gold/35 rounded-[18px] border bg-[rgba(226,161,60,0.05)] p-7">
+          <h2 className="mb-1.5 font-serif text-[26px] font-normal">Your safety alerts</h2>
+          <p className="text-brand-fg/65 mb-5.5 font-sans text-sm leading-relaxed">
+            {enabled
+              ? 'On — you will be alerted when wildlife is detected near you.'
+              : 'Off — turn them on to be alerted about wildlife near you.'}
+          </p>
+          <button
+            type="button"
+            onClick={() => setEnabled(!enabled)}
+            disabled={saving}
+            aria-pressed={enabled}
+            className="border-brand-fg/15 flex min-h-13 w-full items-center justify-between gap-3.5 rounded-xl border bg-[#0B0D0B] px-4 py-3.5 disabled:opacity-60"
+          >
+            <span className="text-brand-fg text-left font-sans text-[14.5px] font-semibold">
+              Alerts for detections near me
+            </span>
+            <span
+              className={`relative h-6.5 w-11.5 shrink-0 rounded-full transition-colors ${
+                enabled ? 'bg-brand-green' : 'bg-brand-fg/20'
+              }`}
+            >
+              <span
+                className={`bg-brand-fg absolute top-0.75 h-5 w-5 rounded-full transition-all ${
+                  enabled ? 'left-6' : 'left-0.75'
+                }`}
+              />
+            </span>
+          </button>
+          {error && <p className="text-brand-red mt-3 font-sans text-[13px] font-medium">{error}</p>}
+          <p className="text-brand-fg/45 mt-3.5 font-sans text-[12.5px] leading-relaxed">
+            Your contact details and location are used only to alert you, never shared or sold. Turn alerts off
+            here at any time.
           </p>
         </div>
       )}
