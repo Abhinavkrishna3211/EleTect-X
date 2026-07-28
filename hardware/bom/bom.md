@@ -6,7 +6,7 @@
 
 ## 0. Two decisions locked
 - **Camera — LOCKED: `B0CQ4QDCXN` = Arducam IMX462 day/night, auto IR-cut + 940 nm IR, ₹8,680 (Amazon.in).** Only one of the three available that is a proper **active-IR** day/night camera with a top NIR sensor → correct for dark forest. ⚠️ NOT `B0829HZ3Q7` (₹5,932 = OV2710, weak night — budget fallback only, 850 nm). ⚠️ NOT Robu `B0576` IMX662 (₹6,699) — it's a low-light *color* cam with no IR-cut/IR LEDs listed → likely can't do active-IR night; skip unless Robu confirms NoIR. **External IR = 940 nm to match.**
-- **Speaker:** either (A) **compact 8 Ω 20 W ABS PA horn** ~130–150 mm (Amazon.in ₹400–700) or (B) keep **Ahuja SUH-15** and **mount it externally** so the enclosure stays small. Recommended: **B** (no SPL loss).
+- **Speaker — LOCKED per ADR 0003/0005: Ahuja SUH-15**, flush-mounted into the front face, ₹1,299–3,150. A TOA SC-610 detour (ADR 0004) was reverted (ADR 0005) — it solved the enclosure's "generic box" look with a 3–6x costlier part instead of a form-language fix, which contradicts the project's own cost-effectiveness/scalability principle and meaningfully raises real fleet cost at DFO deployment scale. Compactness/aesthetics are addressed in the enclosure design instead (sentinel two-volume form, visor band, tapered horn cutout).
 
 ---
 
@@ -50,7 +50,7 @@
 | Item | Spec | Qty | ₹ | Source |
 |---|---|---|---|---|
 | **Audio player** | **DFPlayer PRO** (onboard flash, no SD) | 1 | 500–700 | Robu/Amazon.in *(fallback: DFPlayer Mini + 8 GB microSD)* |
-| Horn speaker | **8 Ω, 15–25 W** — Ahuja SUH-15 (₹1,299, ext-mount) *or* compact ABS PA horn ₹400–700 | 1 | 400–1,300 | Moglix/Amazon.in |
+| Horn speaker | **Ahuja SUH-15**, 8 Ω, 15W RMS/23W Max, flush-mounted per ADR 0003 (ADR 0004 TOA SC-610 detour reverted, ADR 0005) | 1 | 1,299–3,150 | Moglix/Amazon.in, or Electrosolutions Trading LLP (Kondotty) |
 | Speaker wire | 2-core, ~1 m | 1 | 30 | local |
 
 ---
@@ -149,7 +149,7 @@
 |---|---|
 | Camera + IR | 6,600 |
 | Geophone chain | 1,300 |
-| Audio deterrence | 1,300–2,300 |
+| Audio deterrence | 1,300–2,300 (Ahuja SUH-15, ADR 0003/0005) |
 | Visual deterrence | 900 |
 | Power system | 4,500 |
 | Passives/semis kit | 700 |
@@ -163,7 +163,7 @@
 ## 11. Order-now checklist (freeze)
 1. ☐ **Camera:** Arducam **IMX462 board — ASIN `B0CQ4QDCXN`** (NOT the ₹5,932 `B0829HZ3Q7`, which is OV2710). Try Amazon.in ASIN search → Robu → metal-case B0490 ₹8,680. Match IR to sensor (IMX462→940 nm). *(+1 spare if budget allows.)*
 2. ☐ **940 nm IR illuminator board (12 V)** + N-MOSFET.
-3. ☐ **DFPlayer PRO** + **8 Ω horn** (Ahuja SUH-15 ext-mount *or* compact horn).
+3. ☐ **DFPlayer PRO** + **8 Ω horn** (Ahuja SUH-15, flush-mount per ADR 0003 — see ADR 0005 for why the TOA SC-610 detour was reverted).
 4. ☐ **LEDs:** 4× 3 W white + 2× 3 W royal-blue stars + 2× PT4115 drivers + 6× lenses + MOSFETs.
 5. ☐ **Power:** 4S LiFePO4 pack + BMS + MPPT (LiFePO4) + 20 W panel + Schottky + fuse + load-switch MOSFETs.
 6. ☐ **Geophone burial:** shielded cable + PVC pipe/caps + SS spike + Araldite + M12 + HDPE conduit + MCP6002.

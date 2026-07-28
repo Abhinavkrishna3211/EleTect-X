@@ -80,6 +80,10 @@ Workflow: (1) build every page against realistic placeholder data; (2) **rebuild
 
 ## 6. Week-by-week execution roadmap (today → 30 Aug)
 
+> **Superseded 26 Jul 2026 by `docs/BUILD_BLUEPRINT_AUG8.md`.** That document reflects the actual repo
+> state (web stack built; `device/mcu`, `device/mpu`, `ml` still empty) and gives a day-by-day plan to an
+> 8 Aug freeze. The table below is kept for history; follow the new document instead.
+
 | Window | Focus | Milestones / exit criteria |
 |---|---|---|
 | **Now – 12 Jul** | Repo + **frontend design prototype** + backend start | Repo pushed & protected; every page designed + **rebuilt into `web/frontend/`**; Supabase project + schema; hardware orders confirmed |

@@ -1,6 +1,6 @@
 # ADR 0002: Keep LoRaWAN star for node network (not Meshtastic mesh)
 
-- **Status:** proposed
+- **Status:** accepted
 - **Date:** 2026-07-12
 
 ## Context
