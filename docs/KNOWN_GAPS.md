@@ -1,8 +1,9 @@
 # Known gaps
 
-Deferred items surfaced while building `device/mcu` against `device/mpu/bridge/schema.md`
-(`docs/BUILD_BLUEPRINT_AUG8.md` §8 build-call 1). One line each: what's deferred, severity, effort,
-status. Nothing here blocks this build call's own exit criteria — see each entry's status.
+Deferred items surfaced while building `device/mcu` and `device/mpu` against
+`device/mpu/bridge/schema.md` (`docs/BUILD_BLUEPRINT_AUG8.md` §8 build-calls 1–2). One line each:
+what's deferred, severity, effort, status. Nothing here blocks either build call's own exit
+criteria — see each entry's status.
 
 - **No PlatformIO board support for the UNO Q; `pio` is host-only.** Medium severity, small effort
   to keep understood (banner comments already in place). See ADR 0010. Status: resolved by design,
@@ -85,3 +86,53 @@ status. Nothing here blocks this build call's own exit criteria — see each ent
 - **Lightning/ESD clamp protection for the geophone's buried cable run is deferred**, not decided.
   A small TVS/clamp across the INA333 differential input pair is worth adding before DFO field
   deployment; not required for bench testing. Low severity now, revisit before burial. Status: open.
+
+## Build-call 2 (`device/mpu` scaffold)
+
+- **Ping bench round trip written but not run.** `device/mpu/bench/ping/` (sketch + Python side) is
+  complete and documented (`device/mpu/README.md`), but has not been pushed to or run on real
+  hardware. High severity — this is the build call's own exit criterion for proving the MCU→MPU
+  Bridge direction at all. Effort: one bench session (board reachable over SSH, `rsync` push,
+  build/run from App Lab). Status: **pending hardware.**
+- **MCU→Python Bridge `call()` direction is what ping proves, not the `notify()` direction the real
+  schema functions use.** Rung 0 proved Python→MCU only (stock Blink LED). Ping deliberately uses
+  `Bridge.call()` rather than `Bridge.notify()` — a `call` gets a verifiable `pong` reply, which is
+  the better bench test than a fire-and-forget `notify` that gives no positive confirmation of
+  receipt. `report_footfall_event`, `report_acoustic_event`, and `report_system_status` (the real
+  MCU→MPU functions, all `notify` targets) plausibly share the same underlying
+  registration/dispatch path as `call` targets, but that is an assumption ping does not prove
+  outright. A green ping result should read as "MCU→MPU `call()` direction confirmed, `notify()`
+  direction still inferred," not as "MCU→MPU closed." High severity — this distinction matters
+  before trusting the real schema functions to work purely because ping worked. Status: open,
+  pending a hardware session that specifically exercises `notify()`.
+- **App Lab Python entrypoint idiom, `app.yaml`'s field names, and the C++ `Bridge.call()` result
+  API are written from `DEVICE_DEVELOPMENT_WORKFLOW.md` §3's description, not checked line-by-line
+  against a real App Lab-generated App.** Each is marked `// UNVERIFIED` / `# UNVERIFIED` inline in
+  `device/mpu/bench/ping/`. High severity for the ping bench specifically (a wrong guess here fails
+  the bench, not the real schema) but does not block anything else. Status: open, resolve at the
+  same bench session as the ping run.
+- **`ack: bool` on `drive_horn`/`drive_led`/`pulse_ir` is lossy for what the contextual bandit will
+  need.** `bridge/schema.md` documents the ack as reporting whether the (possibly clamped) values
+  actually fired, but types it `bool` — the bandit's never-repeat / stop-on-retreat logic
+  (`cognition/`, not yet built) needs to know *which* clamped duration/gain actually fired, not just
+  that something did. Medium severity — a real mismatch between the schema's stated intent and its
+  wire type, not just an open question. Effort: small, needs a schema decision (richer return type,
+  or a follow-up `get_system_state` read to recover the actual values) before `cognition/` lands.
+  Status: open.
+- **`MPU_WAKE_HOLD_S = 30.0` (`services/config.py`) is invented — no measured suspend/resume or
+  fusion-latency data backs it.** ADR 0008's own open bench items don't cover this either. Medium
+  severity. Effort: bench measurement of real MPU wake/suspend timing once ADR 0008's hardware
+  lands. Status: open.
+- **Board Python version is unverified; `pyproject.toml` targets `py311`** (assumed Debian 12
+  bookworm, per the QRB2210's documented OS). If the board ships an older Python, `bridge/rpc.py`'s
+  use of `enum.StrEnum` (3.11+) would need to fall back to `class AcousticClass(str, Enum)`. Medium
+  severity, cheap to confirm (`python3 --version` over SSH). Status: open, resolve at the same bench
+  session as the ping run.
+- **`bridge/rpc.py` has no `Bridge.provide()`/`Bridge.call()` wiring, deliberately.** Mirrors the
+  existing MCU-side entry point (`device/mcu/src/main.cpp`) — same `DEVICE_DEVELOPMENT_WORKFLOW.md`
+  §3 registration bug is the reason on both sides. High severity by design — add one function at a
+  time on real hardware, testing between each, not as a batch of seven from a host build. Status:
+  open, intentionally deferred to a hardware session.
+- **Edge Impulse projects (footfall, acoustic, vision) are created manually via Studio's own UI; no
+  project IDs are recorded in-repo.** Not part of this build call's scope. Low severity. Status:
+  open, tracked for a future session.
