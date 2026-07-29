@@ -25,14 +25,14 @@ action actually executed before deciding what happens next).
 """
 
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum
 
 # ---------------------------------------------------------------------------
 # Shared types
 # ---------------------------------------------------------------------------
 
 
-class AcousticClass(StrEnum):
+class AcousticClass(str, Enum):
     """Classifier output label for `report_acoustic_event`.
 
     Values match schema.md's `class_label` enum literally - the MCU sends

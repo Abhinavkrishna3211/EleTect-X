@@ -8,9 +8,15 @@
 
 [tool.ruff]
 line-length = 100
-# Debian 12 (bookworm) ships Python 3.11 as of this writing - the board's
-# actual interpreter is unverified on hardware (docs/KNOWN_GAPS.md).
-target-version = "py311"
+# Target the lower bound this code actually requires, not the board's
+# assumed interpreter. Debian 12 (bookworm) ships Python 3.11, but the
+# board's actual interpreter is unverified on hardware
+# (docs/KNOWN_GAPS.md), and the dev host's default `python` is 3.10 -
+# pinning py311 here made ruff's UP042 rule push AcousticClass back
+# toward `enum.StrEnum` (3.11+ only), which is exactly the hard
+# dependency bridge/rpc.py was written to avoid. py310 syntax runs
+# fine on 3.11 too, so this loses nothing on the board side.
+target-version = "py310"
 
 [tool.ruff.lint]
 select = [
