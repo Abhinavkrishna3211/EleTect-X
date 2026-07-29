@@ -77,3 +77,11 @@ status. Nothing here blocks this build call's own exit criteria — see each ent
   power draws. Medium severity. Status: open.
 - **GNSS → Bridge → dashboard forum thread** (`DEVICE_DEVELOPMENT_WORKFLOW.md` §3) — carried
   forward as a reference link, not yet acted on. Low severity. Status: open.
+- **Geophone damping resistor (1 kΩ, ADR 0001 addendum) is calculated and documented but not yet
+  wired or bench-verified.** Without it the SM-24's h=0.25 open-circuit damping will ring at its
+  10 Hz resonance after every stomp, which could distort or duplicate `[trigger]` events during
+  Rung 1. High severity — resolve in the same bench session as the stomp test, before trusting its
+  results. Status: open, pending hardware.
+- **Lightning/ESD clamp protection for the geophone's buried cable run is deferred**, not decided.
+  A small TVS/clamp across the INA333 differential input pair is worth adding before DFO field
+  deployment; not required for bench testing. Low severity now, revisit before burial. Status: open.

@@ -42,6 +42,45 @@ CONTEXT.md §4 freezes the reflex/cognition split and the log-odds fusion formul
 
 Qualcomm's own "Brain + Nervous System" robotics reference architecture — the same vendor as QRB2210 — maps directly onto this project's reflex (STM32, always-on, real-time trigger) / cognition (QRB2210, event-driven perception+decision) split, which is a strong, specific precedent for calling this design "Physical AI" rather than just "embedded ML." Where the design is *not* the full closed-loop ideal some Physical AI literature describes: deterrence action itself (horn/LED trigger) is open-loop in the sense that it doesn't yet measure whether the elephant actually retreated and feed that back into perception thresholds. It's worth noting, though, that the frozen design already has real closed-loop adaptation on the *decision* side — the contextual bandit (CONTEXT.md §4: "never-repeat, stop-on-retreat," SQLite experience) already learns from deterrence outcomes and adapts action selection over time. So the honest scoping is: perception (fusion weights, thresholds) is fixed/centrally-updated, not self-adapting in the field; action selection (which deterrence to use, when to stop) already is. Contest and DFO documentation should describe it this way rather than either overclaiming full closed-loop autonomy or underselling the bandit's existing adaptation.
 
+## Addendum, 29 Jul 2026 — geophone damping resistor
+
+Decision #1 fixed the SM-24 → INA333 → Sallen-Key → STM32 ADC chain but left the geophone's own
+electrical damping unaddressed. The SM-24's manufacturer datasheet (I/O Sensor Nederland, part
+1004117) specifies open-circuit damping of only **h=0.25** at its 10 Hz natural frequency — badly
+underdamped, meaning an unshunted coil rings for several cycles after any impulsive input rather
+than producing a clean transient. Left unaddressed, this would corrupt the STA/LTA envelope shape
+the footfall trigger depends on before any firmware or ML logic sees the signal.
+
+**Decision:** wire a 1 kΩ shunt resistor directly across the SM-24's own two leads, upstream of the
+burial cable, targeting h≈0.7 (the standard maximally-flat/minimal-overshoot damping target for
+resolving a transient, as opposed to the flatter-passband target exploration seismology typically
+uses). Derivation, using the datasheet's own transduction constant and its own worked example as a
+check:
+
+`R_shunt = RtBcfn / (fn × (h_target − h_open)) − Rc`
+
+Datasheet values: `RtBcfn = 6,000 Ω·Hz`, `fn = 10 Hz`, `Rc = 375 Ω` (coil resistance),
+`h_open = 0.25`. Formula check against the datasheet's own published calibration point
+(1,339 Ω shunt → h=0.60): `6000/(10×0.35) − 375 = 1339.3 Ω` ✓. At the chosen `R_shunt = 1 kΩ`:
+`h = 0.25 + 6000/(10×1375) = 0.686`, i.e. h≈0.69 — matching one of the two damping curves plotted
+directly on the datasheet's own frequency-response and phase-lag graphs, not an extrapolation.
+1 kΩ was chosen over the theoretically closer ~958 Ω because it is a standard value already in the
+existing resistor kit (`hardware/bom/procurement-status.md`), and resistor tolerance is not
+critical to this calculation — no new procurement needed.
+
+**Placement matters:** the shunt must sit at the geophone end, not the amplifier end, so cable
+resistance from the burial run doesn't add into the effective coil resistance and shift the
+delivered damping away from this calculation. Reflected in `device/mcu/README.md`'s wiring table.
+
+**Mechanical note, not electrical, but from the same datasheet:** all SM-24 parameters are
+specified "in the vertical position," with a maximum 10° tilt for the rated 10 Hz Fn. Worth
+carrying into the burial spike/pipe mounting geometry in `hardware/bom/procurement-status.md` §3,
+not just the electrical design here.
+
+**Deferred, not decided:** a small clamp/TVS across the differential pair for lightning/ESD
+protection on the long buried cable run. Worth a field-hardening pass before the DFO deployment,
+not a Rung 1 bench-test blocker — logged in `docs/KNOWN_GAPS.md`.
+
 ## Evidence / sources
 
 - O'Connell-Rodwell et al., "Seismic properties of Asian elephant vocalizations and locomotion" (JASA, 2000) — https://pubs.aip.org/asa/jasa/article/108/6/3066/554703/
@@ -53,3 +92,7 @@ Qualcomm's own "Brain + Nervous System" robotics reference architecture — the 
 - Bayesian log-odds vs Dempster-Shafer equivalence/divergence — https://arxiv.org/pdf/2602.18872
 - West Bengal AI-filtered camera-alert HEC deployment (field outcome data) — https://conbio.onlinelibrary.wiley.com/doi/abs/10.1111/csp2.70186
 - Qualcomm "Brain + Nervous System" robotics/Physical-AI architecture — https://www.businesswire.com/news/home/20260104991116/en/
+- I/O Sensor Nederland, SM-24 Geophone Element datasheet (P/N 1004117), damping/RtBcfn/coil
+  resistance specifications — manufacturer PDF, 2006
+- olewolf/geophone (Arduino SM-24 amplifier shield + frequency analyzer reference) —
+  https://github.com/olewolf/geophone

@@ -36,6 +36,16 @@ I2C4.
 Geophone signal path: SM-24 → INA333 (gain per its own datasheet resistor) → ADS1115 AIN0/AIN1
 differential pair, rejecting the INA333's bias rail rather than reading it as signal.
 
+**Damping resistor — required, not optional.** The SM-24's open-circuit damping is h=0.25
+(datasheet), badly underdamped at its 10 Hz resonance: an unshunted coil rings for several cycles
+after every footfall, smearing the STA/LTA envelope the trigger detector reads. Wire a **1 kΩ
+resistor directly across the SM-24's own two leads**, before the burial cable (not at the INA333
+end — cable resistance would otherwise shift the delivered damping away from this calculation).
+1 kΩ gives h≈0.69, matching one of the datasheet's own plotted response curves, using
+`R_shunt = RtBcfn / (fn × (h_target − h_open)) − Rc` with the SM-24's own
+`RtBcfn=6000 Ω·Hz, fn=10 Hz, Rc=375 Ω` against a target h≈0.7. Any resistor from the existing kit
+works — tolerance isn't critical here. See ADR 0001 addendum for the full derivation.
+
 **Known open item (`docs/KNOWN_GAPS.md`):** whether `Wire` or `Wire1` is actually the Arduino Core
 mapping for I2C2 (D20/D21) on this board has not been confirmed on hardware. `config.h` defaults to
 `Wire`. If the geophone never reads (`geophone_ok()` stays false, or `report_system_status`'s
