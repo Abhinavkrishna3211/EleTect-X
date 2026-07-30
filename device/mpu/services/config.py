@@ -67,7 +67,7 @@ MPU_WAKE_HOLD_S = 30.0
 # Filesystem paths
 # ---------------------------------------------------------------------------
 # Resolved relative to this module so they land inside the App's own folder
-# on the board (arduino_apps/<app>/python/), not /tmp or a path that only
+# on the board (ArduinoApps/<app>/python/), not /tmp or a path that only
 # exists on a dev laptop.
 
 _MODULE_DIR = Path(__file__).resolve().parent.parent

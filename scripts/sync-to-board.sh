@@ -10,7 +10,7 @@
 # device/mpu/README.md for its own plain rsync one-liner.
 #
 # Usage:
-#   BOARD_HOST=eletect-x.local APP_NAME=EleTect-X scripts/sync-to-board.sh
+#   BOARD_HOST=eletect-x.local APP_NAME=eletect-x scripts/sync-to-board.sh
 #
 # Defaults match the board name used during App Lab's First Setup wizard
 # (DEVICE_DEVELOPMENT_WORKFLOW.md 2) — override if this board was set up
@@ -19,8 +19,12 @@ set -euo pipefail
 
 BOARD_USER="${BOARD_USER:-arduino}"
 BOARD_HOST="${BOARD_HOST:-eletect-x.local}"
-APP_NAME="${APP_NAME:-EleTect-X}"
-APP_ROOT="/home/${BOARD_USER}/arduino_apps/${APP_NAME}"
+APP_NAME="${APP_NAME:-eletect-x}"
+# arduino-app-cli config get reports the real Apps Directory as
+# ~/ArduinoApps (CamelCase) — confirmed on hardware 30 Jul 2026. Neither
+# arduino-cli nor App Lab itself expose this path in their own docs, which
+# say arduino_apps; that name doesn't exist on the board.
+APP_ROOT="/home/${BOARD_USER}/ArduinoApps/${APP_NAME}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MCU_DIR="${REPO_ROOT}/device/mcu"
