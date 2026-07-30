@@ -12,13 +12,13 @@ from pathlib import Path
 from services import config
 
 MCU_CONFIG_PATH = (
-    Path(__file__).resolve().parent.parent.parent / "mcu" / "include" / "config.h"
+    Path(__file__).resolve().parent.parent.parent / "mcu" / "src" / "config.h"
 )
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "bridge" / "schema.md"
 
 
 def _read_mcu_define(name: str) -> float:
-    """Pull a #define's numeric value out of device/mcu/include/config.h."""
+    """Pull a #define's numeric value out of device/mcu/src/config.h."""
     text = MCU_CONFIG_PATH.read_text(encoding="utf-8")
     match = re.search(rf"#define\s+{name}\s+([0-9.]+)", text)
     assert match, f"Could not find #define {name} in {MCU_CONFIG_PATH}"

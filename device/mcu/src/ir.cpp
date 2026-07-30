@@ -1,7 +1,7 @@
 #include "ir.h"
 
 #include "Arduino.h"
-#include "actuators/rule_gate.h"
+#include "rule_gate.h"
 #include "config.h"
 
 namespace {

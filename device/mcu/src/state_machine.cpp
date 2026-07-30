@@ -2,8 +2,8 @@
 
 #include "Arduino.h"
 #include "config.h"
-#include "footfall/sta_lta.h"
-#include "sensors/geophone.h"
+#include "geophone.h"
+#include "sta_lta.h"
 
 namespace {
 

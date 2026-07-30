@@ -32,9 +32,9 @@ MPU_DIR="${REPO_ROOT}/device/mpu"
 
 echo "==> 1. Sanity: local device/mcu tree present"
 [ -d "${MCU_DIR}/src" ] || { echo "   MISSING ${MCU_DIR}/src — aborting"; exit 1; }
-[ -f "${MCU_DIR}/include/config.h" ] || { echo "   MISSING config.h — aborting"; exit 1; }
-if [ ! -f "${MCU_DIR}/include/secrets.h" ]; then
-  echo "   MISSING ${MCU_DIR}/include/secrets.h — copy secrets.h.example and fill in real"
+[ -f "${MCU_DIR}/src/config.h" ] || { echo "   MISSING config.h — aborting"; exit 1; }
+if [ ! -f "${MCU_DIR}/src/secrets.h" ]; then
+  echo "   MISSING ${MCU_DIR}/src/secrets.h — copy secrets.h.example and fill in real"
   echo "   OTAA credentials before syncing to a board that needs to join (see the file's"
   echo "   own header comment). Aborting rather than sync a sketch with no LoRa identity."
   exit 1
@@ -57,22 +57,22 @@ echo "==> 4. rsync src/ -> sketch/ (one-directional, deletes files removed local
 # in the repo does not linger on the board as stale dead code. hostshim/ and
 # tests/ are host-only (platformio.ini's build_src_filter) and never sync —
 # App Lab's own build never sees them.
-rsync -avz --delete --exclude='config.h' --exclude='secrets.h' \
+#
+# device/mcu/src/ is itself flat (no subfolders) so this rsync produces the
+# exact layout arduino-cli's sketch build requires: it only compiles .cpp
+# files that are direct children of the sketch root and only puts the
+# sketch root itself on the include search path (see docs/decisions/0010's
+# addendum) — a nested sensors/, actuators/, etc. would silently vanish from
+# the board build (compiles with zero errors, then fails at the link step),
+# not just break an #include like the earlier config.h/secrets.h issue did.
+rsync -avz --delete \
   "${MCU_DIR}/src/" \
   "${BOARD_USER}@${BOARD_HOST}:${APP_ROOT}/sketch/"
 
-echo "==> 5. config.h + secrets.h -> sketch root"
-# #include "config.h" then resolves identically in both builds: PlatformIO
-# puts include/ on its search path, App Lab puts the sketch root on its.
-rsync -avz \
-  "${MCU_DIR}/include/config.h" \
-  "${MCU_DIR}/include/secrets.h" \
-  "${BOARD_USER}@${BOARD_HOST}:${APP_ROOT}/sketch/"
-
-echo "==> 6. Sanity: local device/mpu tree present"
+echo "==> 5. Sanity: local device/mpu tree present"
 [ -d "${MPU_DIR}/bridge" ] || { echo "   MISSING ${MPU_DIR}/bridge — aborting"; exit 1; }
 
-echo "==> 7. rsync device/mpu/ -> python/ (one-directional, deletes files removed locally)"
+echo "==> 6. rsync device/mpu/ -> python/ (one-directional, deletes files removed locally)"
 # --delete keeps the board's python/ an exact mirror of device/mpu/ so a file
 # removed in the repo does not linger on the board as stale dead code.
 # tests/, bench/ and pyproject.toml are host-only (ruff/pytest never run on
@@ -91,4 +91,4 @@ rsync -avz --delete \
   "${MPU_DIR}/" \
   "${BOARD_USER}@${BOARD_HOST}:${APP_ROOT}/python/"
 
-echo "==> DONE. Build/flash from App Lab, or over SSH with the Arduino App CLI."
+echo "==> 7. DONE. Build/flash from App Lab, or over SSH with the Arduino App CLI."

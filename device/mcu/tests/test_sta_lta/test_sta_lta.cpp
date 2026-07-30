@@ -7,7 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "footfall/sta_lta.h"
+#include "sta_lta.h"
 
 void setUp() {}
 void tearDown() {}
