@@ -84,6 +84,22 @@ void geophone_service() {
 
   const float volts = static_cast<float>(raw) * ADS1115_LSB_VOLTS;
 
+#if GEOPHONE_DEBUG_SINGLE_ENDED_AIN0
+  // Bench-only: prints what ADS1115_CONFIG_WORD is now sampling single-ended
+  // against GND, per the flag's own rationale in config.h. Rate-limited with
+  // a static millis()-gated timer - this function runs every loop()
+  // iteration with no delay, so an ungated print would flood the console.
+  static uint32_t s_last_bias_check_print_ms = 0;
+  const uint32_t bias_check_now_ms = millis();
+  if (bias_check_now_ms - s_last_bias_check_print_ms >= SEISMIC_DEBUG_PRINT_INTERVAL_MS) {
+    s_last_bias_check_print_ms = bias_check_now_ms;
+    Serial.print("[bias-check] raw=");
+    Serial.print(raw);
+    Serial.print(" volts=");
+    Serial.println(volts, 6);
+  }
+#endif
+
   g_ring[g_write_index] = volts;
   g_write_index = (g_write_index + 1) % SEISMIC_WINDOW_SAMPLES;
   if (g_samples_written < SEISMIC_WINDOW_SAMPLES) {
