@@ -74,3 +74,45 @@ pays for.
   `pio run -e native`'s smoke run proves the wiring doesn't crash, it does not and cannot prove
   real I²C/UART behavior. The bench stomp test (`device/mcu/README.md`) remains the only thing
   that proves that.
+
+## Addendum (2026-07-30): arduino-cli's sketch build has no subfolder support at all
+
+Getting the first real board build past `pio run -e native` (which had been passing all along)
+surfaced three `arduino-cli` behaviors with no PlatformIO analogue, none discoverable except by
+compiling on real hardware with `--verbose` — confirmed against the actual `eletect-x` app on
+`arduino:zephyr:unoq`, core `arduino:zephyr` 0.90.0:
+
+1. **Quoted includes never search the sketch root or any subfolder.** `#include "x.h"` resolves
+   only to (a) the including file's own directory, or (b) an explicit `-I` flag. The only
+   automatic `-I` entries `arduino-cli` adds beyond the core/toolchain are each *recognized
+   library's* own `src/` directory (a folder containing `library.properties`) — a sketch's own
+   subfolders, regardless of name or nesting depth, are never added, no matter how deeply the
+   including file sits under the sketch root.
+2. **Only `.cpp`/`.ino` files that are direct children of the sketch root are compiled.** Files in
+   subfolders are silently invisible to the sketch build — not a compile error, a build that
+   reports zero errors and then fails at the *link* step with `undefined reference` for every
+   symbol only those files defined. This was the more expensive of the two to find: the include
+   fix alone made the build look clean all the way through preprocessing, and the real cause only
+   showed up by diffing a `--verbose` compile log's file list against the sketch tree.
+3. **A sketch also requires a file named exactly `<sketch-folder-name>.ino` to physically exist**,
+   or `arduino-cli compile` refuses to run at all (`main file missing from sketch`) before
+   touching any `.cpp` file. On this board that folder is always `sketch/` (`scripts/
+   sync-to-board.sh`'s `APP_ROOT/sketch`), so the file must be named `sketch.ino` regardless of
+   this repo's own directory name — and because it isn't optional, it has to live in the repo
+   (`device/mcu/src/sketch.ino`) like everything else the sync script mirrors, or a future
+   `rsync --delete` run silently deletes it again.
+
+None of this is `library.properties`-gated recognition failing to trigger — it's that a sketch
+(as opposed to a library) has no recursive-subfolder concept in `arduino-cli` at all, for either
+includes or compilation units. The one-line summary: **sketch convention is flat-root-only;
+subfolder recursion is a library-only feature.**
+
+Resulting decision: `device/mcu/src/` is now itself flat — `sensors/`, `actuators/`, `footfall/`,
+and `lora/` were removed and their contents moved to sit directly beside `main.cpp`, alongside
+`config.h`/`secrets.h` (moved here from a separate `include/` for the same reason, in an earlier
+pass) and the required `sketch.ino` placeholder. This was not the first fix attempted — relative
+`../config.h`-style includes were tried first, since that looked sufficient from finding (1) alone,
+and only turned out to be incomplete once finding (2) surfaced on the very next clean board build.
+Every file in `src/` now sits at the same depth and uses a plain `#include "whatever.h"`; see
+`device/mcu/README.md`'s Layout section for the current file list and this same rationale restated
+for anyone reading that file cold.
