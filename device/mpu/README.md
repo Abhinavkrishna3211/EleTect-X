@@ -41,14 +41,17 @@ below is a separate App and is **not** covered by this script — see its own pr
 bridge/
   schema.md      Bridge contract — source of truth for every function below
   rpc.py         signatures + docstrings for all 7 schema.md functions, no Bridge wiring yet
-perception/      vision detector (future build call)
+perception/
+  camera.py      IMX462 V4L2 capture wrapper — open/capture/burst/release, no trigger/IR logic
+  (vision INT8 detector itself: future build call)
 cognition/       fusion + contextual bandit (future build call)
 services/
   config.py      MPU-side tuning constants, one rationale each (mirrors device/mcu/include/config.h)
 comms/           LoRa uplink (future build call)
 models/          on-device vision model export, gitignored (*.tflite)
 tests/           host-only contract + config tests, never synced to the board
-bench/ping/      disposable hello-world Bridge round trip, see below
+bench/ping/          disposable hello-world Bridge round trip, see below
+bench/camera_check/  disposable camera capture-and-save check, see below
 ```
 
 `bridge/rpc.py` ships as **signatures and docstrings only**, deliberately not wired up with
@@ -111,3 +114,82 @@ of these three unverified details than a fundamental Bridge failure.
 
 **Status: pending hardware.** This procedure has not yet been run against real hardware — see
 `docs/KNOWN_GAPS.md`.
+
+## Camera bench check — capture-and-save against the real IMX462
+
+`perception/camera.py` is a pure V4L2 capture wrapper (`ENGINEERING_CONVENTIONS.md` §1's earned
+`capture_frame()` interface boundary) — fully unit-tested against a fake capture device
+(`tests/test_camera.py`), but never yet run against the real Arducam IMX462 (ADR 0001).
+`bench/camera_check/capture_check.py` is a disposable, non-App-Lab script (needs no Bridge, no
+`app.yaml`) that opens the real camera, captures one frame plus a short burst, saves them to disk,
+and prints exactly what the device negotiated — resolution, pixel format, and FPS — which is what
+turns `docs/KNOWN_GAPS.md`'s IMX462-defaults entry from an assumption into a measured fact.
+
+It runs in two places, both driving the same `perception.camera.Camera` class:
+
+- **The board**, over SSH, the actual V4L2/target-platform path (`--backend v4l2`, or the
+  `--backend auto` default, which resolves to V4L2 on Linux).
+- **A Windows/macOS dev host** with `pip install opencv-python` (not a `pyproject.toml` dependency —
+  see "Two build paths" above), using `--backend any` (or `auto`'s off-Linux default) — the IMX462
+  is a UVC device, so DirectShow/AVFoundation see it too. Useful for confirming the physical camera
+  works *before* a board session is available; the V4L2 path itself stays pending hardware either
+  way.
+
+### Camera check prerequisites
+
+- **Board run:** board reachable over SSH in Network Mode; camera plugged into the board's USB-C
+  port via the spare USB hub (`hardware/bom/procurement-status.md`) — the port can't be both a dev
+  link and a camera host at the same time, so run this over Network Mode, not a USB dev cable; and
+  `python3-opencv` present on the board's Debian image (unverified — `docs/KNOWN_GAPS.md`).
+- **Host run:** `pip install opencv-python` and the IMX462 plugged into a USB port directly.
+
+### Running the camera check
+
+Board (not covered by `scripts/sync-to-board.sh` — a plain rsync one-liner, same as the ping
+bench):
+
+```bash
+rsync -avz --exclude='__pycache__' device/mpu/ arduino@<board-host>:/home/arduino/camera-check/
+ssh arduino@<board-host> "cd /home/arduino/camera-check && python3 bench/camera_check/capture_check.py --probe"
+```
+
+Dev host (from the repo root, camera plugged in):
+
+```powershell
+python device\mpu\bench\camera_check\capture_check.py --backend any --out-dir <scratch-dir>
+```
+
+### What a successful capture looks like
+
+```text
+Opening '/dev/video0' (backend=auto, requested 1920x1080 MJPG)...
+Negotiated: device=/dev/video0 1920x1080 fourcc=MJPG fps=30.0
+
+Single frame:
+  saved output\single.jpg (187342 bytes, index=0, t=1.203s)
+
+Burst (5 requested):
+  saved output\burst_00.jpg (183210 bytes, index=0, t=1.245s)
+  saved output\burst_01.jpg (185004 bytes, index=1, t=1.279s)
+  saved output\burst_02.jpg (184556 bytes, index=2, t=1.312s)
+  saved output\burst_03.jpg (186012 bytes, index=3, t=1.347s)
+  saved output\burst_04.jpg (183890 bytes, index=4, t=1.381s)
+  inter-frame intervals (s): [0.034, 0.033, 0.035, 0.034]
+
+Done. 6 frame(s) saved to output
+```
+
+Non-trivial file sizes (tens to hundreds of KB, not near-zero) and a `Negotiated:` line matching
+real numbers, not the requested ones, are the two signals that this is a real frame, not a
+black/garbage capture. **Expected resolution/format is 1920×1080 MJPG — that is the product
+listing's stated spec, not yet confirmed against this specific unit** (`docs/KNOWN_GAPS.md`).
+
+### If no `/dev/video*` node shows up
+
+Run `--probe` first — it lists `/dev/video*` nodes and, if `v4l2-ctl` is installed, the camera's
+full format list. A completely empty listing with the camera physically plugged in points at a USB
+host-mode question (does the UNO Q's USB-C port enumerate a host device at all while powered from
+VIN?), not a bug in `capture_check.py` or `camera.py` — see `docs/KNOWN_GAPS.md`.
+
+**Status: pending hardware.** Written and host-tested against a fake capture device; not yet run
+against the real IMX462 on the board or the dev host.

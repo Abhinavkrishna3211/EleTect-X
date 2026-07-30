@@ -12,6 +12,11 @@ Two things this file deliberately does NOT hold:
   (device/mpu/bridge/schema.md).
 - Fusion weights, bandit hyperparameters, and risk thresholds. Those belong
   to cognition/ once that module lands, not to this bridge-facing config.
+
+Camera device path, resolution, and pixel format DO belong here even though
+they're perception/-facing, not bridge-facing - they're device-configuration
+constants in the same sense as the MCU's pin assignments (config.h), not
+tuning knobs for cognition math.
 """
 
 from pathlib import Path
@@ -75,6 +80,44 @@ EXPERIENCE_DB_PATH = DATA_DIR / "experience.sqlite3"
 
 # On-device vision model artifacts (Edge Impulse export target).
 MODELS_DIR = _MODULE_DIR / "models"
+
+# ---------------------------------------------------------------------------
+# Camera (perception/camera.py, IMX462 over USB-UVC)
+# ---------------------------------------------------------------------------
+# Capture-only constants. No trigger/IR-sync values here - pulse_ir() is an
+# MCU-side Bridge call not registered on either side yet
+# (device/mpu/bridge/rpc.py), and capture has no business calling it.
+
+# UNVERIFIED on this board - the UNO Q has one USB-C port and no carrier
+# (ADR 0001), so the exact /dev/videoN index the IMX462 lands on once a hub
+# is in the path is unconfirmed. bench/camera_check's --probe flag resolves
+# this; see docs/KNOWN_GAPS.md.
+CAMERA_DEVICE = "/dev/video0"
+
+# IMX462 is a 2MP sensor; 1920x1080 taken from the product listing
+# (B0CQ4QDCXN), not from a queried V4L2 format list on this specific unit.
+# UNVERIFIED - bench/camera_check's --probe flag closes this.
+CAMERA_FRAME_WIDTH = 1920
+CAMERA_FRAME_HEIGHT = 1080
+
+# MJPG, not YUYV: most 1080p UVC webcams only sustain a useful frame rate
+# over USB2/3 in MJPG - YUYV's uncompressed bandwidth typically caps near
+# 5 fps at this resolution. UNVERIFIED for this specific unit (product
+# listing doesn't state it) - bench/camera_check's --probe flag confirms
+# which formats this camera actually offers.
+CAMERA_PIXEL_FORMAT = "MJPG"
+
+# UVC auto-exposure/AGC needs several frames after stream start before
+# output is representative - the first few grabs after open() are commonly
+# dark, over-bright, or otherwise unsettled. INVENTED - no AE-settle bench
+# data backs this number yet; see docs/KNOWN_GAPS.md.
+CAMERA_WARMUP_FRAMES = 3
+
+# Default burst size and inter-frame spacing for capture_burst(). 0.0
+# interval means "as fast as the device delivers," not a real-time target.
+# Both INVENTED - no detector-side timing requirement drives these yet.
+CAMERA_BURST_FRAMES = 5
+CAMERA_BURST_INTERVAL_S = 0.0
 
 # ---------------------------------------------------------------------------
 # Logging
