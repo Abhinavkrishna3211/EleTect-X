@@ -1,0 +1,14 @@
+# App Lab app manifest - hello-world Bridge round trip, MCU -> MPU direction.
+#
+# UNVERIFIED against a real App Lab-generated app.yaml (DEVICE_DEVELOPMENT_WORKFLOW.md
+# 2 documents the folder shape - sketch/, python/, assets/, app.yaml, README.md -
+# but not this file's own field names). Confirm against a fresh app.yaml App Lab
+# generates on the board before trusting these fields; correct on the bench,
+# not from this file alone (docs/KNOWN_GAPS.md).
+#
+# Disposable and separate from the real EleTect-X app (ENGINEERING_CONVENTIONS.md
+# 1's "one function at a time" discipline) - never merge this into the real
+# app's app.yaml.
+name: ping-bench
+description: Hello-world Bridge round trip, MCU calls a Python-provided ping().
+version: "0.1.0"

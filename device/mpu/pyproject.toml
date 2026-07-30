@@ -1,0 +1,45 @@
+# EleTect X - MPU (QRB2210) host lint/test configuration.
+#
+# No runtime dependencies: the on-device `arduino.app_utils` module (which
+# provides `Bridge`) only exists on the board's own Python install and must
+# never be imported at module scope by anything ruff or pytest touches here
+# (ENGINEERING_CONVENTIONS.md 1/4) - that is what keeps bridge/rpc.py
+# importable and testable on a dev laptop with no board attached.
+
+[tool.ruff]
+line-length = 100
+# Target the lower bound this code actually requires, not the board's
+# assumed interpreter. Debian 12 (bookworm) ships Python 3.11, but the
+# board's actual interpreter is unverified on hardware
+# (docs/KNOWN_GAPS.md), and the dev host's default `python` is 3.10 -
+# pinning py311 here made ruff's UP042 rule push AcousticClass back
+# toward `enum.StrEnum` (3.11+ only), which is exactly the hard
+# dependency bridge/rpc.py was written to avoid. py310 syntax runs
+# fine on 3.11 too, so this loses nothing on the board side.
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "F",  # pyflakes
+    "I",  # import sorting
+    "B",  # bugbear - common real bugs, not just style
+    "UP", # pyupgrade - keep syntax current for the target version
+    "N",  # pep8-naming - snake_case per ENGINEERING_CONVENTIONS.md 2
+    "D",  # pydocstyle - enforces the "every public function gets a
+          # one-line contract" rule (ENGINEERING_CONVENTIONS.md 3)
+]
+# Module and package docstrings are covered by each file's own header
+# comment style already used across this repo; don't force a second,
+# redundant `"""..."""` on top of it.
+ignore = ["D100", "D104"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.pytest.ini_options]
+# Makes `from bridge.rpc import ...` resolve the same way it does on the
+# board, where device/mpu becomes the app's python/ root (app.yaml's own
+# entrypoint convention, per DEVICE_DEVELOPMENT_WORKFLOW.md 2/3).
+pythonpath = ["."]
+testpaths = ["tests"]

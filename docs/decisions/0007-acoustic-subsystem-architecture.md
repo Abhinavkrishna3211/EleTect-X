@@ -11,6 +11,37 @@ signature/range table, the MCU/MPU wake sequence, the power budget, and the fusi
 split in Decision §5 — is unaffected and stands as written; only the "Detection tier" column's assumption
 that a comparator gate is the mechanism should be read as "whichever capture mechanism ADR 0009 resolves to."
 
+## Addendum, 30 Jul 2026 — acoustic subsystem sequenced after the DFO field test
+
+Everything below this line still stands unchanged. This addendum records a scheduling decision,
+not an architecture change: acoustic hardware bring-up, dataset collection, and Edge Impulse model
+training are deferred until after the ~9-14 Aug DFO field test, freed time going instead to vision
+and seismic model work and camera/video capture setup ahead of the Aug 8 freeze.
+
+This is a safe deferral, not a scope cut, for reasons already written into this ADR and ADR 0001:
+acoustic corroboration was scoped as a "stretch" from the start (`BUILD_BLUEPRINT_AUG8.md` §1), and
+of its two outputs, gunshot classification was already decided (Decision §5, above) to route to its
+own direct anti-poaching alert, entirely outside the elephant-presence fusion sum — so it was never
+part of the loop the field test needs to prove. The other three classes (chainsaw, vehicle, animal
+call) *do* feed fusion, but ADR 0001's addendum already establishes that a missing modality is
+excluded from the sum, not scored as negative evidence — the system is explicitly designed to
+degrade gracefully with acoustic absent, not break.
+
+**Hardware plan:** the field-bound UNO Q keeps running seismic + vision only through the field test.
+The second unit (`hardware/bom/procurement-status.md`'s permanent bench/dev board) becomes the
+dedicated acoustic development unit once freed up, so acoustic bring-up never touches the
+already-validated field node.
+
+**What's already done and doesn't need redoing:** the Bridge contract (`report_acoustic_event` in
+`device/mpu/bridge/schema.md` and its stub in `device/mpu/bridge/rpc.py`) and this ADR's full
+architecture already exist — the acoustic subsystem is designed and its function boundary is fixed,
+only its hardware bring-up and trained model are deferred. Nothing needs to be un-built or removed.
+
+**What's actually deferred:** INMP441 hardware integration, the ADR 0009 Rung 2 LPBAM dual-channel
+concurrency bench test, gunshot/chainsaw dataset collection (`DEVICE_DEVELOPMENT_WORKFLOW.md` §4a),
+and Edge Impulse acoustic model training. Targeted for the post-field-test window (15-30 Aug),
+alongside the Robu/Hackster submission sprints.
+
 ## Context
 
 ADR 0006 solved one piece of the acoustic subsystem (the gunshot wake-gate and its cold-start risk) in isolation. That left the full picture scattered across several conversations: what INMP441 can actually hear and how far, how each of CONTEXT.md §3's four target classes (gunshot, chainsaw/logging, illegal vehicle entry, animal sounds) differs physically and therefore needs a different detection treatment, where each processing stage actually lives (STM32 vs QRB2210), and how Edge Impulse fits given ADR 0001's "one toolchain" principle. This ADR is the single, unified reference for all of that — it does not re-decide anything ADR 0006 already settled (the gunshot gate and its pre-trigger-buffer fix stand as written), it assembles the surrounding architecture ADR 0006 depends on and was written without.
