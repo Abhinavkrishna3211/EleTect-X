@@ -84,6 +84,23 @@ void geophone_service() {
 
   const float volts = static_cast<float>(raw) * ADS1115_LSB_VOLTS;
 
+#if SEISMIC_DEBUG_STREAM_RAW
+  // Bench-only: one raw volts reading per line, for scripts/live_seismic_
+  // plot.py's top panel - see SEISMIC_DEBUG_STREAM_RAW's own comment in
+  // config.h for the wire-format contract. Gated to SEISMIC_SAMPLE_RATE_HZ
+  // rather than SEISMIC_DEBUG_PRINT_INTERVAL_MS: geophone_service() runs
+  // every loop() iteration with no ready-bit check on the ADS1115, so
+  // back-to-back calls can return the same conversion (KNOWN_GAPS) - this
+  // gate bounds the console to the nominal sample rate, it does not make
+  // the samples themselves any fresher.
+  static uint32_t s_last_stream_print_ms = 0;
+  const uint32_t stream_now_ms = millis();
+  if (stream_now_ms - s_last_stream_print_ms >= (1000 / SEISMIC_SAMPLE_RATE_HZ)) {
+    s_last_stream_print_ms = stream_now_ms;
+    Serial.println(volts, 6);
+  }
+#endif
+
 #if GEOPHONE_DEBUG_SINGLE_ENDED_AIN0
   // Bench-only: prints what ADS1115_CONFIG_WORD is now sampling single-ended
   // against GND, per the flag's own rationale in config.h. Rate-limited with
