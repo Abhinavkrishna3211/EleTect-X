@@ -70,3 +70,38 @@ def test_data_paths_resolve_under_device_mpu():
     assert mpu_root in config.DATA_DIR.parents
     assert mpu_root in config.MODELS_DIR.parents
     assert config.EXPERIENCE_DB_PATH.parent == config.DATA_DIR
+
+
+def test_camera_device_is_a_v4l2_path():
+    """CAMERA_DEVICE must look like a V4L2 device node, not a Windows/OS-default path.
+
+    perception/camera.py's own backend choice (cv2.CAP_V4L2, forced
+    explicitly) only makes sense against a /dev/videoN path - this catches
+    a future edit accidentally pointing it somewhere else.
+    """
+    assert config.CAMERA_DEVICE.startswith("/dev/video")
+
+
+def test_camera_pixel_format_is_a_valid_fourcc_length():
+    """CAMERA_PIXEL_FORMAT must be exactly 4 characters - what FourCC requires.
+
+    perception.camera.fourcc_to_int raises ValueError on anything else, so
+    a malformed constant here would fail at Camera.open() time on real
+    hardware instead of at import/lint time.
+    """
+    assert len(config.CAMERA_PIXEL_FORMAT) == 4
+
+
+def test_camera_warmup_frames_is_non_negative():
+    """CAMERA_WARMUP_FRAMES feeds a range() in Camera.open() - must be >= 0."""
+    assert config.CAMERA_WARMUP_FRAMES >= 0
+
+
+def test_camera_burst_frames_is_at_least_one():
+    """CAMERA_BURST_FRAMES is capture_burst()'s default count, which rejects < 1."""
+    assert config.CAMERA_BURST_FRAMES >= 1
+
+
+def test_camera_burst_interval_is_non_negative():
+    """CAMERA_BURST_INTERVAL_S is capture_burst()'s default interval, which rejects < 0."""
+    assert config.CAMERA_BURST_INTERVAL_S >= 0
