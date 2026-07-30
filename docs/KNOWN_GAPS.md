@@ -83,6 +83,12 @@ criteria — see each entry's status.
   10 Hz resonance after every stomp, which could distort or duplicate `[trigger]` events during
   Rung 1. High severity — resolve in the same bench session as the stomp test, before trusting its
   results. Status: open, pending hardware.
+- **INA333 (Rajiv Electronics module) `REF` pin bias is unconfirmed.** The board's own listed
+  interfaces omit `REF`, though the INA333 IC always has one. If it's internally tied to GND
+  rather than a mid-supply bias, the geophone's AC signal clips on its negative half. Check by
+  shorting `IN+`/`IN-` and measuring `OUT` against `GND` — ~VCC/2 is correct, ~0V is not. High
+  severity (silently corrupts every reading if wrong, no error, just a bad waveform). Status:
+  open, pending hardware, resolve before trusting any bench signal from this front-end.
 - **Lightning/ESD clamp protection for the geophone's buried cable run is deferred**, not decided.
   A small TVS/clamp across the INA333 differential input pair is worth adding before DFO field
   deployment; not required for bench testing. Low severity now, revisit before burial. Status: open.
