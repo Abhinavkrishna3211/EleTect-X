@@ -92,6 +92,10 @@ criteria — see each entry's status.
 - **Lightning/ESD clamp protection for the geophone's buried cable run is deferred**, not decided.
   A small TVS/clamp across the INA333 differential input pair is worth adding before DFO field
   deployment; not required for bench testing. Low severity now, revisit before burial. Status: open.
+  Partially, cheaply mitigated as of 30 Jul: 1 kΩ series resistors now sit between the damping-
+  resistor node and the INA333's `IN+`/`IN-` inputs (ADR 0001 addendum, `device/mcu/README.md`) —
+  current-limiting only, does not clamp voltage or absorb real surge energy, so this line item
+  stays open until an actual TVS/clamp is added.
 
 ## Build-call 2 (`device/mpu` scaffold)
 
@@ -186,3 +190,45 @@ criteria — see each entry's status.
   has no dependency on `Bridge` at all — wiring that coordination is later build-call scope, once the
   ping bench proves the Bridge round trip works at all. Medium severity. Status: open, deferred by
   design.
+
+## Build-call 4 (`device/mpu/cognition` fusion math)
+
+- **Fusion weights (`WEIGHT_SEISMIC`/`WEIGHT_ACOUSTIC`/`WEIGHT_VISION`, `cognition/config.py`) have
+  a justified ordering but invented magnitudes.** The ordering (vision > seismic > acoustic) follows
+  from ADR 0001's Consequences section (seismic-alone ~70–75%, vision-alone ~70–85% standalone field
+  accuracy) and ADR 0007/0009 scoping acoustic as corroboration only, never standalone presence
+  detection — but the actual numbers (1.5/1.2/0.6) are round values chosen to preserve that ordering,
+  not a fit against real data. High severity — these set every fused probability. Effort: a
+  calibration/fitting pass once a labelled multi-modal field dataset exists (ADR 0001 already lists
+  this as a v2 item, not a launch requirement). Status: open.
+- **Per-modality baselines (`BASELINE_SEISMIC`/`BASELINE_ACOUSTIC`/`BASELINE_VISION`,
+  `cognition/config.py`) are uniform and invented.** All three are `logit(0.10)`, an assumed 10%
+  background/false-positive rate with no per-modality measurement behind it — no bench or field data
+  differentiates them yet. Medium severity. Status: open, pending real trigger-rate data per
+  modality.
+- **`L_PRIOR` (`cognition/config.py`, -1.0) is invented.** It is meant to be the log-odds of
+  "elephant" conditioned on an MCU event having already fired, but no real trigger-to-elephant rate
+  has ever been measured (no field deployment yet) — the value encodes an engineering judgement
+  (most STA/LTA crossings are not elephants) documented in the constant's own rationale comment, not
+  a derived number. Medium severity. Status: open.
+- **The fused probability `P` is not a calibrated probability and must not be presented as one.**
+  ADR 0001's 70–75%/70–85% figures are per-modality field-accuracy *expectations*, not inputs that
+  have been formally propagated through this fusion formula — `P` should not be quoted as a
+  calibrated confidence number in contest or DFO material until real labelled events validate it.
+  Status: open, informational.
+- **No decision/alert threshold on `P` exists yet, deliberately.** `cognition/config.py`'s own
+  docstring states why: no consumer exists (the contextual bandit and alert-escalation logic are
+  both future build calls), and any real threshold needs the field-accuracy figures above, not an
+  invented cutoff picked before they exist. Status: open, scoped to a future build call.
+- **Nothing yet converts a real sensor reading into the log-odds `fuse()` expects.** No code turns
+  `report_footfall_event`'s `probability` field, `report_acoustic_event`'s `confidence` field, or a
+  vision detector's output (not yet built) into a `ModalityReading`'s `log_odds`/`available` pair —
+  `cognition/fusion.py`'s `logit()` is the intended conversion primitive, but nothing calls it yet.
+  High severity — this is the actual integration gap between the Bridge and cognition layers.
+  Status: open, scoped to the Bridge-wiring build call.
+- **ADR 0001 §6's two fusion limitations are accepted approximations, not resolved.** Correlated
+  noise across modalities (rain/fog degrading seismic SNR and vision IR contrast together) and the
+  MCAR assumption behind availability-gated dropout (vision being unavailable due to fog is
+  plausibly not independent of elephant activity) are both restated in `cognition/fusion.py`'s
+  module docstring so a code reader sees them without opening the ADR — see ADR 0001 for the full
+  reasoning. Status: open, tracked as future work, not a launch blocker per the ADR.

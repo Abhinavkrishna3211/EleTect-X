@@ -23,18 +23,50 @@ today, standing in for the STM32's own internal ADC (ADR 0009 swaps this out via
 Rung lands). Plain jumper wires, not Qwiic — I2C2 is an independent bus from the Qwiic connector's
 I2C4.
 
-| Signal | ADS1115 pin | UNO Q pin | MCU pin |
-| --- | --- | --- | --- |
-| SDA | SDA | D20 | PB11 (I2C2_SDA) |
-| SCL | SCL | D21 | PB10 (I2C2_SCL) |
-| VCC | VDD | 3V3 | — |
-| GND | GND | GND | — |
-| Address select | ADDR | GND | — (fixes I2C address at `0x48`) |
-| Differential input+ | AIN0 | — | INA333 `OUT` |
-| Differential input− | AIN1 | — | INA333 `REF` |
+Pin names below match the actual silkscreen on the two breakout boards in use (INA333: `WCMCU-333`;
+ADS1115: `HW-198`) — not the generic IC datasheet pin names, so this table can be followed directly
+without translating labels at the bench.
 
-Geophone signal path: SM-24 → INA333 (gain per its own datasheet resistor) → ADS1115 AIN0/AIN1
-differential pair, rejecting the INA333's bias rail rather than reading it as signal.
+**ADS1115 (`HW-198`) side:**
+
+| Signal | ADS1115 pin (silkscreen) | UNO Q pin | MCU pin |
+| --- | --- | --- | --- |
+| SDA | `SDA` | D20 | PB11 (I2C2_SDA) |
+| SCL | `SCL` | D21 | PB10 (I2C2_SCL) |
+| Power | `VDD` | 3V3 | — |
+| Ground | `GND` | GND | — |
+| Address select | `ADDR` | GND | — (fixes I2C address at `0x48`) |
+| Differential input+ | `A0` | — | INA333 `VOUT` |
+| Differential input− | `A1` | — | INA333 `UREF` |
+
+**INA333 (`WCMCU-333`) side:**
+
+| Signal | INA333 pin (silkscreen) | Connects to |
+| --- | --- | --- |
+| Output | `VOUT` | ADS1115 `A0` |
+| Reference | `UREF` | ADS1115 `A1` (same function as the datasheet's `REF` pin) |
+| Power | `VCC` | 3V3 rail — use this pin, not the board's separate `3.3V` label (see note below) |
+| Ground | `GND` | GND rail (either of the board's two `GND` pins) |
+| Non-inverting input | `VIN+` | 1 kΩ series resistor → damping-resistor node → geophone lead |
+| Inverting input | `VIN-` | 1 kΩ series resistor → damping-resistor node → geophone other lead |
+
+**Unconfirmed:** this board breaks out both `VCC` and a separately labeled `3.3V` pin (also two `GND`
+pins, one per edge). Most likely these are the same power/ground nets mirrored on both edges of the
+board for breadboard convenience, not two distinct functions — but this is not verified against a
+datasheet for this specific clone board. Wire `VCC` (the standard supply-pin name) to 3V3 and leave
+the separate `3.3V` pin unconnected; only investigate further if the amp doesn't power up.
+
+Geophone signal path: SM-24 → (1 kΩ damping resistor) → 1 kΩ series resistors → INA333 `VIN+`/
+`VIN-` → INA333 → ADS1115 `A0`/`A1` differential pair, rejecting the INA333's bias rail (`UREF`)
+rather than reading it as signal.
+
+**Input protection — 1 kΩ in series with each INA333 input.** Between the damping-resistor node and
+the INA333's `VIN+`/`VIN-` pins, add a 1 kΩ resistor in each leg. Negligible effect on the signal
+(the INA333's input impedance is high enough that this forms an RC corner far above the 2-50 Hz
+seismic band), but gives the amp's internal ESD structures some current limiting against a transient
+on the buried cable run. Same 1 kΩ value as the damping resistor, already in the kit. This is a
+cheap partial mitigation, not a substitute for the still-open TVS/clamp item in
+`docs/KNOWN_GAPS.md` — see ADR 0001's 30 Jul addendum.
 
 **Damping resistor — required, not optional.** The SM-24's open-circuit damping is h=0.25
 (datasheet), badly underdamped at its 10 Hz resonance: an unshunted coil rings for several cycles
@@ -47,12 +79,14 @@ end — cable resistance would otherwise shift the delivered damping away from t
 works — tolerance isn't critical here. See ADR 0001 addendum for the full derivation.
 
 **INA333 REF-bias check — do this before wiring the rest.** The geophone's output is a true AC
-signal (swings both positive and negative). If the INA333's `REF` pin is tied to GND instead of a
-mid-supply bias (~VCC/2), the negative half of every waveform clips at the rail. Short `IN+` to
-`IN-`, power the board, measure `OUT` against `GND`: ~1.65V on a 3.3V rail means `REF` is biased
+signal (swings both positive and negative). If the INA333's `UREF` pin is tied to GND instead of a
+mid-supply bias (~VCC/2), the negative half of every waveform clips at the rail. Short `VIN+` to
+`VIN-`, power the board, measure `VOUT` against `GND`: ~1.65V on a 3.3V rail means `UREF` is biased
 correctly and the wiring below is safe to use as-is; a reading near 0V means it isn't, and needs an
-external fix before proceeding. Also check the `RG` gain-setting pads — this specific board ships
-with no default resistor populated; ~1 kΩ gives a reasonable starting gain (G≈101) if bare.
+external fix before proceeding. Also check this board's `RG` gain-setting pads (unlabeled in the
+photo reference for this specific board — look for a small unpopulated 2-pad footprint near the
+INA333 chip itself, not on the main 8-pin header) — ~1 kΩ gives a reasonable starting gain (G≈101)
+if bare.
 
 **Known open item (`docs/KNOWN_GAPS.md`):** whether `Wire` or `Wire1` is actually the Arduino Core
 mapping for I2C2 (D20/D21) on this board has not been confirmed on hardware. `config.h` defaults to
