@@ -12,9 +12,10 @@ rule-gates, watchdog. On-device models live in `lib/` (Edge Impulse SDK export).
   `rule_gate.cpp`). **This never produces a flashable image.** `hostshim/` is never synced to the
   board.
 - **App Lab (or the Arduino App CLI over SSH)** — the only path onto real hardware. Fed by
-  `scripts/sync-to-board.sh`, which one-directionally mirrors `src/` and `include/config.h` +
-  `include/secrets.h` into the board's App folder. Never hand-edit the board's copy — edit here,
-  re-run the sync script, then build/flash from App Lab.
+  `scripts/sync-to-board.sh`, which one-directionally mirrors `src/` (config.h and secrets.h
+  included — see the Layout section below on why they live in `src/`, not a separate `include/`)
+  into the board's App folder as `sketch/`. Never hand-edit the board's copy — edit here, re-run
+  the sync script, then build/flash from App Lab.
 
 ## Wiring — bench stand-in (ADS1115 + INA333)
 
@@ -81,12 +82,12 @@ works — tolerance isn't critical here. See ADR 0001 addendum for the full deri
 **INA333 REF-bias check — do this before wiring the rest.** The geophone's output is a true AC
 signal (swings both positive and negative). If the INA333's `UREF` pin is tied to GND instead of a
 mid-supply bias (~VCC/2), the negative half of every waveform clips at the rail. Short `VIN+` to
-`VIN-`, then run the check: set `GEOPHONE_DEBUG_SINGLE_ENDED_AIN0` to `1` in `include/config.h`,
+`VIN-`, then run the check: set `GEOPHONE_DEBUG_SINGLE_ENDED_AIN0` to `1` in `src/config.h`,
 sync, flash, and read the `[bias-check] raw=<int> volts=<float>` lines the board prints — ~1.65V
 on a 3.3V rail means `UREF` is biased correctly and the wiring below is safe to use as-is; a
 reading near 0V means it isn't, and needs an external fix before proceeding. Set the flag back to
 `0` and re-sync before moving on — it must never read `1` on a node headed for the field
-(`include/config.h`'s own bench-only-flags section says the same). Also check this board's `RG`
+(`src/config.h`'s own bench-only-flags section says the same). Also check this board's `RG`
 gain-setting pads (unlabeled in the photo reference for this specific board — look for a small
 unpopulated 2-pad footprint near the INA333 chip itself, not on the main 8-pin header) — ~1 kΩ
 gives a reasonable starting gain (G≈101) if bare.
@@ -117,7 +118,7 @@ pio run -e native       # whole src/ tree compiles + links against the host shim
 scripts/sync-to-board.sh
 ```
 
-Requires `include/secrets.h` to exist locally first (copy `include/secrets.h.example`, fill in the
+Requires `src/secrets.h` to exist locally first (copy `src/secrets.h.example`, fill in the
 real per-device OTAA DevEUI/AppEUI/AppKey — never commit this file, it's gitignored).
 
 ## Bench stomp test (Rung 1 exit criterion)
@@ -149,18 +150,45 @@ Run this after wiring the table above and syncing/flashing:
 ## Layout
 
 ```text
-include/         config.h (pin map + tuning constants), secrets.h.example
-src/
+src/                        flat - no subfolders (see rationale below)
+  sketch.ino               required by arduino-cli's naming convention only - empty otherwise
+  sketch.yaml              required by arduino-app-cli - board profile, not repo-specific
+  config.h                 pin map + tuning constants
+  secrets.h / secrets.h.example   per-device OTAA credentials (secrets.h gitignored)
   main.cpp                 setup()/loop() shell
   state_machine.{h,cpp}    idle -> sensing -> event -> cooldown
-  sensors/geophone.{h,cpp} read_seismic_window() over the ADS1115 stand-in
-  footfall/sta_lta.{h,cpp} pure STA/LTA core, zero hardware calls
-  actuators/
-    rule_gate.{h,cpp}      pure clamp/cooldown core, shared by horn/led/ir
-    horn.{h,cpp}            owns AUDIO_TRIGGER_PIN + HORN_AMP_ENABLE_PIN
-    led.{h,cpp}             white/blue deterrent LED pods
-    ir.{h,cpp}              940nm illuminator for night-vision capture
-  lora/mac.{h,cpp}          Grove E5 AT-command OTAA join (IN865 only)
+  geophone.{h,cpp}         read_seismic_window() over the ADS1115 stand-in
+  sta_lta.{h,cpp}          pure STA/LTA core, zero hardware calls
+  rule_gate.{h,cpp}        pure clamp/cooldown core, shared by horn/led/ir
+  horn.{h,cpp}             owns AUDIO_TRIGGER_PIN + HORN_AMP_ENABLE_PIN
+  led.{h,cpp}              white/blue deterrent LED pods
+  ir.{h,cpp}               940nm illuminator for night-vision capture
+  mac.{h,cpp}              Grove E5 AT-command OTAA join (IN865 only)
 hostshim/        HOST BUILD ONLY - never synced to the board (ADR 0010)
 tests/           Unity known-answer suites (pure cores only)
 ```
+
+`src/` is deliberately flat — no `sensors/`/`actuators/`/`footfall/`/`lora/` subfolders, and
+`config.h`/`secrets.h` live directly in it rather than a separate `include/`. This is load-bearing,
+not stylistic (ADR 0010's addendum has the full story): `arduino-cli`'s sketch build only compiles
+`.cpp` files that are direct children of the sketch root, and only puts the sketch root itself on
+the include search path — subfolder `.cpp` files are silently skipped (the build reports zero
+errors, then fails at the link step), and a subfolder file's bare `#include "config.h"` only ever
+worked by accident under PlatformIO's now-removed `-I include` flag. App Lab's build has no
+equivalent fallback for either case. Every file in `src/` therefore sits at the same depth and uses
+a plain `#include "whatever.h"` — no relative `../` paths anywhere in this tree.
+
+`sketch.ino` is a separate, unrelated requirement from the same tool: `arduino-cli` refuses to
+compile a sketch at all unless it contains a file named exactly `<sketch-folder-name>.ino` — on the
+board that folder is always `sketch/` (see `scripts/sync-to-board.sh`), so this file must be named
+`sketch.ino` regardless of this repo's own directory name. It carries no logic; `setup()`/`loop()`
+are ordinary functions in `main.cpp`, which the merged sketch links against normally. Do not delete
+it — a manual `rm -rf` of the board's `sketch/` folder without this file present breaks the build
+with `main file missing from sketch`, and it will not be restored by re-running
+`scripts/sync-to-board.sh` unless it exists here in the repo first.
+
+`sketch.yaml` is the same story from `arduino-app-cli` rather than `arduino-cli`: `app start`
+refuses to run at all without it present (`sketch folder is incomplete: both sketch.ino and
+sketch.yaml are required`), and it carries no repo-specific content — just the `arduino:zephyr`
+platform profile every App Lab sketch uses. Like `sketch.ino`, it belongs here rather than only on
+the board for the same `rsync --delete` reason.
