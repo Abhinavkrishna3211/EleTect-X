@@ -46,6 +46,14 @@ end — cable resistance would otherwise shift the delivered damping away from t
 `RtBcfn=6000 Ω·Hz, fn=10 Hz, Rc=375 Ω` against a target h≈0.7. Any resistor from the existing kit
 works — tolerance isn't critical here. See ADR 0001 addendum for the full derivation.
 
+**INA333 REF-bias check — do this before wiring the rest.** The geophone's output is a true AC
+signal (swings both positive and negative). If the INA333's `REF` pin is tied to GND instead of a
+mid-supply bias (~VCC/2), the negative half of every waveform clips at the rail. Short `IN+` to
+`IN-`, power the board, measure `OUT` against `GND`: ~1.65V on a 3.3V rail means `REF` is biased
+correctly and the wiring below is safe to use as-is; a reading near 0V means it isn't, and needs an
+external fix before proceeding. Also check the `RG` gain-setting pads — this specific board ships
+with no default resistor populated; ~1 kΩ gives a reasonable starting gain (G≈101) if bare.
+
 **Known open item (`docs/KNOWN_GAPS.md`):** whether `Wire` or `Wire1` is actually the Arduino Core
 mapping for I2C2 (D20/D21) on this board has not been confirmed on hardware. `config.h` defaults to
 `Wire`. If the geophone never reads (`geophone_ok()` stays false, or `report_system_status`'s
