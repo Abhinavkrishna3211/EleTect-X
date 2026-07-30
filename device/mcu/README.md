@@ -81,12 +81,21 @@ works — tolerance isn't critical here. See ADR 0001 addendum for the full deri
 **INA333 REF-bias check — do this before wiring the rest.** The geophone's output is a true AC
 signal (swings both positive and negative). If the INA333's `UREF` pin is tied to GND instead of a
 mid-supply bias (~VCC/2), the negative half of every waveform clips at the rail. Short `VIN+` to
-`VIN-`, power the board, measure `VOUT` against `GND`: ~1.65V on a 3.3V rail means `UREF` is biased
-correctly and the wiring below is safe to use as-is; a reading near 0V means it isn't, and needs an
-external fix before proceeding. Also check this board's `RG` gain-setting pads (unlabeled in the
-photo reference for this specific board — look for a small unpopulated 2-pad footprint near the
-INA333 chip itself, not on the main 8-pin header) — ~1 kΩ gives a reasonable starting gain (G≈101)
-if bare.
+`VIN-`, then run the check: set `GEOPHONE_DEBUG_SINGLE_ENDED_AIN0` to `1` in `include/config.h`,
+sync, flash, and read the `[bias-check] raw=<int> volts=<float>` lines the board prints — ~1.65V
+on a 3.3V rail means `UREF` is biased correctly and the wiring below is safe to use as-is; a
+reading near 0V means it isn't, and needs an external fix before proceeding. Set the flag back to
+`0` and re-sync before moving on — it must never read `1` on a node headed for the field
+(`include/config.h`'s own bench-only-flags section says the same). Also check this board's `RG`
+gain-setting pads (unlabeled in the photo reference for this specific board — look for a small
+unpopulated 2-pad footprint near the INA333 chip itself, not on the main 8-pin header) — ~1 kΩ
+gives a reasonable starting gain (G≈101) if bare.
+
+**Seismic waveform capture (Part C2 sensitivity pass).** Separate from the REF-bias check above:
+set `SEISMIC_DEBUG_VERBOSE` to `1` to get a periodic `[seismic]` sta/lta/ratio line plus a
+`[window]` CSV volts dump on every `[trigger]` event, then render the dumps with
+`python scripts/plot_seismic_window.py <saved-console-log> --out-dir <dir>`. Same flag discipline
+as above — back to `0` and re-sync once the capture session is done.
 
 **Known open item (`docs/KNOWN_GAPS.md`):** whether `Wire` or `Wire1` is actually the Arduino Core
 mapping for I2C2 (D20/D21) on this board has not been confirmed on hardware. `config.h` defaults to
