@@ -21,7 +21,7 @@ local store only (not worth an online search, per prior sourcing attempts this s
 | INA333 | **H** | — |
 | ADS1115 | **H** | Confirmed needed — bench ADC stand-in for the geophone front-end per the build schedule. |
 | SM-24 geophone | **H** | — |
-| USB hub | **H**, unused in final design | Spare only. |
+| USB hub | **H** | Bridges the IMX462's USB-A UVC connector to the UNO Q's single USB-C port for bench validation (build call 3's camera check). Not part of the final field enclosure — a compact USB-C-to-USB-A pigtail is the likely permanent fit once the camera path is proven. |
 | Arducam IMX462 | **H** | No stand-in needed — real camera already in hand. |
 
 ## 2. Camera + IR
