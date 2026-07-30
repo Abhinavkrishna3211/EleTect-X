@@ -62,7 +62,7 @@
 // Every flag in this section exists to support a bench characterization
 // session (the INA333 REF-bias check, or a later Part C2 sensitivity/
 // waveform-capture pass) and has no role in the field-deployed reflex
-// behaviour. All three must read 0 before running scripts/sync-to-board.sh
+// behaviour. All four must read 0 before running scripts/sync-to-board.sh
 // against a node that is actually going in the ground - device/mcu/README.md
 // documents the sync/re-sync procedure that flips them back.
 
@@ -88,11 +88,37 @@
 // of that has no consumer.
 #define SEISMIC_DEBUG_VERBOSE 0
 
+// When 1: geophone.cpp prints one raw volts reading per line, gated to
+// SEISMIC_SAMPLE_RATE_HZ (not SEISMIC_DEBUG_PRINT_INTERVAL_MS - that 200 ms
+// cadence would give a 5 Hz trace, useless for eyeballing a 2-50 Hz
+// waveform live). This is pitch/demo tooling: scripts/live_seismic_plot.py
+// parses this stream for its top (raw volts) panel and is meant to be run
+// with SEISMIC_DEBUG_VERBOSE also set to 1, whose [seismic] sta/lta/ratio
+// line feeds the script's bottom panel - the two flags are independent but
+// designed to be combined for that script specifically. Wire format is a
+// parser contract: exactly one line per sample, bare float, 6 decimals,
+// nothing else -
+//
+//   -0.001250
+//
+// No [tag] prefix (every other line this firmware prints starts with one,
+// so an unprefixed float is already unambiguous) and no timestamp (the host
+// script times arrival itself); a label would only cost bytes on a stream
+// that already runs continuously at up to SEISMIC_SAMPLE_RATE_HZ. 6 decimals
+// matches log_window_csv's existing precision and is what it takes to
+// resolve ADS1115_LSB_VOLTS's 62.5 uV LSB - 4 decimals would quantize away
+// 3 of every 4 LSB steps. Left at 0 in the field: no consumer, and this
+// flag must never read 1 on a node headed for the field, same as the other
+// flags in this section.
+#define SEISMIC_DEBUG_STREAM_RAW 0
+
 // Rate limit shared by both bench prints above (GEOPHONE_DEBUG_SINGLE_ENDED_
 // AIN0's [bias-check] line and SEISMIC_DEBUG_VERBOSE's periodic [seismic]
 // line) - fast enough to watch a reading settle at the bench, slow enough
 // not to flood a 115200-baud console that other subsystems log to as well.
 // INVENTED - no bench session has confirmed this cadence yet (KNOWN_GAPS).
+// Not used by SEISMIC_DEBUG_STREAM_RAW above, which gates to
+// SEISMIC_SAMPLE_RATE_HZ instead - see that flag's own comment.
 #define SEISMIC_DEBUG_PRINT_INTERVAL_MS 200
 
 #if GEOPHONE_DEBUG_SINGLE_ENDED_AIN0
