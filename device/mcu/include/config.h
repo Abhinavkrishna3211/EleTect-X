@@ -56,6 +56,51 @@
 #define ADS1115_CFG_DR_250SPS 0x00A0        // 250 samples per second
 #define ADS1115_CFG_COMP_DISABLE 0x0003     // comparator off, ALERT/RDY unused
 
+// ---------------------------------------------------------------------------
+// Seismic bench-only debug flags - MUST be 0 before any field sync
+// ---------------------------------------------------------------------------
+// Every flag in this section exists to support a bench characterization
+// session (the INA333 REF-bias check, or a later Part C2 sensitivity/
+// waveform-capture pass) and has no role in the field-deployed reflex
+// behaviour. All three must read 0 before running scripts/sync-to-board.sh
+// against a node that is actually going in the ground - device/mcu/README.md
+// documents the sync/re-sync procedure that flips them back.
+
+// When 1, ADS1115_CONFIG_WORD below samples AIN0 single-ended against board
+// GND (ADS1115 datasheet 9.6.3, MUX=100) instead of the field differential
+// AIN0-AIN1 pair - ADS1115_CFG_MUX_DIFF_0_1 itself is untouched either way.
+// This is the INA333 REF-bias bench check (device/mcu/README.md): with VIN+
+// shorted to VIN-, differential mode already rejects the INA333's own bias
+// rail, so it cannot show whether that bias is centered; single-ended mode
+// reads VOUT directly against GND instead, which is the absolute bias level
+// the check needs. Left at 0, ADS1115_CFG_MUX_ACTIVE below resolves to
+// ADS1115_CFG_MUX_DIFF_0_1 and the field wiring is unaffected.
+#define GEOPHONE_DEBUG_SINGLE_ENDED_AIN0 0
+
+// When 1: state_machine.cpp prints sta/lta/ratio every
+// SEISMIC_DEBUG_PRINT_INTERVAL_MS regardless of whether a trigger fires, and
+// every existing [trigger] event additionally dumps the raw window buffer as
+// CSV volts (scripts/plot_seismic_window.py renders the dump). Both are for
+// the later Part C2 sensitivity-characterization pass, not the REF-bias
+// check above - independent of GEOPHONE_DEBUG_SINGLE_ENDED_AIN0, either flag
+// can be 1 without the other. Left at 0 in the field: the reflex loop
+// already prints [trigger] on its own schedule, and a periodic print on top
+// of that has no consumer.
+#define SEISMIC_DEBUG_VERBOSE 0
+
+// Rate limit shared by both bench prints above (GEOPHONE_DEBUG_SINGLE_ENDED_
+// AIN0's [bias-check] line and SEISMIC_DEBUG_VERBOSE's periodic [seismic]
+// line) - fast enough to watch a reading settle at the bench, slow enough
+// not to flood a 115200-baud console that other subsystems log to as well.
+// INVENTED - no bench session has confirmed this cadence yet (KNOWN_GAPS).
+#define SEISMIC_DEBUG_PRINT_INTERVAL_MS 200
+
+#if GEOPHONE_DEBUG_SINGLE_ENDED_AIN0
+#define ADS1115_CFG_MUX_ACTIVE 0x4000  // single-ended AIN0 vs GND, MUX=100
+#else
+#define ADS1115_CFG_MUX_ACTIVE ADS1115_CFG_MUX_DIFF_0_1
+#endif
+
 // Differential AIN0-AIN1 measures the INA333 output against its own reference
 // pin, so the mid-rail bias the instrumentation amp sits on cancels instead of
 // eating half the ADC range.
@@ -64,7 +109,7 @@
 // INA333's gain is set to keep inside 2 V. The wider +/-4.096 V range would
 // throw away a bit of resolution for headroom the signal never uses.
 #define ADS1115_CONFIG_WORD                                            \
-  (ADS1115_CFG_MUX_DIFF_0_1 | ADS1115_CFG_PGA_2048MV |                 \
+  (ADS1115_CFG_MUX_ACTIVE | ADS1115_CFG_PGA_2048MV |                   \
    ADS1115_CFG_MODE_CONTINUOUS | ADS1115_CFG_DR_250SPS |               \
    ADS1115_CFG_COMP_DISABLE)
 
