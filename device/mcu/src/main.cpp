@@ -5,12 +5,12 @@
 // why that is deliberately deferred to a hardware session.
 
 #include "Arduino.h"
-#include "actuators/horn.h"
-#include "actuators/ir.h"
-#include "actuators/led.h"
 #include "config.h"
-#include "lora/mac.h"
-#include "sensors/geophone.h"
+#include "geophone.h"
+#include "horn.h"
+#include "ir.h"
+#include "led.h"
+#include "mac.h"
 #include "state_machine.h"
 
 void setup() {
