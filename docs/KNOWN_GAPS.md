@@ -92,6 +92,10 @@ criteria — see each entry's status.
 - **Lightning/ESD clamp protection for the geophone's buried cable run is deferred**, not decided.
   A small TVS/clamp across the INA333 differential input pair is worth adding before DFO field
   deployment; not required for bench testing. Low severity now, revisit before burial. Status: open.
+  Partially, cheaply mitigated as of 30 Jul: 1 kΩ series resistors now sit between the damping-
+  resistor node and the INA333's `IN+`/`IN-` inputs (ADR 0001 addendum, `device/mcu/README.md`) —
+  current-limiting only, does not clamp voltage or absorb real surge energy, so this line item
+  stays open until an actual TVS/clamp is added.
 
 ## Build-call 2 (`device/mpu` scaffold)
 

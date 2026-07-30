@@ -81,6 +81,32 @@ not just the electrical design here.
 protection on the long buried cable run. Worth a field-hardening pass before the DFO deployment,
 not a Rung 1 bench-test blocker — logged in `docs/KNOWN_GAPS.md`.
 
+## Addendum, 30 Jul 2026 — INA333 input series resistors
+
+A third-party SM-24+ADS1115 build (Core Electronics' Raspberry Pi geophone guide) wires two 1 kΩ
+resistors in series between the sensor and the ADC's differential inputs, purely for ESD/transient
+current-limiting — separate from that design's own damping resistor. Their topology has no
+instrumentation amp, so the ADC is the first thing the buried-cable signal touches; ours interposes
+the INA333, so the equivalent boundary in our chain is the INA333's own `IN+`/`IN-` pins, not the
+ADS1115's `AIN0`/`AIN1` (which already sit downstream of the amp, inside the enclosure).
+
+**Decision:** add a 1 kΩ resistor in series with each of the INA333's `IN+` and `IN-` leads,
+between the damping-resistor node and the amp's inputs. Negligible effect on the signal — the
+INA333's input impedance is high enough (typical CMOS instrumentation-amp input stage) that a 1 kΩ
+series resistor forms an RC corner with parasitic input capacitance many orders of magnitude above
+the 2–50 Hz seismic band — while giving the amp's internal input-ESD structures some current
+limiting against a transient coupled onto the buried cable. Same 1 kΩ value as the damping
+resistor and already in the kit; no new procurement.
+
+**This is not a substitute for the deferred TVS/clamp above.** A resistor limits steady current; it
+does not clamp voltage or absorb real transient energy the way a TVS diode or gas-discharge tube
+would. A genuine lightning-induced surge on a long buried run could still exceed both the resistor's
+rating and the INA333 input stage's clamp current despite this addition. Treat this as free, partial
+insurance layered under the still-open TVS/clamp item, not a resolution of it — that gap stays open
+in `docs/KNOWN_GAPS.md`.
+
+Reflected in `device/mcu/README.md`'s wiring table.
+
 ## Evidence / sources
 
 - O'Connell-Rodwell et al., "Seismic properties of Asian elephant vocalizations and locomotion" (JASA, 2000) — https://pubs.aip.org/asa/jasa/article/108/6/3066/554703/
@@ -96,3 +122,6 @@ not a Rung 1 bench-test blocker — logged in `docs/KNOWN_GAPS.md`.
   resistance specifications — manufacturer PDF, 2006
 - olewolf/geophone (Arduino SM-24 amplifier shield + frequency analyzer reference) —
   https://github.com/olewolf/geophone
+- Core Electronics, "Set Up a Geophone with a Raspberry Pi and an ADC (ADS1115)" — SM-24+ADS1115
+  reference build, source of the input series-resistor idea and independent 1 kΩ corroboration —
+  https://core-electronics.com.au/guides/geophone-raspberry-pi/
