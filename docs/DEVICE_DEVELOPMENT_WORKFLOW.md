@@ -112,8 +112,10 @@ fail or mislead if assumed otherwise.
 **Bricks** are pre-built, attachable modules (Web Server, Camera, Object Detection, Climate/Modulino,
 **and — critical for us — pre-built Edge Impulse demo bricks**, see §4).
 
-**App files live on the board's own Linux filesystem** (`/home/arduino/arduino_apps/<app>/`), not your PC
-— even in "PC mode" over USB. Confirmed independently and consistent with Arduino's own setup docs, which
+**App files live on the board's own Linux filesystem** (`/home/arduino/ArduinoApps/<app>/` — CamelCase,
+confirmed on real hardware 30 Jul 2026 via `arduino-app-cli config get`'s own "Apps Directory" field; an
+earlier pass at this document had it as lowercase `arduino_apps`, which does not exist on the board), not
+your PC — even in "PC mode" over USB. Consistent with Arduino's own setup docs, which
 explicitly recommend **VS Code Remote-SSH** as a first-class way to work on the board — with one real
 gotcha, straight from Arduino's own documentation: **disable GitHub Copilot and similar heavy extensions
 when Remote-SSH'd into the board — they can cause memory issues on this low-RAM device.**
