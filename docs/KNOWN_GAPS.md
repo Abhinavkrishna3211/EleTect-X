@@ -232,3 +232,16 @@ criteria — see each entry's status.
   plausibly not independent of elephant activity) are both restated in `cognition/fusion.py`'s
   module docstring so a code reader sees them without opening the ADR — see ADR 0001 for the full
   reasoning. Status: open, tracked as future work, not a launch blocker per the ADR.
+
+## Build-call 5 (`device/mcu` seismic bench debug flags)
+
+- **`GEOPHONE_DEBUG_SINGLE_ENDED_AIN0`, `SEISMIC_DEBUG_VERBOSE`, and
+  `SEISMIC_DEBUG_PRINT_INTERVAL_MS` (`config.h`) are bench-only and invented.** All three exist
+  solely to support the INA333 REF-bias check and the Part C2 sensitivity/waveform-characterization
+  pass; none has a role in field-deployed reflex behaviour, and `SEISMIC_DEBUG_PRINT_INTERVAL_MS`'s
+  200 ms cadence is engineering judgement, not a bench-measured value. High severity if left
+  non-zero: `GEOPHONE_DEBUG_SINGLE_ENDED_AIN0=1` samples the ADS1115 single-ended against GND
+  instead of the field differential pair, silently corrupting every reading. Both flags must be
+  confirmed `0` before any `scripts/sync-to-board.sh` run against a node headed for the field.
+  Status: open, self-enforced only by the comment in `config.h` and the README procedure — no
+  automated check yet.
