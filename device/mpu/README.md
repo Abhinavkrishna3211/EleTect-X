@@ -44,7 +44,10 @@ bridge/
 perception/
   camera.py      IMX462 V4L2 capture wrapper — open/capture/burst/release, no trigger/IR logic
   (vision INT8 detector itself: future build call)
-cognition/       fusion + contextual bandit (future build call)
+cognition/
+  fusion.py      weighted log-odds fusion (CONTEXT.md 4) — pure function, no Bridge/hardware
+  config.py      fusion weights, per-modality baselines, prior — one rationale each
+  (contextual bandit + SQLite experience store: future build call)
 services/
   config.py      MPU-side tuning constants, one rationale each (mirrors device/mcu/include/config.h)
 comms/           LoRa uplink (future build call)
