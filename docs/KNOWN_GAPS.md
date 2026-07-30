@@ -243,5 +243,17 @@ criteria — see each entry's status.
   non-zero: `GEOPHONE_DEBUG_SINGLE_ENDED_AIN0=1` samples the ADS1115 single-ended against GND
   instead of the field differential pair, silently corrupting every reading. Both flags must be
   confirmed `0` before any `scripts/sync-to-board.sh` run against a node headed for the field.
-  Status: open, self-enforced only by the comment in `config.h` and the README procedure — no
-  automated check yet.
+  Status: **closed for the REF-bias check** — run on hardware 2026-07-30, `[bias-check]
+  raw≈26890 volts≈1.6806V`, stable across multiple readings, confirming `UREF` is correctly
+  mid-supply biased. `GEOPHONE_DEBUG_SINGLE_ENDED_AIN0` reset to `0` and re-synced afterward. Still
+  open for Part C2 (`SEISMIC_DEBUG_VERBOSE`) — no bench session has run that pass yet.
+- **`arduino-app-cli monitor` cannot read this board's live serial console — use App Lab's own
+  Serial Monitor (in a browser) instead.** Confirmed on hardware while running the REF-bias check
+  above: the CLI path connects to `arduino-router` without error but never delivers any bytes, in
+  steady state, regardless of firmware content (tested against `eletect-x`, against `examples:blink`
+  as a control case, and against a firmware build with a guaranteed periodic print). Root cause not fully
+  isolated — see ADR 0010's 2026-07-30 addendum for the full investigation — but the workaround is
+  simple and confirmed: App Lab's own web-UI console works. Medium severity: does not block any
+  bench work, since the GUI path is confirmed to work, but wastes time for anyone who reaches for
+  the CLI first. Status: open as a CLI limitation, closed as a practical blocker (workaround
+  documented here and in the ADR).

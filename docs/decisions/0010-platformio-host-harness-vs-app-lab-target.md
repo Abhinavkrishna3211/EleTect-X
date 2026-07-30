@@ -116,3 +116,43 @@ and only turned out to be incomplete once finding (2) surfaced on the very next 
 Every file in `src/` now sits at the same depth and uses a plain `#include "whatever.h"`; see
 `device/mcu/README.md`'s Layout section for the current file list and this same rationale restated
 for anyone reading that file cold.
+
+## Addendum (2026-07-30): `arduino-app-cli monitor` does not surface plain `Serial` output — use App Lab's own Serial Monitor instead
+
+Running the INA333 REF-bias bench check (`device/mcu/README.md`) needs to read the
+`[bias-check] raw=<int> volts=<float>` line the board prints. The obvious path over SSH —
+`arduino-app-cli monitor` — connects without error but never delivers a single byte, under every
+capture method tried (plain redirection, `timeout`, `ssh -tt`, and a `script`-emulated real pty),
+including a debug-logged run and a control test against `examples:blink`. Root cause was narrowed,
+not fully identified:
+
+- `arduino-app-cli monitor` (confirmed via `--help`) attaches to the MCU serial line through
+  `arduino-router`, a system daemon (`arduino-router.service`) — not a direct read of `/dev/ttyGS0`
+  (the USB-gadget-serial device the MCU's UART is exposed as on the Linux side; owned by
+  `arduino-router-serial.service`, which the CLI does not bypass).
+- `journalctl` on the board shows `arduino-router` accepts the monitor client's connection cleanly
+  every time (`Accepted monitor connection from=127.0.0.1:<port>`), and logs a burst of
+  `invalid packet, expected array, got: int8` errors exactly once per MCU reset/reflash — consistent
+  with raw boot-loader noise on the wire before the app's own code starts, not with the app's own
+  prints. Critically, **no errors and no data appear in steady state**, even against a firmware build
+  with an unconditional `Serial.print()` every 2 seconds (added and flashed purely to test this,
+  then reverted) — so the gap is not "no evidence exists," it never leaves the board (or never
+  leaves the MCU) at all in this daemon's data path.
+- Adding a bare `Bridge.begin()` (zero `Bridge.provide()` handlers, gated behind `#ifdef ARDUINO`
+  so the host build is unaffected) was tested as the leading hypothesis, since the one confirmed
+  working comparison case (`examples:blink`) calls `Bridge.begin()` and `eletect-x`'s firmware does
+  not. This made no difference — identical zero-byte result, identical reset-only error burst — so
+  the gap is not simply "Bridge was never initialized." The change was reverted; `main.cpp` carries
+  no Bridge dependency.
+
+**What is confirmed to work**: App Lab's own web-UI Serial Monitor (opened directly in a browser
+against the board, not through `arduino-app-cli`) shows the `[bias-check]` lines correctly and was
+used to complete the actual bench check (see `device/mcu/README.md`'s REF-bias section for the
+result). Whether the GUI shares `arduino-router`'s serial path was not independently confirmed — a
+`curl` probe against the App Lab backend (`127.0.0.1:8800`, the same `arduino-app-cli` daemon
+process that implements the CLI `monitor` subcommand) found no guessable REST/websocket route, and
+reproducing the GUI's console requires a real browser session, which isn't reachable over SSH — but
+regardless of *why* the GUI works and the CLI doesn't, the practical finding stands on its own:
+**for any future bench session that needs to read this board's live serial console, use App Lab's
+own Serial Monitor in a browser, not `arduino-app-cli monitor`.** No further investigation of the
+CLI/router path is planned; it isn't blocking anything as long as the GUI path is used instead.

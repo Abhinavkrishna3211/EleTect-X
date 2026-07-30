@@ -85,12 +85,17 @@ mid-supply bias (~VCC/2), the negative half of every waveform clips at the rail.
 `VIN-`, then run the check: set `GEOPHONE_DEBUG_SINGLE_ENDED_AIN0` to `1` in `src/config.h`,
 sync, flash, and read the `[bias-check] raw=<int> volts=<float>` lines the board prints — ~1.65V
 on a 3.3V rail means `UREF` is biased correctly and the wiring below is safe to use as-is; a
-reading near 0V means it isn't, and needs an external fix before proceeding. Set the flag back to
+reading near 0V means it isn't, and needs an external fix before proceeding. Read the console via
+**App Lab's own Serial Monitor (in a browser)** — `arduino-app-cli monitor` over SSH does not
+deliver serial data on this board; see ADR 0010's 2026-07-30 addendum. Set the flag back to
 `0` and re-sync before moving on — it must never read `1` on a node headed for the field
 (`src/config.h`'s own bench-only-flags section says the same). Also check this board's `RG`
 gain-setting pads (unlabeled in the photo reference for this specific board — look for a small
 unpopulated 2-pad footprint near the INA333 chip itself, not on the main 8-pin header) — ~1 kΩ
 gives a reasonable starting gain (G≈101) if bare.
+
+**Result (2026-07-30):** `[bias-check] raw≈26890 volts≈1.6806V`, stable across multiple readings —
+`UREF` is correctly mid-supply biased and the wiring above is safe to use as-is.
 
 **Seismic waveform capture (Part C2 sensitivity pass).** Separate from the REF-bias check above:
 set `SEISMIC_DEBUG_VERBOSE` to `1` to get a periodic `[seismic]` sta/lta/ratio line plus a
@@ -125,7 +130,8 @@ real per-device OTAA DevEUI/AppEUI/AppKey — never commit this file, it's gitig
 
 Run this after wiring the table above and syncing/flashing:
 
-1. Power the board, open the App Lab console (or `ssh` in and tail the sketch's stdout).
+1. Power the board and open App Lab's own Serial Monitor in a browser — `arduino-app-cli monitor`
+   over SSH does not deliver serial data on this board (ADR 0010's 2026-07-30 addendum).
 2. Let it idle ~30 s and confirm a quiet baseline: repeated STA/LTA sensing with no
    `[trigger]` lines, and (if logging is added later) a ratio staying comfortably under
    `STA_LTA_TRIGGER_RATIO` (4.0).
