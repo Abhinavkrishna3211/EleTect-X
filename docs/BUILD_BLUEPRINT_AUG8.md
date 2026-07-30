@@ -96,7 +96,7 @@ this framing into the project story from the first draft, not as a late edit.
 | **Wed 29 Jul** | Integrate EI footfall v1 model (C++ export) into STA/LTA pipeline; bench stomp-test | Vision capture (V4L2) skeleton on USB webcam stand-in; build EI vision dataset (public wildlife images + night augmentation) | — | Footfall model fires correctly on real stomp tests |
 | **Thu 30 Jul** | Safety rule-gates: burst-duration cap + trigger cooldown (ADR 0003), unit-tested | Train EI vision v1 (INT8), export, run inference loop on QRB2210 against webcam stand-in | — | Vision detector returns confidence scores on stand-in feed |
 | **Fri 31 Jul** | — | Implement log-odds fusion math (CONTEXT.md §4) fed by real STM32 features over the Bridge | — | Bench test: stomp + webcam trigger → fusion → risk score (detect+alert only, no deterrence yet) |
-| **Sat 1 Aug** | Wire actuator commands from MPU decisions over the Bridge | Contextual bandit (never-repeat, stop-on-retreat) + SQLite experience store; EI acoustic v1 trained/integrated | — | **Milestone: full detect→confirm→deter→learn loop on bench with stand-ins** |
+| **Sat 1 Aug** | Wire actuator commands from MPU decisions over the Bridge | Contextual bandit (never-repeat, stop-on-retreat) + SQLite experience store | — | **Milestone: full detect→confirm→deter→learn loop on bench with stand-ins (seismic + vision only — acoustic deferred, see ADR 0007 addendum)** |
 | **Sun 2 Aug** | Swap in real actuators as parts arrive | Recalibrate thresholds on real sensor data | Real SM-24 geophone (potted capsule/spike — this is the scheduled Aug 2 reminder), real IMX462+940nm IR, real LEDs if arrived | Real-part swap validated against bench baseline |
 | **Mon 3 Aug** | Power/load-switch management against real rail | — | 4S LiFePO4 + MPPT + solar + supercap + surge/reverse-polarity protection wired (scheduled Aug 3 reminder) | Power draw measured against µA-idle target |
 | **Tue 4 Aug** | — | LoRa end-to-end: SenseCAP gateway (IN865 confirmed) → ChirpStack → `web/ingest` → Supabase → dashboard | Enclosure assembly starts: PETG print, gasket seams, e-PTFE vent, SUH-15 flush-mounted (ADR 0003), conformal coating | A real LoRa event shows up live on the already-built dashboard |
@@ -115,7 +115,13 @@ are fresh rather than reconstructed afterward.
 - **~9–14 Aug — DFO field test (Kothamangalam):** deploy at a real crossing, detection+alert mode first,
   then capped deterrence per ADR 0003's cooldown/burst-cap safeguards. Capture night IR footage, power
   trace, and the bandit's learning curve. Iterate on anything the field exposes that the bench didn't. Get
-  DFO sign-off/quote.
+  DFO sign-off/quote. **Single node, seismic + vision only** — acoustic is deferred (ADR 0007 addendum,
+  30 Jul), so the field-bound unit isn't carrying that subsystem into this test.
+- **~15 Aug onward — acoustic subsystem, on the second UNO Q unit:** INMP441 hardware bring-up, the
+  ADR 0009 Rung 2 LPBAM dual-channel concurrency bench test, gunshot/chainsaw/vehicle/animal-call
+  dataset collection (`DEVICE_DEVELOPMENT_WORKFLOW.md` §4a), and Edge Impulse acoustic model training —
+  on the bench/dev unit, never touching the field-validated node. Runs alongside the submission sprints
+  below, not blocking either.
 - **15–23 Aug — Robu submission sprint:** register by 15 Aug. Cut the demo video (bench + field footage),
   finalize the GitHub repo (history already reads clean per the existing commit log), write the project
   report PDF mapped explicitly onto the four judged categories, attach UNO Q purchase proof, submit by 23
