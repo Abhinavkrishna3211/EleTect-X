@@ -103,6 +103,18 @@ set `SEISMIC_DEBUG_VERBOSE` to `1` to get a periodic `[seismic]` sta/lta/ratio l
 `python scripts/plot_seismic_window.py <saved-console-log> --out-dir <dir>`. Same flag discipline
 as above — back to `0` and re-sync once the capture session is done.
 
+**Live seismic plot (pitch/demo tool, not the Part C2 pass above).** Set both
+`SEISMIC_DEBUG_STREAM_RAW` and `SEISMIC_DEBUG_VERBOSE` to `1`, sync, flash, then run
+`python scripts/live_seismic_plot.py --port <COM port>` (or `--file <log>` / `-` for stdin,
+depending on which console transport is reachable — see the script's own docstring; only App
+Lab's browser Serial Monitor is confirmed to deliver bytes at all, per ADR 0010's 2026-07-30
+addendum) for a live two-panel view: raw geophone volts on top, STA/LTA ratio with the
+`STA_LTA_TRIGGER_RATIO` (4.0) line on the bottom. The bottom panel does not advance for
+`EVENT_MAX_MS` + `COOLDOWN_MS` (about 35 s today) after a trigger, since `[seismic]` only
+prints while the state machine is in `kSensing` — time a recording around that gap rather than
+expecting a continuous trace across an event. Same flag discipline as above — both flags back
+to `0` and re-sync once the recording session is done.
+
 **Known open item (`docs/KNOWN_GAPS.md`):** whether `Wire` or `Wire1` is actually the Arduino Core
 mapping for I2C2 (D20/D21) on this board has not been confirmed on hardware. `config.h` defaults to
 `Wire`. If the geophone never reads (`geophone_ok()` stays false, or `report_system_status`'s

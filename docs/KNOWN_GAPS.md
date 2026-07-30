@@ -235,18 +235,37 @@ criteria — see each entry's status.
 
 ## Build-call 5 (`device/mcu` seismic bench debug flags)
 
-- **`GEOPHONE_DEBUG_SINGLE_ENDED_AIN0`, `SEISMIC_DEBUG_VERBOSE`, and
-  `SEISMIC_DEBUG_PRINT_INTERVAL_MS` (`config.h`) are bench-only and invented.** All three exist
-  solely to support the INA333 REF-bias check and the Part C2 sensitivity/waveform-characterization
-  pass; none has a role in field-deployed reflex behaviour, and `SEISMIC_DEBUG_PRINT_INTERVAL_MS`'s
+- **`GEOPHONE_DEBUG_SINGLE_ENDED_AIN0`, `SEISMIC_DEBUG_VERBOSE`, `SEISMIC_DEBUG_STREAM_RAW`, and
+  `SEISMIC_DEBUG_PRINT_INTERVAL_MS` (`config.h`) are bench-only and invented.** All four exist
+  solely to support the INA333 REF-bias check, the Part C2 sensitivity/waveform-characterization
+  pass, and (for `SEISMIC_DEBUG_STREAM_RAW`) the `scripts/live_seismic_plot.py` pitch/demo tool;
+  none has a role in field-deployed reflex behaviour, and `SEISMIC_DEBUG_PRINT_INTERVAL_MS`'s
   200 ms cadence is engineering judgement, not a bench-measured value. High severity if left
   non-zero: `GEOPHONE_DEBUG_SINGLE_ENDED_AIN0=1` samples the ADS1115 single-ended against GND
-  instead of the field differential pair, silently corrupting every reading. Both flags must be
+  instead of the field differential pair, silently corrupting every reading. All flags must be
   confirmed `0` before any `scripts/sync-to-board.sh` run against a node headed for the field.
   Status: **closed for the REF-bias check** — run on hardware 2026-07-30, `[bias-check]
   raw≈26890 volts≈1.6806V`, stable across multiple readings, confirming `UREF` is correctly
   mid-supply biased. `GEOPHONE_DEBUG_SINGLE_ENDED_AIN0` reset to `0` and re-synced afterward. Still
-  open for Part C2 (`SEISMIC_DEBUG_VERBOSE`) — no bench session has run that pass yet.
+  open for Part C2 (`SEISMIC_DEBUG_VERBOSE`) and the live-plot tool (`SEISMIC_DEBUG_STREAM_RAW`) —
+  no bench session has run either pass yet.
+- **`geophone_service()` samples the ADS1115 at loop rate, not at a gated `SEISMIC_SAMPLE_RATE_HZ`
+  cadence — the ring buffer likely holds repeated conversions, not 512 distinct samples.**
+  Found while investigating where to hook `SEISMIC_DEBUG_STREAM_RAW`'s print
+  (`device/mcu/src/geophone.cpp`): `ads1115_read_conversion()` never polls the ADS1115's OS/ready
+  bit (`ADS1115_CFG_COMP_DISABLE` leaves ALERT/RDY unused), and `loop()`
+  (`device/mcu/src/main.cpp`) calls `geophone_service()` on every iteration with no delay. At
+  `ADS1115_CFG_DR_250SPS` a new conversion appears only every 4 ms, so back-to-back polls can — and
+  on a fast host loop, likely do — return the same conversion register value more than once,
+  meaning `SEISMIC_WINDOW_SAMPLES` (512) worth of ring writes do not necessarily span the assumed
+  2.048 s at 250 SPS. This would skew the STA/LTA windowing (`STA_SAMPLES`/`LTA_SAMPLES` are
+  defined in samples, not time) without crashing or zero-filling — no existing check would surface
+  it. Not fixed as part of adding `SEISMIC_DEBUG_STREAM_RAW`: that flag's print is rate-gated to
+  `SEISMIC_SAMPLE_RATE_HZ` to keep the console from flooding, which bounds the debug output but
+  does not address the underlying sampling cadence. Medium-high severity — affects real STA/LTA
+  timing accuracy, not just debug output. Fixing it (an OS-bit poll or a `millis()`/`micros()` gate
+  around the ADC read itself) changes field reflex behaviour and needs its own bench validation
+  against a real stomp trace, not a debug-tooling change. Status: open, found not fixed.
 - **`arduino-app-cli monitor` cannot read this board's live serial console — use App Lab's own
   Serial Monitor (in a browser) instead.** Confirmed on hardware while running the REF-bias check
   above: the CLI path connects to `arduino-router` without error but never delivers any bytes, in
