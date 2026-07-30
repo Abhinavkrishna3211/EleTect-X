@@ -142,3 +142,47 @@ criteria — see each entry's status.
 - **Edge Impulse projects (footfall, acoustic, vision) are created manually via Studio's own UI; no
   project IDs are recorded in-repo.** Not part of this build call's scope. Low severity. Status:
   open, tracked for a future session.
+
+## Build-call 3 (`device/mpu/perception` vision capture)
+
+- **Whether the UNO Q's USB-C port enumerates a USB host device at all while powered from VIN is
+  unverified.** The whole camera path (ADR 0001, CONTEXT.md §3) rests on this and nothing in-repo
+  confirms it; `hardware/references/UNO_Q_PINOUT_REFERENCE.md` only notes a `VBUS_DISABLE` signal on
+  the USB-C connector, not host-mode behavior under VIN power. High severity — blocks the entire
+  vision capture module if false. Effort: `lsusb` and `ls /dev/video*` over SSH with the camera (via
+  the spare USB hub, `hardware/bom/procurement-status.md`) attached. Status: open, pending hardware.
+- **Exact V4L2 device path is unverified.** `services/config.py`'s `CAMERA_DEVICE` defaults to
+  `/dev/video0`, a guess — UVC devices commonly expose a second metadata-only node alongside the
+  real capture node, and the index isn't guaranteed once a USB hub is in the path. Medium severity
+  (wrong path fails `Camera.open()` loudly, not silently). Effort: resolved by
+  `bench/camera_check/capture_check.py --probe`. Status: open, pending hardware.
+- **IMX462 default resolution/pixel-format/FPS are unverified for this specific unit.**
+  `services/config.py`'s `CAMERA_FRAME_WIDTH/HEIGHT` (1920x1080) and `CAMERA_PIXEL_FORMAT` (MJPG)
+  are taken from the product listing (B0CQ4QDCXN) and general UVC-bandwidth reasoning, not a queried
+  V4L2 format list. Medium severity. Effort: resolved by the same `--probe` run above. Status: open,
+  pending hardware.
+- **`python3-opencv` (or equivalent) presence on the board's Debian image is unverified.**
+  `perception/camera.py`'s only real dependency; nothing in this build call confirms it ships on the
+  QRB2210's default image. Medium severity — if absent, `Camera.open()` fails at import time on the
+  board specifically. Effort: `python3 -c "import cv2"` over SSH. Status: open, pending hardware.
+- **Night/IR performance is entirely unmeasured.** The IMX462's auto IR-cut switch behavior, actual
+  exposure under 940 nm illumination, and whether `CAMERA_WARMUP_FRAMES` is enough for AE/AGC to
+  settle in darkness are all unknown — this build call is daylight/bench capture only, no IR
+  illuminator coordination (that needs `pulse_ir()`, not wired up; see below). High severity for
+  CONTEXT.md's ">70% of raids are nocturnal" requirement, but explicitly out of this call's capture-
+  only scope. Status: open, deferred to a later build call once `pulse_ir()` is registered.
+- **`CAMERA_WARMUP_FRAMES`, `CAMERA_BURST_FRAMES`, and `CAMERA_BURST_INTERVAL_S`
+  (`services/config.py`) are invented values**, not backed by measured AE-settle time or any
+  detector-side timing requirement. Medium severity. Status: open, revisit once the vision detector
+  (future build call) has a real inference-latency budget to size the burst against.
+- **`bench/camera_check/capture_check.py` is written and host-tested against a fake capture device,
+  but has not been run against the real IMX462** — neither on the board nor on a dev host with
+  OpenCV installed. High severity — this is the build call's own exit criterion for proving real
+  frames come off the real camera. Status: **pending hardware.**
+- **Capture and IR illumination are not coordinated, by design.** `pulse_ir()` exists as an MCU-side
+  Bridge stub (`device/mpu/bridge/rpc.py`) but is unregistered on both sides (same
+  `Bridge.provide()` batch-registration caution as `bridge/rpc.py`'s other stubs). Night capture will
+  eventually need capture windows aligned to an IR pulse, but `perception/camera.py` deliberately
+  has no dependency on `Bridge` at all — wiring that coordination is later build-call scope, once the
+  ping bench proves the Bridge round trip works at all. Medium severity. Status: open, deferred by
+  design.
