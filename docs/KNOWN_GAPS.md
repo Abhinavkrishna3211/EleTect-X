@@ -104,17 +104,24 @@ criteria — see each entry's status.
   hardware. High severity — this is the build call's own exit criterion for proving the MCU→MPU
   Bridge direction at all. Effort: one bench session (board reachable over SSH, `rsync` push,
   build/run from App Lab). Status: **pending hardware.**
-- **MCU→Python Bridge `call()` direction is what ping proves, not the `notify()` direction the real
-  schema functions use.** Rung 0 proved Python→MCU only (stock Blink LED). Ping deliberately uses
-  `Bridge.call()` rather than `Bridge.notify()` — a `call` gets a verifiable `pong` reply, which is
-  the better bench test than a fire-and-forget `notify` that gives no positive confirmation of
-  receipt. `report_footfall_event`, `report_acoustic_event`, and `report_system_status` (the real
-  MCU→MPU functions, all `notify` targets) plausibly share the same underlying
-  registration/dispatch path as `call` targets, but that is an assumption ping does not prove
-  outright. A green ping result should read as "MCU→MPU `call()` direction confirmed, `notify()`
-  direction still inferred," not as "MCU→MPU closed." High severity — this distinction matters
-  before trusting the real schema functions to work purely because ping worked. Status: open,
-  pending a hardware session that specifically exercises `notify()`.
+- **MCU→MPU Bridge `notify()` direction — the direction the real schema functions
+  (`report_footfall_event`, `report_acoustic_event`, `report_system_status`) actually use — is now
+  confirmed working on real hardware. `call()`'s synchronous-reply direction is not, and the two are
+  not interchangeable evidence.** This flips the original framing of this entry: ping
+  (`device/mpu/bench/ping`) was written to prove `call()` first, on the theory that a verifiable
+  `pong` reply is a better bench test than a fire-and-forget `notify` — but ping has still never
+  been run against hardware (see the bullet above, unchanged, still "pending hardware"). `notify()`
+  ended up proven first instead, via an unrelated path: Build-call 5's `SEISMIC_DEBUG_STREAM_RAW`
+  Bridge-relay work sent real `Bridge.notify()` calls from `device/mcu/src/geophone.cpp` to a
+  `Bridge.provide()` handler in `device/mpu/main.py` and confirmed live samples arriving on
+  2026-07-31 (see that section below for the full verification). Per `Arduino_RouterBridge`'s own
+  `bridge.h`, `call()` and `notify()` are genuinely distinct code paths — `call()`'s `RpcCall::
+  result()` blocks on a reply, `notify()`'s one-way `client->notify()` never does — so a confirmed
+  `notify()` does not imply `call()` also works; the MPU→MCU actuator functions (`drive_horn`,
+  `drive_led`, `pulse_ir`, `get_system_state`), all `call` targets, remain unproven. High severity —
+  this is the first hardware-confirmed channel the fusion/cognition layer has to build real MCU
+  reporting on, but it covers only the MCU→MPU direction. Status: `notify()` direction closed
+  (2026-07-31); `call()` direction still open, pending the ping bench actually running.
 - **App Lab Python entrypoint idiom, `app.yaml`'s field names, and the C++ `Bridge.call()` result
   API are written from `DEVICE_DEVELOPMENT_WORKFLOW.md` §3's description, not checked line-by-line
   against a real App Lab-generated App.** Each is marked `// UNVERIFIED` / `# UNVERIFIED` inline in
@@ -276,3 +283,63 @@ criteria — see each entry's status.
   bench work, since the GUI path is confirmed to work, but wastes time for anyone who reaches for
   the CLI first. Status: open as a CLI limitation, closed as a practical blocker (workaround
   documented here and in the ADR).
+- **`scripts/sync-to-board.sh` needs `rsync` present on the board itself, and the stock App Lab
+  image does not ship it.** Found 2026-07-31 running the first real `sync-to-board.sh` push of
+  this build-call's changes: `rsync` was missing on the Windows host (worked around locally) and,
+  separately, missing on the board — `rsync: command not found` on the remote side, `code 12`
+  protocol error on the sending end. rsync needs a matching binary on both ends; having one side
+  covered isn't enough. Fixed for this board with `sudo apt-get install -y rsync` (Debian trixie,
+  stock repo, no extra source needed) — but the `arduino` user's passwordless-sudo allowlist
+  (`sudo -l`) only covers `apt-get update`, `apt-get install --only-upgrade`, and two named
+  Arduino meta-packages, not arbitrary new installs, so this required an interactive password at
+  a real terminal. Anyone re-imaging or replacing this board needs to install `rsync` (and confirm
+  with `command -v rsync`, not just trust apt's own output) before `sync-to-board.sh` will get past
+  its rsync step. Status: closed for this board, open as a re-imaging gotcha.
+- **The real MPU Python entry point does not exist. `device/mpu/main.py` is a bench-only
+  placeholder that only satisfies App Lab's `app.yaml` parser (`arduino-app-cli` requires a
+  `main.py` at the root of `python/` by convention, not something `app.yaml` itself declares) — it
+  imports the Bridge SDK and blocks forever (as of the entry below, it also registers one
+  bench-only Bridge function, `debug_stream_raw_seismic_sample` — still nothing schema-shaped).**
+  Found 2026-07-31: the
+  `eletect-x` app turned up in `arduino-app-cli app list --show-broken-apps` as `unable to parse
+  the app.yaml: main python file missing from app`. Root cause traced via `sync-to-board.sh`'s own
+  rsync log (`deleting main.py`): a `main.py` existed on the board only, untracked, almost
+  certainly a leftover from App Lab's original "New App" scaffolding wizard, and a legitimate
+  `--delete` sync against a repo that never tracked one wiped it — the one-directional,
+  repo-is-truth sync (`ENGINEERING_CONVENTIONS.md` §5) working exactly as designed is what broke
+  the app. Wiring `bridge/`, `cognition/`, `perception/`, and `services/` together into the actual
+  sense → fuse → decide → actuate loop has never been designed, let alone implemented — this stub
+  deliberately does not import or call into any of them (`bridge/rpc.py`'s functions all
+  `raise NotImplementedError`; nothing here should be read as a preview of the real design). High
+  severity, launch blocker: no field deployment can ship without a real entry point wiring the
+  actual MCU↔MPU RPC contract, the fusion logic, and the actuation calls. Status: open, tracked
+  as its own design pass, not a debug-flag or tooling gap like the entries above.
+- **`SEISMIC_DEBUG_STREAM_RAW` gained a second, bench-only delivery path (`Bridge.notify()`
+  from `device/mcu/src/geophone.cpp` to a matching `Bridge.provide()` handler in
+  `device/mpu/main.py`) so `scripts/live_seismic_plot.py` can read live via
+  `docker logs -f eletect-x-main-1` instead of only the Serial console.** Two premises behind
+  this task turned out to be false and are recorded here rather than silently dropped: no
+  Bridge-round-trip RTT measurement exists anywhere (the ping bench, `device/mpu/bench/ping`,
+  has never been run against real hardware — `device/mpu/README.md` still reads "pending
+  hardware"), and no "Core Electronics 25/sec" throttle finding exists in this repo (the only
+  Core Electronics reference is ADR 0001's unrelated SM-24 wiring guide). In place of a
+  measured RTT, `Bridge.notify()` was confirmed structurally safe by reading the real installed
+  `Arduino_RouterBridge` v0.4.3 `bridge.h` on the board directly: it takes a write mutex and
+  performs a one-way send, never blocking on an MPU reply the way `Bridge.call()`'s
+  `RpcCall::result()` does — so it cannot stall `geophone_service()` regardless of RTT.
+  `SEISMIC_STREAM_BRIDGE_EVERY_N_SAMPLES` (`config.h`, default 10) is therefore an unmeasured,
+  conservative default, not a tuned value. Implementing this also required the sketch's first
+  ever `Bridge.begin()`/`Bridge.update()` calls (`device/mcu/src/main.cpp`) — gated behind
+  `#if SEISMIC_DEBUG_STREAM_RAW` so they compile out of the field build entirely; the real
+  schema handlers (`drive_horn`, `drive_led`, `pulse_ir`, `geophone_ok`) remain unregistered.
+  Verified end-to-end on hardware 2026-07-31: rebuilt/restarted via `arduino-app-cli app
+  restart`, then ran the real `docker logs -f eletect-x-main-1 | python
+  scripts/live_seismic_plot.py -` pipeline and confirmed a live matplotlib window actively
+  redrawing (rising CPU time) against real streamed samples, not just that the build succeeded.
+  This is more than a demo win: it is the first time `Bridge.notify()` has been confirmed working
+  on real hardware, MCU→MPU direction, at all, in this project's history — see the Build-call 2
+  "MCU→MPU Bridge `notify()` direction" entry above, now closed on the strength of this session.
+  `Bridge.call()`'s synchronous-reply direction is a distinct mechanism and stays open, unproven —
+  not folded into this result. Status: closed for this bench tool; the missing ping-bench RTT,
+  the still-unproven `call()` direction, and the never-registered production schema handlers
+  remain open, tracked by their own existing entries above.
