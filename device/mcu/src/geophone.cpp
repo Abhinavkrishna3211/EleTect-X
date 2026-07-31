@@ -5,6 +5,14 @@
 #include "Arduino.h"
 #include "Wire.h"
 
+#if SEISMIC_DEBUG_STREAM_RAW
+// Bench-only dependency, compiled out entirely at SEISMIC_DEBUG_STREAM_RAW=0
+// - arduino-cli's library-discovery preprocess pass strips this #include
+// along with everything else in this #if, so the field build never links
+// Bridge code. See config.h for why this exists.
+#include "Arduino_RouterBridge.h"
+#endif
+
 namespace {
 
 // Ring buffer of raw volts, most-recent-write tracked by write_index_. Sized
@@ -98,6 +106,22 @@ void geophone_service() {
   if (stream_now_ms - s_last_stream_print_ms >= (1000 / SEISMIC_SAMPLE_RATE_HZ)) {
     s_last_stream_print_ms = stream_now_ms;
     Serial.println(volts, 6);
+  }
+
+  // Second delivery path, same samples: push every
+  // SEISMIC_STREAM_BRIDGE_EVERY_N_SAMPLES-th sample to the MPU over
+  // Bridge.notify() so `docker logs -f eletect-x-main-1` piped into
+  // live_seismic_plot.py's stdin mode is a live alternative to the Serial
+  // console - see config.h for the decimation rationale. notify() is
+  // fire-and-forget (confirmed by reading Arduino_RouterBridge's bridge.h:
+  // it takes a write mutex and returns after a one-way send, it does not
+  // wait on an MPU reply the way Bridge.call() does), so this cannot stall
+  // this loop on an MPU round trip. Counts every accepted sample, not every
+  // loop() iteration, so the decimation is against real conversions.
+  static uint32_t s_stream_sample_count = 0;
+  ++s_stream_sample_count;
+  if (s_stream_sample_count % SEISMIC_STREAM_BRIDGE_EVERY_N_SAMPLES == 0) {
+    Bridge.notify("debug_stream_raw_seismic_sample", volts);
   }
 #endif
 

@@ -86,7 +86,7 @@
 // can be 1 without the other. Left at 0 in the field: the reflex loop
 // already prints [trigger] on its own schedule, and a periodic print on top
 // of that has no consumer.
-#define SEISMIC_DEBUG_VERBOSE 0
+#define SEISMIC_DEBUG_VERBOSE 1
 
 // When 1: geophone.cpp prints one raw volts reading per line, gated to
 // SEISMIC_SAMPLE_RATE_HZ (not SEISMIC_DEBUG_PRINT_INTERVAL_MS - that 200 ms
@@ -110,7 +110,30 @@
 // 3 of every 4 LSB steps. Left at 0 in the field: no consumer, and this
 // flag must never read 1 on a node headed for the field, same as the other
 // flags in this section.
-#define SEISMIC_DEBUG_STREAM_RAW 0
+//
+// Second delivery path, same flag: geophone.cpp also pushes every
+// SEISMIC_STREAM_BRIDGE_EVERY_N_SAMPLES-th sample to the MPU over
+// Bridge.notify() (device/mpu/main.py's debug_stream_raw_seismic_sample
+// handler re-prints it in the same wire format on the MPU's own stdout, so
+// `docker logs -f eletect-x-main-1` piped into live_seismic_plot.py's stdin
+// mode is a live alternative to the Serial console). This is genuinely a
+// second delivery mechanism for the same samples, not a second stream - the
+// existing Serial.println path above is untouched. Bridge.notify() is
+// fire-and-forget (Arduino_RouterBridge's bridge.h grabs a write mutex and
+// returns after a one-way send, never waiting on an MPU reply the way
+// Bridge.call() does - confirmed by reading bridge.h directly, not assumed),
+// so this cannot stall the reflex loop on an MPU round trip.
+#define SEISMIC_DEBUG_STREAM_RAW 1
+
+// Bridge-notify decimation for the second delivery path above: push every
+// Nth sample, not every sample. No measured Bridge.notify() RTT backs this
+// number - the ping bench (device/mpu/bench/ping) that would measure it has
+// never been run against hardware (device/mpu/README.md: "Status: pending
+// hardware"), so this is not a tuned value (KNOWN_GAPS). 10 (~25 Hz at the
+// nominal 250 SPS SEISMIC_SAMPLE_RATE_HZ) is chosen as a conservative
+// default: lighter on the Bridge call than the full sample rate, and
+// visually indistinguishable on live_seismic_plot.py's scrolling window.
+#define SEISMIC_STREAM_BRIDGE_EVERY_N_SAMPLES 10
 
 // Rate limit shared by both bench prints above (GEOPHONE_DEBUG_SINGLE_ENDED_
 // AIN0's [bias-check] line and SEISMIC_DEBUG_VERBOSE's periodic [seismic]
