@@ -32,9 +32,18 @@
 #define GEOPHONE_I2C_SDA_PIN 20  // PB11, I2C2_SDA (default mapping, no config needed)
 #define GEOPHONE_I2C_SCL_PIN 21  // PB10, I2C2_SCL
 
-// Which TwoWire instance the Arduino Core exposes for I2C2 on this board is
-// NOT confirmed on hardware yet - `Wire` is the assumption, `Wire1` the likely
-// alternative. Resolve at the bench before trusting a silent read (KNOWN_GAPS).
+// CONFIRMED on hardware 2026-08-14: `Wire` is the correct instance for I2C2.
+// The arduino:zephyr core declares Wire/Wire1/Wire2/... in the order listed
+// by the board overlay's `zephyr,user { i2cs = <&i2c2>, <&i2c4>, <&i2c3>; }`
+// (arduino_uno_q_stm32u585xx.overlay) - i2c2 is first, so it is `Wire`, not
+// `Wire1` (which binds to i2c4, the Qwiic connector). The generated board
+// .dts confirms i2c2's pinctrl-0 is `i2c2_scl_pb10`/`i2c2_sda_pb11` and that
+// the node is aliased `arduino_i2c` - i.e. i2c2 is the default Arduino I2C
+// header, exactly the PB10/PB11 pins documented above. Cross-checked against
+// real bench data: continuous, plausible, varying ADS1115 differential
+// readings over the socat/TCP console bridge (not silent, not garbage),
+// which is what a correct bus produces - a wrong bus would fail every I2C
+// transaction and produce no ring-buffer writes at all.
 #define GEOPHONE_I2C_BUS Wire
 
 // 0x48 is the ADS1115 address with ADDR tied to GND - the breakout's default.
@@ -86,7 +95,7 @@
 // can be 1 without the other. Left at 0 in the field: the reflex loop
 // already prints [trigger] on its own schedule, and a periodic print on top
 // of that has no consumer.
-#define SEISMIC_DEBUG_VERBOSE 1
+#define SEISMIC_DEBUG_VERBOSE 0
 
 // When 1: geophone.cpp prints one raw volts reading per line, gated to
 // SEISMIC_SAMPLE_RATE_HZ (not SEISMIC_DEBUG_PRINT_INTERVAL_MS - that 200 ms
@@ -123,7 +132,7 @@
 // returns after a one-way send, never waiting on an MPU reply the way
 // Bridge.call() does - confirmed by reading bridge.h directly, not assumed),
 // so this cannot stall the reflex loop on an MPU round trip.
-#define SEISMIC_DEBUG_STREAM_RAW 1
+#define SEISMIC_DEBUG_STREAM_RAW 0
 
 // Bridge-notify decimation for the second delivery path above: push every
 // Nth sample, not every sample. No measured Bridge.notify() RTT backs this
@@ -190,29 +199,89 @@
 #define GEOPHONE_WINDOW_STALE_MS 3072
 
 // ---------------------------------------------------------------------------
+// Manual fire-test harness - MUST be 0 before any field sync
+// ---------------------------------------------------------------------------
+// Serial-command-triggered single fire of horn/LED/IR for hardware bring-up
+// verification (docs/specs/mcu-fire-test-harness.md). Human types a digit
+// into App Lab's Serial Monitor; nothing fires without that keystroke, so
+// this has no autonomous trigger path. Still gated to 0 by default, same
+// discipline as the seismic bench flags above: the point of field builds is
+// that bench-only surface area doesn't exist in them.
+#define FIRE_TEST_HARNESS 0
+
+// Bench defaults - short and conservative. The real safety backstop is still
+// rule_gate_apply()'s per-actuator caps (HORN_GAIN_MAX_PCT etc. above); these
+// are just sane starting points for a desk-bench test, not a duplicate
+// limit.
+#define FIRE_TEST_HORN_DURATION_MS 500   // well under HORN_BURST_MAX_MS=3000
+#define FIRE_TEST_HORN_GAIN_PCT 30.0f    // under HORN_GAIN_MAX_PCT=60, desk-volume not field-volume
+#define FIRE_TEST_LED_DURATION_MS 1000
+#define FIRE_TEST_LED_GAIN_PCT 50.0f
+#define FIRE_TEST_IR_DURATION_MS 200     // under IR_PULSE_MAX_MS=500
+#define FIRE_TEST_IR_GAIN_PCT 100.0f     // IR is invisible, thermal is the only real constraint
+
+// ---------------------------------------------------------------------------
 // STA/LTA footfall trigger
 // ---------------------------------------------------------------------------
-// WARNING: these four values are generic STA/LTA convention, carried over from
-// standard seismic-trigger practice. They are NOT derived from the elephant
-// footfall-frequency work ADR 0001 cites, and no bench data backs them yet.
-// They decide whether the node triggers at all, so they are the first thing to
-// calibrate against a real stomp trace (KNOWN_GAPS).
+// STA_SAMPLES/LTA_SAMPLES and STA_LTA_TRIGGER_RATIO (field branch, below) are
+// now grounded, not generic convention - see docs/KNOWN_GAPS.md's 2026-08-14
+// entry for the full derivation. Sample counts were checked against the real
+// measured geophone_service() rate (226.98 Hz on a lean field-flag build, not
+// the nominal 250 Hz) against literature targets from Wijayakulasooriya et
+// al. (arXiv:2406.05140) and Trnkoczy/Guralp STA/LTA sizing guidance.
+// STA_LTA_TRIGGER_RATIO was checked against a real human stomp test on
+// hardware (quiet floor 1.03-1.13, stomp ratio 4.60, real waveform capture
+// confirming a genuine ~65x amplitude transient). STA_LTA_DETRIGGER_RATIO is
+// still unvalidated - see its own comment below, it is currently dead code.
 
-// 25 samples = 0.1 s. The short-term average has to be brief enough to rise
+// 25 samples: at the measured 226.98 Hz field rate this is ~110 ms, inside
+// the ~40-150 ms literature ballpark for a few periods of a ~26 Hz elephant
+// footfall (~38 ms/period, Wijayakulasooriya et al.). Short enough to rise
 // sharply on a single footfall impact rather than average it away.
 #define STA_SAMPLES 25
 
-// 250 samples = 1.0 s. The long-term average is the local noise floor the
-// short-term average is compared against. Bounded by the 2.048 s bench window;
-// the LPBAM swap should extend it well past 1 s (KNOWN_GAPS).
+// 250 samples: at the measured 226.98 Hz field rate this is ~1.10 s, clearing
+// the >=0.5 s literature floor (period of the 2 Hz edge of the analog 2-50 Hz
+// band-pass) with ~2.2x margin. The long-term average is the local noise
+// floor the short-term average is compared against. Bounded by the 2.048 s
+// bench window; the LPBAM swap should extend it well past 1 s (KNOWN_GAPS).
 #define LTA_SAMPLES 250
 
+// Demo mode: lowers the trigger ratio so a pen tap or light finger tap near
+// the geophone reads as a trigger for a live audience, instead of requiring
+// a real stomp-strength impact. MUST be set back to 0 before field
+// deployment - these ratios are unvalidated placeholders to begin with (see
+// WARNING above) and the demo values below are tuned for visible drama, not
+// for rejecting ambient field noise (wind, vehicles, footsteps near but not
+// at the sensor).
+#define SEISMIC_DEMO_MODE 0
+
+#if SEISMIC_DEMO_MODE
 // Ratio at which a window is declared a trigger.
+#define STA_LTA_TRIGGER_RATIO 2.0f
+// Ratio the signal must fall back below before a new trigger can be declared.
+#define STA_LTA_DETRIGGER_RATIO 1.2f
+#else
+// Ratio at which a window is declared a trigger. Validated on hardware
+// 2026-08-14: a real human stomp test (see device/mcu/README.md's Bench
+// stomp test procedure) measured a quiet-floor ratio of 1.03-1.13 over ~89 s
+// (before and after the stomp) and a real stomp ratio of 4.60, with a
+// captured raw window showing a genuine ~65x amplitude transient over the
+// noise floor. 4.0 clears the observed floor ceiling by ~3.5x and the stomp
+// clears 4.0 by ~15% - real margin in both directions, so kept at the value
+// already here rather than retuned from a single clean trial.
 #define STA_LTA_TRIGGER_RATIO 4.0f
 
 // Ratio the signal must fall back below before a new trigger can be declared,
 // set well under the trigger ratio so one event does not chatter into many.
+// DEAD CODE as of 2026-08-14 (KNOWN_GAPS): grepping device/mcu for
+// DETRIGGER_RATIO finds no reference outside this #define. state_machine.cpp's
+// kEvent case only checks EVENT_MAX_MS elapsed, never this ratio - there is no
+// detrigger logic to calibrate yet, so no real stomp data can validate this
+// value. Left unchanged per the hard rule that these four constants are only
+// set from real stomp data, not literature or invention.
 #define STA_LTA_DETRIGGER_RATIO 1.5f
+#endif
 
 // ---------------------------------------------------------------------------
 // Audio deterrence - DFPlayer -> TPA3116D2 (single BTL) -> Ahuja SUH-15
@@ -356,12 +425,29 @@
 // How long the node stays in EVENT before falling back to COOLDOWN if nothing
 // escalates. Bounds the time actuators and the MPU wake path can be held open
 // by one trigger.
+//
+// Demo mode (SEISMIC_DEMO_MODE, see the STA/LTA block above) shortens both
+// this and COOLDOWN_MS below: read_seismic_window() - the only place either
+// the raw-volts or STA/LTA debug stream gets a new sample - is called
+// exclusively from kSensing (state_machine.cpp), so every trigger blanks
+// both live-plot panels for the full EVENT_MAX_MS + COOLDOWN_MS duration.
+// At the field values (15 s + 20 s = 35 s) that is a deliberate anti-alarm-
+// fatigue design, not a bug - but demo mode's whole point is triggering
+// easily, so at the field cooldown a live audience sees the plot go dark for
+// half a minute after almost every tap. Shortened here to keep the demo
+// cycling quickly; MUST come back to the field values below before any real
+// deployment, same as the trigger ratios.
+#if SEISMIC_DEMO_MODE
+#define EVENT_MAX_MS 2000
+#define COOLDOWN_MS 3000
+#else
 #define EVENT_MAX_MS 15000
 
 // Quiet period after an event completes, before the node will arm a new one.
 // Distinct from the per-actuator cooldowns: those bound one output, this bounds
 // the whole detect-deter cycle.
 #define COOLDOWN_MS 20000
+#endif
 
 // Heartbeat period for report_system_status (device/mpu/bridge/schema.md).
 // 10 minutes gives the dashboard a liveness signal through quiet periods
@@ -370,5 +456,18 @@
 
 // Console baud for bench logging.
 #define CONSOLE_BAUD 115200UL
+
+// ---------------------------------------------------------------------------
+// Bridge RPC - device/mpu/bridge/schema.md
+// ---------------------------------------------------------------------------
+// Every schema.md payload carries schema_version as its first field,
+// currently 1 (schema.md's own header). Mirrors device/mpu/services/
+// config.py's SCHEMA_VERSION = 1 - both sides must bump together on any
+// breaking field change, never reuse a version number (schema.md). Used
+// by bridge_handlers.cpp to log (not reject) a mismatched request on an
+// MPU->MCU call, same as services/reflex_loop.py does on an MCU->MPU
+// notify - schema.md defines no MCU-side reject behavior for this, and a
+// synchronous actuator call still owes its caller an ack either way.
+#define BRIDGE_SCHEMA_VERSION 1
 
 #endif  // CONFIG_H

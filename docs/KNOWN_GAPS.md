@@ -8,13 +8,24 @@ criteria — see each entry's status.
 - **No PlatformIO board support for the UNO Q; `pio` is host-only.** Medium severity, small effort
   to keep understood (banner comments already in place). See ADR 0010. Status: resolved by design,
   not a defect — flashing goes through App Lab + `scripts/sync-to-board.sh` only.
-- **Bench stomp-test trigger log not yet captured.** High severity — this is Rung 1's actual proof
-  criterion. Effort: one bench session (wiring already documented in `device/mcu/README.md`).
-  Status: **pending hardware.** The procedure is shipped; it has not been run.
-- **Whether `Wire` or `Wire1` maps to I2C2 (D20/D21) on this core is unverified on hardware.**
-  `config.h`'s `GEOPHONE_I2C_BUS` defaults to `Wire` with a comment saying so. High severity (wrong
-  bus means the geophone never reads), cheap to resolve at the same bench session as the stomp
-  test. Status: open.
+- **Bench stomp-test trigger log — captured 2026-08-14.** Rung 1's actual proof criterion, run
+  against real hardware on a lean field-flag build. Quiet floor held ratio 1.03-1.13 across ~89 s
+  (before and after the stomp, no false triggers); a firm human stomp near the geophone produced
+  `ratio=4.60`, with a `[window]` raw-volts CSV dump confirming a genuine ~65x amplitude transient
+  over the noise floor. `STA_LTA_TRIGGER_RATIO` (4.0) clears the observed floor ceiling by ~3.5x and
+  the stomp clears the threshold by ~15% margin. Full derivation, including the real sample-rate
+  math and why `STA_LTA_DETRIGGER_RATIO` could not be validated the same way, is in this document's
+  "STA/LTA field-flag rate re-measurement and real stomp-test calibration" entry near the end.
+  Status: **closed.**
+- **Whether `Wire` or `Wire1` maps to I2C2 (D20/D21) on this core — resolved 2026-08-14.** `Wire`
+  is correct, confirmed from the board's own generated devicetree rather than inferred from
+  behavior: the `arduino:zephyr` core declares `Wire`/`Wire1`/... in the order listed by the board
+  overlay's `zephyr,user { i2cs = <&i2c2>, <&i2c4>, <&i2c3>; }`
+  (`arduino_uno_q_stm32u585xx.overlay`) — i2c2 is first, so it's `Wire`, not `Wire1` (which binds to
+  i2c4, the Qwiic connector). The generated `zephyr-arduino_uno_q_stm32u585xx.dts` shows i2c2's
+  `pinctrl-0` is `i2c2_scl_pb10`/`i2c2_sda_pb11` and the node is aliased `arduino_i2c` — an exact
+  match for `config.h`'s documented PB10/PB11 pins. `config.h`'s comment is updated. Status:
+  **closed.**
 - **Whether USART1 (D0/D1) is free or claimed by the sketch console is unverified.** `config.h`'s
   `LORA_SERIAL` defaults to `Serial1` with a comment saying so. High severity (wrong port strands
   the LoRa join), same bench session to resolve. Status: open.
@@ -23,14 +34,24 @@ criteria — see each entry's status.
   `LED_BURST_MAX_MS`, `LED_COOLDOWN_MS`, `IR_PULSE_MAX_MS`, `IR_MIN_INTERVAL_MS` are this session's
   engineering judgement, not measured values. Medium severity. Status: open, pending field/bench
   tuning.
-- **`STA_SAMPLES`, `STA_LTA_TRIGGER_RATIO`, `STA_LTA_DETRIGGER_RATIO` (`config.h`) are generic
-  STA/LTA convention values**, carried over from standard seismic-trigger practice (25-sample
-  short window, 250-sample long window, 4.0x trigger / 1.5x detrigger). They have **not** been
-  validated against the elephant footfall-frequency research ADR 0001 cites, and no bench data
-  backs them — in particular, whether a 0.1 s STA window actually resolves the cited footfall band
-  has not been checked. High severity — these are the numbers that decide whether the node
-  triggers at all. Effort: one calibration pass once real stomp-test traces exist. Status: open,
-  blocks nothing in this build call but blocks trusting Rung 1's result once it lands.
+- **`STA_SAMPLES`, `STA_LTA_TRIGGER_RATIO` (`config.h`) — checked against real hardware, 2026-08-14,
+  values kept unchanged.** `STA_SAMPLES=25`/`LTA_SAMPLES=250` were sized assuming
+  `SEISMIC_SAMPLE_RATE_HZ=250`; the real measured rate on a lean field-flag build is **226.98 Hz**
+  (not the nominal 250), which puts the two windows at ~110 ms and ~1.10 s of real elapsed time —
+  both still land inside the literature targets (STA ≈40-150 ms, LTA ≥0.5 s per Wijayakulasooriya et
+  al. arXiv:2406.05140 and Trnkoczy/Güralp STA/LTA sizing guidance), so no retune was justified by
+  this check. `STA_LTA_TRIGGER_RATIO=4.0` was then validated against a real human stomp test (see
+  the "Bench stomp-test trigger log" entry above and the full derivation entry near the end of this
+  document): quiet floor 1.03-1.13, real stomp 4.60, both constants left numerically unchanged
+  because the real data confirmed rather than contradicted them. `STA_LTA_DETRIGGER_RATIO` is a
+  **separate, still-open item** — confirmed by `grep` to be dead code (referenced nowhere outside
+  its own `#define`; `state_machine.cpp`'s `kEvent` state only exits on `EVENT_MAX_MS` elapsed, no
+  ratio-based detrigger check exists anywhere), so there is no live logic to validate it against and
+  no real data can set it meaningfully until one exists. Status: **closed for `STA_SAMPLES` and
+  `STA_LTA_TRIGGER_RATIO`; open for `STA_LTA_DETRIGGER_RATIO`**, tracked as dead code, not a
+  calibration gap — see the "Literature review" section near the end of this document for the wider
+  scientific grounding and the honest scope line between STA/LTA tuning and true multi-species
+  classification.
 - **`HORN_AMP_ENABLE_DELAY_MS = 150` (`config.h`) is invented — no measured DFPlayer Mini
   trigger-to-audio-seek latency backs it.** `horn.cpp`'s fire sequence depends on this value being
   long enough to cover DFPlayer seek (avoiding a pop) but not so long it clips the start of the
@@ -63,6 +84,19 @@ criteria — see each entry's status.
   250 SPS).** The LPBAM swap (ADR 0009) that replaces the ADS1115 stand-in should revisit whether
   a longer buffer is worth the SRAM cost once the internal-ADC path exists. Medium severity.
   Status: open, deferred to the LPBAM swap.
+- **`loop()` has no task/priority separation, so an actuator fire stalls sensing.** `horn.cpp`'s
+  fire sequence blocks on `delay()` for up to `HORN_BURST_MAX_MS` (3000 ms) plus the amp-enable
+  delay; `led.cpp`/`ir.cpp` block for their own `duration_ms`. Because `main.cpp`'s `loop()` calls
+  `geophone_service()` and `lora_service()` sequentially after the actuator call returns, both are
+  starved for up to ~3.15 s during every horn fire — a geophone sample or an incoming LoRa frame in
+  that window is silently missed, not queued. Not caused by this session's fire-test harness (see
+  `docs/specs/mcu-fire-test-harness.md`), which surfaces the same pre-existing blocking behavior
+  rather than introducing it. High severity if a real elephant event and a deterrence burst overlap
+  in time — exactly the case that matters most. Effort: either move sensing to a higher-priority
+  Zephyr thread (real RTOS tasks are available under Arduino Core on this board, just unused so far)
+  or make the actuator fire non-blocking (state-machine-driven timing instead of `delay()`). Status:
+  open, not scheduled before Aug 20 — flagged so the Aug-20 trial's data is read with this caveat,
+  not treated as a silent gap.
 - **Bridge `provide()` registration is deliberately not wired up in this build call.**
   `DEVICE_DEVELOPMENT_WORKFLOW.md` §3 documents a live, reproducible bug where registering an
   extra `Bridge.provide()` function — a `float`-argument one specifically — broke every previously
@@ -226,13 +260,57 @@ criteria — see each entry's status.
 - **No decision/alert threshold on `P` exists yet, deliberately.** `cognition/config.py`'s own
   docstring states why: no consumer exists (the contextual bandit and alert-escalation logic are
   both future build calls), and any real threshold needs the field-accuracy figures above, not an
-  invented cutoff picked before they exist. Status: open, scoped to a future build call.
+  invented cutoff picked before they exist. Status: **superseded, not closed** — a consumer now
+  exists (`device/mpu/services/reflex_loop.py`'s `handle_footfall_event()`, this build call), and it
+  needs a threshold to call `cognition/decision.py`'s `decide()` with. Rather than leave that call
+  site without one, `reflex_loop.py` defines `ALERT_PROBABILITY_THRESHOLD = 0.5` itself — the fused
+  probability's own uninformative midpoint, adding no additional skepticism or credulity beyond what
+  `L_PRIOR` and the per-modality weights/baselines already encode — deliberately outside
+  `cognition/config.py`, so that module's own documented refusal to hold this number stays true.
+  This is still an invented placeholder, not the field-accuracy-derived value `cognition/config.py`
+  describes; it must be revisited once real labelled events exist. Status: open, now scoped to
+  `services/reflex_loop.py`'s `ALERT_PROBABILITY_THRESHOLD` constant specifically.
+- **The horn-only "request the wire protocol's max, let the MCU clamp" deterrence policy
+  (`services/reflex_loop.py`'s `ALERT_HORN_GAIN_PCT=100.0`/`ALERT_HORN_DURATION_MS=65535`) is an
+  invented placeholder standing in for the contextual bandit that is supposed to pick which
+  actuator(s) to fire and at what gain/duration.** No bandit exists yet (`cognition/fusion.py`'s own
+  module docstring names it as future work); rather than invent a specific mid-range gain/duration
+  figure to fill that gap, `reflex_loop.py` requests the protocol's own documented maximum
+  (`schema.md`'s 0–100 `gain_pct` range, `duration_ms`'s uint16 ceiling) and relies on
+  `device/mcu/src/rule_gate.cpp`'s existing clamp against the MCU's real, separately-configured caps
+  (`HORN_GAIN_MAX_PCT`/`HORN_BURST_MAX_MS`, `config.h`) to bring it down to something safe — avoiding
+  a second, unreviewed limit invented on the MPU side. LED and IR are not driven by this loop at all.
+  Medium-high severity: until the bandit exists, every alert gets the same maximal horn burst
+  regardless of context (time of day, distance, repeat-trigger history), which is a real deterrence-
+  policy gap, not just a config placeholder. Status: open, blocked on the same future bandit build
+  call `cognition/fusion.py` already names.
 - **Nothing yet converts a real sensor reading into the log-odds `fuse()` expects.** No code turns
   `report_footfall_event`'s `probability` field, `report_acoustic_event`'s `confidence` field, or a
   vision detector's output (not yet built) into a `ModalityReading`'s `log_odds`/`available` pair —
   `cognition/fusion.py`'s `logit()` is the intended conversion primitive, but nothing calls it yet.
   High severity — this is the actual integration gap between the Bridge and cognition layers.
-  Status: open, scoped to the Bridge-wiring build call.
+  Status: **closed for seismic** —
+  `device/mpu/services/reflex_loop.py`'s `handle_footfall_event()` (added this build call) converts
+  `report_footfall_event`'s `probability` via `logit()` (epsilon-clamped against the 0.0/1.0
+  endpoints `logit()` rejects) into the `SEISMIC` reading it passes to `fuse()`, host-tested against
+  hand-computed `cognition.config.DEFAULT_FUSION_PARAMS` values in
+  `device/mpu/tests/test_reflex_loop.py`. Still **open for acoustic and vision** — no detector or
+  classifier-to-elephant-log-odds mapping exists for either (see the two entries below); both are
+  passed to `fuse()` as `available=False` for now, never scored.
+- **`report_acoustic_event`'s classifier output has no defined mapping onto elephant-presence
+  log-odds, and is not fed into `fuse()`.** `AcousticClass` (gunshot/chainsaw/vehicle/animal_call/
+  ambient, `bridge/rpc.py`) is a threat/context classification, not an elephant-presence signal, and
+  ADR 0007 §5 routes `gunshot` to a direct LoRa alert that bypasses fusion entirely — a routing path
+  `comms/` does not implement yet. `device/mpu/services/reflex_loop.py`'s `handle_acoustic_event()`
+  (added this build call) logs every event for visibility only. Medium severity: acoustic was always
+  scoped as corroboration, never a standalone detector (ADR 0007/0009), so this does not block a
+  seismic-only alert path, but the gunshot direct-alert routing is itself a real, undesigned gap.
+  Status: open.
+- **No vision detector exists, so the vision modality is always passed to `fuse()` as
+  unavailable.** `perception/camera.py` is capture-only (no pixel → log-odds model);
+  `cognition/fusion.py`'s own module docstring already named this a future build call. High
+  severity — vision is the highest-weighted modality (`WEIGHT_VISION` = 1.5, the largest of the
+  three), so every alert decision today runs on seismic evidence alone. Status: open.
 - **ADR 0001 §6's two fusion limitations are accepted approximations, not resolved.** Correlated
   noise across modalities (rain/fog degrading seismic SNR and vision IR contrast together) and the
   MCAR assumption behind availability-gated dropout (vision being unavailable due to fog is
@@ -270,9 +348,55 @@ criteria — see each entry's status.
   it. Not fixed as part of adding `SEISMIC_DEBUG_STREAM_RAW`: that flag's print is rate-gated to
   `SEISMIC_SAMPLE_RATE_HZ` to keep the console from flooding, which bounds the debug output but
   does not address the underlying sampling cadence. Medium-high severity — affects real STA/LTA
-  timing accuracy, not just debug output. Fixing it (an OS-bit poll or a `millis()`/`micros()` gate
-  around the ADC read itself) changes field reflex behaviour and needs its own bench validation
-  against a real stomp trace, not a debug-tooling change. Status: open, found not fixed.
+  timing accuracy, not just debug output.
+  **Double-read bug fixed** — `geophone_service()` now gates the ADC poll itself with a `millis()`
+  cadence timer at `1000 / SEISMIC_SAMPLE_RATE_HZ` (4 ms), tracked in a new `g_last_poll_ms` module
+  variable reset by `geophone_init()`; a call inside that window returns immediately without
+  touching the ring buffer, same rollover-safe unsigned-subtraction idiom as `rule_gate_apply()`'s
+  cooldown check. An OS-bit poll was considered and rejected: with `ADS1115_CFG_MODE_CONTINUOUS`,
+  the config register's OS bit only means "conversion in progress" in single-shot mode — in
+  continuous mode there is no usable ready signal without rewiring ALERT/RDY for interrupt use, a
+  much larger change than this bug warrants. Host-verified in
+  `device/mcu/tests/test_geophone/test_geophone.cpp` (3 new Unity cases, using
+  `hostshim::advance_millis()` to drive simulated time): 600 back-to-back calls with no simulated
+  time elapsed leave the window unfilled (would have filled it pre-fix), 512 calls paced at exactly
+  the sample period fill it, and a single call one millisecond short of the period is skipped
+  without disturbing the gate's timer. `pio test -e native`: 26/26 passing (up from 23 — the 3 new
+  cases). `pio run -e native`: clean link, same pre-existing unrelated `-Wunused-function` warning
+  for `log_window_csv`. Status: **closed for the double-read bug itself.**
+
+  **Real-hardware verification, 2026-08-14:** flashed with `SEISMIC_DEBUG_STREAM_RAW=1`, captured 6s
+  / 399 lines of real console output against the actual ADS1115 (via the socat/TCP bridge described
+  below, since `arduino-app-cli monitor` itself is dark). 369 raw-volts lines, 29 `[seismic]` lines,
+  0 unparsed/garbled lines. Duplicate-adjacent-pair analysis: 42/368 (~11.4%), max run length 4 —
+  consistent with genuine sensor noise-floor repetition, not the old un-gated-polling bug's
+  signature (which would show much higher-frequency, longer duplicate runs, since a host-speed
+  un-gated loop can out-pace a 4ms ADS1115 conversion period many times over). Also confirmed
+  visually via `scripts/live_seismic_plot.py` run live against the real stream. Status: **closed —
+  the cadence-gate fix is confirmed against real ADS1115 timing, not just the host stub.**
+
+  **New finding from this same capture, not previously measured:** the achieved raw-sample
+  accept/print rate is only **~61.5 Hz**, well under the nominal 250 SPS the STA/LTA window sizing
+  assumes. Measured specifically under this debug/bench build (`SEISMIC_DEBUG_STREAM_RAW=1`, which
+  adds `Bridge.update()` + `Bridge.notify()` overhead not present in the field build) — at 61.5 Hz
+  the 512-sample window spans ~8.3s of wall-clock time, not the assumed ~2.05s, and
+  `STA_SAMPLES`/`LTA_SAMPLES` stretch proportionally. Root cause not profiled — plausibly
+  per-`loop()`-iteration I2C transaction + `Serial.println` + `Bridge.update()` + `lora_service()`
+  overhead exceeding the 4ms cadence-gate floor. High severity for STA/LTA timing accuracy, low
+  effort to re-check: re-measure the achieved rate on a field-flag build
+  (`SEISMIC_DEBUG_STREAM_RAW=0`) before deciding whether `STA_SAMPLES`/`LTA_SAMPLES` need retuning —
+  this debug build's overhead may not reflect the real field rate.
+
+  **Re-measured on the real field-flag build, 2026-08-14:** with every `SEISMIC_DEBUG_*` flag and
+  `FIRE_TEST_HARNESS` at 0 (the actual field-deployment configuration, no Bridge streaming, no debug
+  prints), the achieved `geophone_service()` rate is **226.98 Hz** — much closer to the nominal
+  250 SPS than the 61.5 Hz seen under the debug/Bridge-enabled build, confirming most of that earlier
+  gap was debug/Bridge overhead as suspected, not a hardware ceiling. At 226.98 Hz,
+  `STA_SAMPLES=25`/`LTA_SAMPLES=250` work out to ~110 ms / ~1.10 s of real elapsed time — both still
+  inside the literature targets (STA ≈40-150 ms, LTA ≥0.5 s), so no retune is justified. Full
+  derivation in the "STA/LTA field-flag rate re-measurement and real stomp-test calibration" entry
+  near the end of this document. Status: **closed** — the field rate is now measured, not assumed,
+  and the existing sample counts checked out against it.
 - **`arduino-app-cli monitor` cannot read this board's live serial console — use App Lab's own
   Serial Monitor (in a browser) instead.** Confirmed on hardware while running the REF-bias check
   above: the CLI path connects to `arduino-router` without error but never delivers any bytes, in
@@ -283,6 +407,23 @@ criteria — see each entry's status.
   bench work, since the GUI path is confirmed to work, but wastes time for anyone who reaches for
   the CLI first. Status: open as a CLI limitation, closed as a practical blocker (workaround
   documented here and in the ADR).
+
+  **Re-confirmed fresh, 2026-08-14** (not just recalled): flashed the current build, ran
+  `arduino-app-cli monitor` twice (10s and 12s, debug log level, stdout/stderr separated) — zero
+  bytes both times, against a build guaranteed to be printing continuously
+  (`SEISMIC_DEBUG_STREAM_RAW=1`). New finding this session: the underlying serial data is fine — a
+  pre-existing, previously-undocumented root-owned `socat` daemon on the board
+  (`/usr/bin/socat file:/dev/ttyGS0,raw,echo=0,b9600,crtscts=0 tcp:127.0.0.1:7500`, running since
+  before this session) bridges the raw USB-CDC serial gadget to local TCP port `127.0.0.1:7500`.
+  That port is reachable via plain `nc`/netcat and delivers correct, well-formed, full-rate console
+  output (confirmed by capturing and parsing 399 real lines from it — see the cadence-gate entry
+  above). So the failure is specific to `arduino-app-cli monitor`'s own relay/display logic, not the
+  firmware or the underlying serial transport. This bridge is a viable non-GUI workaround
+  (`ssh <board> "nc 127.0.0.1 7500"`) alongside App Lab's browser Serial Monitor. Note: this bridge's
+  socat invocation uses `tcp:127.0.0.1:7500` (normally socat's client-connect syntax, not a listener
+  form) — how it actually ends up bound as a listener wasn't resolved (would need the board's sudo
+  password to inspect via `ss`/`lsof`); not pursued further since the practical question (does the
+  port deliver real data) was already answered directly.
 - **`scripts/sync-to-board.sh` needs `rsync` present on the board itself, and the stock App Lab
   image does not ship it.** Found 2026-07-31 running the first real `sync-to-board.sh` push of
   this build-call's changes: `rsync` was missing on the Windows host (worked around locally) and,
@@ -295,6 +436,14 @@ criteria — see each entry's status.
   a real terminal. Anyone re-imaging or replacing this board needs to install `rsync` (and confirm
   with `command -v rsync`, not just trust apt's own output) before `sync-to-board.sh` will get past
   its rsync step. Status: closed for this board, open as a re-imaging gotcha.
+
+  **Correction, 2026-08-14:** the "worked around locally" claim above for the Windows host does not
+  hold up — this session searched exhaustively (`/usr`, `/mingw64`, `/c/devtools`) and found `rsync`
+  genuinely absent from this Git-Bash host, not just from the board. Worked around this session by
+  manually replicating the script's clear-then-copy semantics with `ssh ... rm -rf` + `scp -r`
+  instead of actually installing `rsync` locally. Anyone hitting this again should install `rsync`
+  for Git Bash (e.g. via MSYS2's package manager) rather than assume a past session already solved
+  the local side.
 - **The real MPU Python entry point does not exist. `device/mpu/main.py` is a bench-only
   placeholder that only satisfies App Lab's `app.yaml` parser (`arduino-app-cli` requires a
   `main.py` at the root of `python/` by convention, not something `app.yaml` itself declares) — it
@@ -312,8 +461,25 @@ criteria — see each entry's status.
   deliberately does not import or call into any of them (`bridge/rpc.py`'s functions all
   `raise NotImplementedError`; nothing here should be read as a preview of the real design). High
   severity, launch blocker: no field deployment can ship without a real entry point wiring the
-  actual MCU↔MPU RPC contract, the fusion logic, and the actuation calls. Status: open, tracked
-  as its own design pass, not a debug-flag or tooling gap like the entries above.
+  actual MCU↔MPU RPC contract, the fusion logic, and the actuation calls. Status: **partially
+  closed** — `device/mpu/main.py` now wires a real sense → fuse → decide → actuate loop (this build
+  call): `cognition/fusion.py`'s `fuse()`, a new `cognition/decision.py::decide()`, and a new
+  `services/reflex_loop.py` (the imperative shell owning logging and the one real side effect, a
+  `drive_horn` `Bridge.call()`) are real, host-tested code, not a stub — `services/reflex_loop.py`'s
+  own module docstring and `device/mpu/tests/test_reflex_loop.py`/`tests/test_decision.py` cover the
+  design. `SAFE_MODE` (default on, `ELETECT_SAFE_MODE` env var) gates the `drive_horn` call behind a
+  dry-run log. **Still open:** the two `Bridge.provide()` calls that would actually connect this
+  loop to the MCU's real notifies (`report_footfall_event` → `_on_footfall_event`,
+  `report_acoustic_event` → `_on_acoustic_event`) are written in `main.py` but deliberately left
+  commented out, per the one-at-a-time `Bridge.provide()` registration discipline
+  (`docs/DEVICE_DEVELOPMENT_WORKFLOW.md` §3, `ENGINEERING_CONVENTIONS.md` §8) — confirmed to apply on
+  the MPU/Python side of `arduino-router` the same as the MCU/C++ side, not just the latter. Neither
+  has been registered or run against real hardware; only `debug_stream_raw_seismic_sample` is live.
+  Also still open: only the seismic modality is fused (acoustic/vision gaps above), the alert
+  threshold and horn deterrence policy are both invented placeholders (entries above), and no launch
+  can happen until a live session enables these registrations one at a time and bench-validates the
+  real loop end to end. Status: open, now scoped to "register and hardware-verify
+  `report_footfall_event`/`report_acoustic_event` one at a time," not "the loop does not exist."
 - **`SEISMIC_DEBUG_STREAM_RAW` gained a second, bench-only delivery path (`Bridge.notify()`
   from `device/mcu/src/geophone.cpp` to a matching `Bridge.provide()` handler in
   `device/mpu/main.py`) so `scripts/live_seismic_plot.py` can read live via
@@ -343,3 +509,419 @@ criteria — see each entry's status.
   not folded into this result. Status: closed for this bench tool; the missing ping-bench RTT,
   the still-unproven `call()` direction, and the never-registered production schema handlers
   remain open, tracked by their own existing entries above.
+- **`config.h`'s `LORA_SERIAL Serial1` may be pointed at the wrong HardwareSerial object,
+  independent of the Bridge-conflict question raised earlier tonight.** A documentation pass
+  (Arduino UNO Q official datasheet, the `Arduino_RouterBridge` GitHub README, and several 2026
+  Arduino Forum UNO Q threads — full citations in `docs/eletect-x-applab-notes.md`) found multiple
+  independent community reports that `Serial1` is the name the `arduino:zephyr` core binds to
+  Bridge's own internal MCU↔MPU link, and that the Grove LoRa-E5's D0/D1 pins are reached through
+  the plain `Serial` object instead — with one report that this exact naming shifted across a past
+  core update, meaning the true answer is specific to whichever core version this board is running,
+  not fixed. This is not confirmed against this board and is one step short of proof (forum reports,
+  not this project's own hardware test), but it is stronger and more specific than the earlier
+  same-session reasoning that treated the pairing as low-risk. High severity: if correct, LoRaWAN
+  uplink — the path that gets alerts to the DFO — has never had a working transport, independent of
+  anything else about the join/AT-command logic in `mac.cpp`. Effort: cheap to close, two ways —
+  grep the real installed core's variant/pin-mapping source on the board directly (same technique
+  already used to read the real `bridge.h`), or bench-test a real LoRa AT command exchange on both
+  `Serial` and `Serial1` with Bridge simultaneously active and see which one the E5 actually answers
+  on. Status: open, tracked in Cowork's task list, priority re-check before any LoRa bench session.
+- **The manual serial fire-test harness (`device/mcu/src/fire_test.*`,
+  `docs/specs/mcu-fire-test-harness.md`) now exists as the intended mechanism to close two open
+  items above rather than closing them itself.** It gives a human a one-keystroke way to call
+  `drive_horn`/`drive_led`/`pulse_ir` directly and see the full ack (`allowed`/`duration_ms`/
+  `gain_pct`/`clamped`) printed as `[firetest] ...` — the tool `HORN_AMP_ENABLE_DELAY_MS` (invented,
+  see above) and the horn/LED/IR burst-cap and cooldown entries (also invented, see above) need for
+  a real bench pass, but running that pass is still a hardware session that has not happened. Gated
+  behind `FIRE_TEST_HARNESS` (`config.h`, default 0), same discipline as the seismic bench flags.
+  Status: open — tool built and host-tested (`pio test -e native`), not yet run against real
+  hardware; does not close the delay/burst-cap/cooldown gaps above, only supplies the mechanism to.
+- **`SEISMIC_DEBUG_STREAM_RAW`'s committed default (`config.h`, `1`) broke `pio test -e native` and
+  `pio run -e native` outright, for the whole tree, not just the fire-test harness's own additions.**
+  Found running that harness's verification checklist: at `=1`, `main.cpp` and `geophone.cpp` both
+  `#include "Arduino_RouterBridge.h"` to reach `Bridge.begin()`/`Bridge.update()`/`Bridge.notify()`,
+  but `hostshim/` (the host-only Arduino API stand-in `platformio.ini` documents as making `pio run`/
+  `pio test` possible at all) had no stub for that header — it only exists as a real library on the
+  board. Every host build and every `pio test` run failed with `fatal error: Arduino_RouterBridge.h:
+  No such file or directory`, regardless of what any other file changed; the "23/23 pass" first
+  reported for the fire-test harness was against a locally-flipped flag, not the tree as committed,
+  and did not hold against real `HEAD`. High severity while open: the host build is the only
+  pre-hardware compile/test signal this project has, and it had been silently broken since the commit
+  that set this default. **Fixed**: added `hostshim/Arduino_RouterBridge.h`, a no-op `BridgeClass`
+  stand-in exposing `begin()`/`update()`/`notify()`/`provide()` (the last two as variadic/generic
+  templates that accept and discard any name+args shape, since nothing on a host build has an
+  `arduino-router` socket to actually deliver a message to), wired into `hostshim/host_shim.cpp` the
+  same way `Serial`/`Wire` already are (out-of-line non-template methods + a global instance). This is
+  the durable fix, not a per-flag workaround: any future bench flag that pulls in a board-only header
+  hits the same class of break, and a real stub in `hostshim/` (matching the pattern every other
+  Arduino API surface there already follows) is what closes that class of gap, not a second
+  `#if`/`#endif` around this one include. **Verified against the tree exactly as committed**
+  (`SEISMIC_DEBUG_STREAM_RAW=1`, `FIRE_TEST_HARNESS=0`, no flags flipped for the run): `pio test -e
+  native` → 23/23 test cases pass (`test_fire_test` 7, `test_rule_gate` 10, `test_sta_lta` 6); `pio
+  run -e native` → links clean, and the resulting host smoke binary (`.pio/build/native/program.exe`)
+  runs `setup()` + 600× `loop()` to completion without crashing, exercising the real
+  `Bridge.notify()` call site in `geophone.cpp` through the new stub on every iteration. Status:
+  closed.
+
+## Build-call 6 (`device/mcu` Bridge.provide() adapters for the MPU→MCU actuator/status RPCs)
+
+- **`drive_horn`, `drive_led`, `pulse_ir`, and `get_system_state` (`device/mpu/bridge/schema.md`'s
+  MPU→MCU table) now have real MCU-side adapters (`device/mcu/src/bridge_handlers.h/.cpp`), but none
+  is registered with `Bridge.provide()` — `main.cpp`'s four registration lines are written and
+  commented out, one per line, matching the one-at-a-time discipline
+  (`docs/DEVICE_DEVELOPMENT_WORKFLOW.md` §3, `ENGINEERING_CONVENTIONS.md` §8, and the identical
+  treatment `device/mpu/main.py` already uses for `report_footfall_event`/`report_acoustic_event`).**
+  Each adapter converts the flat scalar Bridge call signature schema.md defines into the existing,
+  already-tested actuator/sensor calls (`horn.h`/`led.h`/`ir.h`/`geophone.h`) and back into the flat
+  return shape schema.md specifies; named `bridge_*` rather than reusing the schema names directly,
+  since `horn.h`/`led.h`/`ir.h` already define `drive_horn`/`drive_led`/`pulse_ir` as the real
+  actuator-struct functions and `Bridge.provide()`'s registered name is a string, decoupled from the
+  C++ symbol bound to it. A new `BRIDGE_SCHEMA_VERSION` constant (`config.h`, `1`) mirrors
+  `device/mpu/services/config.py`'s `SCHEMA_VERSION`; a mismatch is logged via `Serial`, not
+  rejected, matching `services/reflex_loop.py`'s "log, don't raise" handling for the MCU→MPU
+  direction — this is a synchronous call the MPU is already blocked on, so it still gets a real ack
+  either way. Host-tested (`device/mcu/tests/test_bridge_handlers`) for the one genuinely new piece
+  of decision logic, `led_channel_for_pattern_id()` (see below); `pio test -e native` → 29/29 passing
+  (up from 26); `pio run -e native` → clean link, same pre-existing unrelated `-Wunused-function`
+  warning. **No line has been uncommented, no board has been flashed, and no actuator has fired** —
+  this build call was host-build/host-test only throughout, per explicit instruction. Status: open,
+  by design — closes one function at a time in a future hardware session, never as a batch.
+- **`drive_led`'s adapter invents a `pattern_id → led_channel` mapping (0 → white, 1 → blue,
+  anything else → white) that has no basis in schema.md or any design doc.** schema.md's `drive_led`
+  row (`schema_version, pattern_id: uint8, duration_ms: uint16`) never defines what `pattern_id`
+  values mean, and no LED strobe-pattern design exists anywhere in this repo. `LED_GAIN_MAX_PCT`
+  (`config.h`) is requested for every call — "request the config max, let `rule_gate_apply()`'s
+  existing clamp resolve it," the same placeholder policy `device/mpu/services/reflex_loop.py`
+  documents for its own horn request — since `gain_pct` isn't part of `drive_led`'s schema row
+  either. `pulse_ir`'s adapter makes the identical choice for `IR_GAIN_MAX_PCT`, for the same reason
+  (`pulse_ir`'s schema row has no `gain_pct` field). Medium severity: harmless until `drive_led` is
+  actually registered and called, but a real LED deterrence pattern design (what `pattern_id` values
+  should exist, whether they should vary gain/color/timing, not just channel) is undesigned work
+  hiding behind this placeholder. Status: open, blocked on an LED pattern design pass this build call
+  did not attempt.
+- **`get_system_state`'s adapter cannot honestly report `battery_v` or `acoustic_ok` — both are
+  fixed placeholder values, not live readings.** No battery-monitor driver or ADC pin exists anywhere
+  in `config.h`; `battery_v` always returns `0.0f`, chosen as an "unknown" sentinel rather than a
+  fabricated voltage that could be mistaken for a real reading on a future dashboard. No acoustic
+  subsystem exists on this MCU at all yet (no driver, no `config.h` entry, no acoustic ADC path) —
+  `acoustic_ok` always returns `false`. `geophone_ok` (the field this task's request specifically
+  named) is real: it calls the existing, already-tested `geophone_ok()` (`geophone.cpp`) directly.
+  `uptime_s` is real too (`millis() / 1000`). High severity if this were registered and trusted
+  today: a dashboard reading `battery_v=0.0` could misread as "battery dead" rather than "not wired
+  yet," and `acoustic_ok=false` could misread as "acoustic sensor faulted" rather than "does not
+  exist." Do not register `get_system_state` for real use until at minimum `battery_v` is backed by
+  an actual ADC read, or the dashboard consumer is taught to treat `0.0`/`false` here as "unknown,"
+  not "measured." Status: open.
+
+## Build-call 7 (`device/mcu` automated geophone excitation self-test)
+
+- **Automated desk-speaker excitation self-test built and run against real hardware, 2026-08-14 —
+  a chain-health/repeatability check, explicitly NOT a substitute for the real human stomp test.**
+  Three new bench-only scripts (`scripts/geophone_excitation_stimulus.py`,
+  `scripts/capture_geophone_console.py`, `scripts/correlate_geophone_excitation.py`) make the
+  existing manual `scripts/geophone_bench_excitation.html` tool's play → capture → correlate → report
+  cycle fully scriptable: the stimulus script drives the laptop speaker (`sounddevice`/`numpy`,
+  installed `--user` this session, bench-only, not a repo dependency; falls back to
+  `winsound.Beep()` — a square wave, not a sine — if `sounddevice` is unavailable) through a fixed
+  sequence and logs each event's real wall-clock start/stop to JSONL; the capture script wraps the
+  same `ssh <board> "nc 127.0.0.1 7500"` bridge used for the cadence-gate check above (with
+  `SEISMIC_DEBUG_VERBOSE=1`, already the working tree's default) and timestamps every console line
+  by **host arrival time**, not the board's own `millis()`-based `t=` field — the two clocks have no
+  cheap way to align after the fact, whereas host-arrival time compares directly against the
+  stimulus log's own wall-clock timestamps; the correlate script pulls the `[seismic] sta=/lta=/
+  ratio=` samples inside each stimulus window and reports the mean/max ratio and the delta against
+  the combined quiet-baseline mean, flagging any window with no discernible response.
+
+  **Pre-check, per this session's explicit instruction:** Nahimic (Lenovo Legion audio-enhancement
+  suite) was found running (`NahimicService`, `Get-Service`) and had to be stopped before any
+  playback — bass/enhancement processing would have distorted the frequency content the correlation
+  depends on. The automation shell had no admin rights to stop the service itself
+  (`net session` confirmed not elevated); stopped manually via an elevated `Stop-Service
+  NahimicService -Force` and left stopped for the remainder of the session, not restarted
+  automatically afterward. Default output device confirmed correct and functional independently of
+  the low-frequency test content: `Speakers (Realtek(R) Audio)` at 100% volume, not muted
+  (`pycaw`/`IAudioEndpointVolume`), and a 440 Hz confirmation tone was audibly confirmed. The bench
+  stimulus tones themselves (10–50 Hz, plus the supplementary frequencies below) were reported
+  inaudible or barely audible by ear — expected, not a fault: `geophone_bench_excitation.html`'s own
+  warning notice already documents that small laptop speakers roll off hard below ~60–100 Hz, so
+  most of what reaches the geophone at these frequencies is chassis/driver motion coupling into the
+  desk, not true audible sound. Per this session's instruction, the room fan was off and no one
+  walked near the desk during either run; the laptop's own load-driven fan (unavoidable, later
+  switched to the laptop's quieter power profile) and, during the second run specifically,
+  foot traffic in an adjacent room are noted as residual, uncontrolled noise sources — see the
+  elevated second-run baseline below.
+
+  **Two runs.** The first (`geophone_excitation_20260814_192430.{log,jsonl}`) covered the four
+  spec'd frequencies (10/20/24/50 Hz), the 2→60 Hz sweep, and the impulse train, but the capture
+  script's fixed duration was sized before accounting for the live diagnostic delay between starting
+  the capture and starting playback, so it ran out mid-impulse-train — that window has only 2
+  `[seismic]` samples for a 15 s span. This is a **test-harness timing bug in this session's own
+  tooling, not a firmware finding** — confirmed by inspecting the raw capture directly: the console
+  stream itself (all lines, not just `[seismic]`) simply stops the moment the capture's fixed
+  duration elapses, mid-window. Fixed for the second run by starting the capture and the full
+  stimulus sequence back-to-back in one shell invocation (no inter-step delay) with a capture budget
+  (150 s) comfortably above the real stimulus length. The second run
+  (`geophone_excitation_20260814_195937.{log,jsonl}`) is the complete dataset and also added five
+  supplementary tone frequencies not in the original spec (5, 8, 15, 30, 100 Hz), to bracket the
+  SM-24's documented ~10 Hz mechanical resonance (`geophone_bench_excitation.html`'s own "10 Hz
+  (SM-24 resonance)" preset) more finely after the first run's result below. Both runs' raw logs are
+  under `scripts/bench-logs/` (now `.gitignore`d — reproducible via these scripts, not source) and
+  were not committed.
+
+  **Real findings (second/complete run; cross-checked against the first run for repeatability):**
+  - **10 Hz is the one frequency that produced an unambiguous, repeatable, above-noise-floor
+    response in both independent runs, including a real STA/LTA `[trigger]` crossing each time.**
+    Run 1: mean ratio 3.37 vs a 1.37 baseline (Δ+2.00), peak 5.06, one real `[trigger]`. Run 2: mean
+    ratio 3.99 vs a 1.75 baseline (Δ+2.24), peak 4.79 (a separate 4.37-ratio trigger also fired
+    inside this window). This is consistent with the SM-24's own known resonance amplifying even a
+    weak, largely inaudible desk-coupled excitation — a credible, physically-explicable real
+    response from the sensor chain, not noise.
+  - **20/24/50 Hz, the 2→60 Hz sweep, the impulse train, and all five supplementary frequencies
+    (5/8/15/30/100 Hz) showed no response distinguishable from the quiet-baseline noise floor** in
+    the complete (second) run (deltas all within ~2 baseline standard deviations). Most plausible
+    explanation is compounding, genuine, non-chain-defect factors, not a sensor-chain problem: (a)
+    weak/near-inaudible speaker output at these frequencies and this session's 22.5% output gain
+    outside the resonance peak, per the already-documented small-speaker rolloff above; (b) this
+    run's own baseline was itself elevated by real ambient disturbance — its combined quiet-window
+    mean/stdev (1.75/0.80) was higher than run 1's (1.37/0.81), and one `[trigger]` (ratio 2.94)
+    fired inside a `baseline_quiet` window itself, coinciding with the adjacent-room foot traffic
+    flagged during this run. Separately, the sweep's and impulse train's null results have their own
+    physical explanation even setting noise aside: the linear sweep only dwells within roughly ±1 Hz
+    of the 10 Hz peak for about 0.7 s of its full 20 s span (≈2.9 Hz/s sweep rate), diluted into one
+    whole-window mean; the impulse train's 80 ms-on/920 ms-off duty cycle likely gives the
+    resonance too little continuous energy per cycle to ring up detectably against STA/LTA's
+    window-averaged ratio, unlike a sustained 5 s tone at the same frequency. None of this proves the
+    chain would respond the same way to real footfall-band energy at real amplitude — only that this
+    specific, weak, desk-speaker stimulus mostly didn't clear this specific, sometimes-noisy floor.
+  - **`tone_24hz` and `tone_50hz` had far fewer `[seismic]` samples than expected in run 2** (3 and 7
+    respectively, vs ~25 expected at the 200 ms print cadence over a ~5 s window). Traced to two real
+    `[trigger]` events landing in the immediately preceding `quiet_gap` windows (ratios 2.18 and
+    2.07 — both just over `SEISMIC_DEMO_MODE`'s lowered `STA_LTA_TRIGGER_RATIO=2.0`, the config
+    currently active in this working tree's uncommitted `config.h`, not field's 4.0), whose
+    `EVENT_MAX_MS`+`COOLDOWN_MS` cycle (2000+3000 ms in demo mode) bled into the start of the
+    following tone window. This is real-hardware corroborating evidence for the already-open
+    "`loop()` has no task/priority separation, so an actuator fire stalls sensing" entry above — not
+    a new bug, and not addressed by this session (no threshold or blocking-behavior code was
+    touched).
+
+  **Hard boundary respected:** `STA_LTA_TRIGGER_RATIO`, `STA_LTA_DETRIGGER_RATIO`, `STA_SAMPLES`,
+  and `LTA_SAMPLES` in `config.h` were not modified by this session — confirmed by this entry's own
+  diff. `SEISMIC_DEMO_MODE`'s lowered trigger/detrigger ratios were already present, uncommitted, in
+  the working tree before this session and are only referenced above as context for interpreting the
+  observed `[trigger]` ratios, not something this session set or changed.
+
+  **This is a desk-speaker-coupled excitation check — chain-health/repeatability only, not real
+  footfall data.** Desk-speaker excitation has a different waveform shape, amplitude, and frequency
+  content than an elephant footfall coupling through soil; the 10 Hz result above shows the sensor
+  chain is alive, repeatable, and roughly the expected frequency-response shape, nothing more. **The
+  real human stomp test — "Bench stomp-test trigger log not yet captured" near the top of this
+  document — remains the only source for actual STA/LTA threshold calibration and is still the
+  next/last remaining step**, unaffected by anything in this entry. Status: closed for this bench
+  tool and this pass; the human stomp test stays open.
+
+## Literature review — geophone species discrimination & scientific STA/LTA grounding (planning session, 14 Aug)
+
+Written in direct response to the request to tune and validate the geophone chain "scientifically"
+against real papers, and the follow-on scope: elephant, boar, human, and vehicle detection, in rain
+and other field conditions. Fetched and read in full where access allowed; several relevant papers
+exist but were not retrievable through the tools available to this session (403/429 on every
+mirror tried) — listed below as unresolved, not silently dropped.
+
+**What was actually retrieved and read:**
+
+- Wijayakulasooriya et al., "Towards Long Range Detection of Elephants Using Seismic Signals"
+  (arXiv:2406.05140 / IEEE Access, 2024) — the single most directly useful source found. Real field
+  trial, validated detection range 155.6 m (controlled) / 140 m (natural), decision-tree classifier
+  (not STA/LTA) on spectral features, 10–200 Hz analysis band. Predominant-frequency-by-source-class
+  result: **elephant 26.13 ± 6.43 Hz, human 70.90 ± 12.52 Hz, motorcycle 115.76 ± 41.53 Hz.** This is
+  a real, citable frequency-separation result and is consistent with ADR 0001's O'Connell-Rodwell
+  et al. 2000 (JASA) figure of ~24 Hz mean elephant footfall frequency that this repo already cites.
+- Trnkoczy, "Understanding and parameter setting of STA/LTA trigger algorithm" (GFZ Potsdam) — the
+  original PDF 403'd on every attempt; read via a secondary source (Güralp's own STA/LTA
+  documentation, which cites the same convention). Practical rule: **STA should be set to roughly
+  the dominant period of the target event** (for a ~26 Hz elephant footfall, ≈ 1 period ≈ 38 ms);
+  **LTA should be set longer than the period of the lowest frequency of interest** (for the existing
+  2 Hz low edge of the analog band-pass, ≥ 0.5 s). Trigger/detrigger ratio has **no universal
+  literature value** — every real source agrees it is set empirically against local noise and real
+  target events, which is exactly why this repo's hard boundary (real threshold constants come only
+  from the real human stomp test, never from bench-speaker data) is the scientifically correct
+  position, not just a cautious one.
+- A wavelet-packet-manifold seismic target classifier (PMC3758609, unattended-ground-sensor
+  literature) — general corroboration, not elephant-specific: pedestrian energy concentrates
+  0–112 Hz, vehicle/helicopter energy extends across the full measured band, and getting from
+  "trigger" to "classify" required wavelet-domain features plus a trained classifier (KNN, 95%
+  across 4 classes), not a single amplitude-ratio threshold.
+
+**What this means for `config.h`'s numbers, concretely:** the existing `STA_SAMPLES=25` /
+`LTA_SAMPLES=250` were sized assuming `SEISMIC_SAMPLE_RATE_HZ=250` maps to real elapsed seconds
+(0.1 s / 1.0 s) — and land close to the Trnkoczy/Güralp guidance above almost by coincidence, since
+generic seismic convention and the elephant-specific numbers happen to be in the same ballpark. But
+this session's own prior hardware finding (~61.5 Hz actual loop-measured sample rate under the
+current debug/Bridge-enabled build, not the nominal 250 SPS ADS1115 conversion rate) means those
+"0.1 s"/"1.0 s" figures are **not currently true in real time on this board** — at ~61.5 Hz, 25
+samples is ~0.41 s, not 0.1 s, four times longer than the literature target for resolving a single
+elephant footfall impulse. This has to be re-measured on a lean, field-flag build (all
+`SEISMIC_DEBUG_*`/`FIRE_TEST_HARNESS` flags at 0, no Bridge streaming) before any STA/LTA sample
+count is retuned — the debug/Bridge overhead may be most or all of the gap between 61.5 Hz and
+250 Hz, and tuning against the wrong real-time base would silently miscalibrate the detector no
+matter how correct the literature-derived target duration is.
+
+**Scope line — what STA/LTA can and cannot do, stated plainly:** a single-channel STA/LTA amplitude
+trigger answers one question — "is there a ground disturbance bigger than the recent local noise
+floor" — using the existing 2–50 Hz analog band-pass as its only frequency selectivity. That
+band-pass is itself a real, literature-grounded discrimination step (it passes the ~26 Hz elephant
+peak while attenuating most of the ~71 Hz human and ~116 Hz motorcycle predominant energy per
+Wijayakulasooriya above) — a genuine scientific design win already built into the hardware, not
+something that needs inventing. But STA/LTA cannot itself tell an elephant from a boar from a human
+stomping directly on the sensor from a nearby vehicle; every real classification paper found here
+(elephant, UGS pedestrian/vehicle, and others below) needed per-window spectral or ML features and a
+trained classifier to get there. That is exactly what `CONTEXT.md` §4 already scopes as "TinyML
+footfall" and what `ml/seismic/` (currently empty, `.gitkeep` only) is reserved for — it is real,
+unbuilt, future work, not a `config.h` tuning pass. Trying to force elephant/boar/human/vehicle/rain
+discrimination out of four STA/LTA constants before 20 Aug would be scientifically dishonest; the
+honest near-term target is a well-calibrated single-class "large ground impact" trigger, validated by
+the real stomp test, plus making sure every trigger's raw window is retained during the field trial
+so the 10-day deployment doubles as the first labeled dataset for the future classifier.
+
+**Gaps this review could not fill — stated honestly rather than papered over:**
+
+- **Wild boar**: no seismic footfall/gait literature for boar (or any similar-mass quadruped) was
+  found despite several targeted searches. The nearest published results are all human-pedestrian- or
+  vehicle-focused. This is a genuine, currently-unfilled gap, not a retrieval failure to paper over —
+  if boar discrimination becomes a real requirement, it will need either dedicated literature this
+  session could not locate, or empirical data collected from an actual boar encounter during the
+  field trial.
+- **Rain/wind seismic noise**: two directly relevant papers were found by title (Rindraharisaona
+  et al. 2022, AGU Earth and Space Science, "Seismic Signature of Rain and Wind Inferred From Seismic
+  Data"; a second rain-seismic-signature abstract via AGU) but both 403'd on every fetch attempt — 
+  content not retrievable through the tools available here. No specific numbers from those papers are
+  reported below because they were never actually read. General seismological expectation (not a
+  citation, background domain reasoning only) is that rain/wind tends to raise the ambient noise
+  floor with broadband, continuous energy rather than producing discrete impulses — which would
+  mainly threaten LTA/false-trigger behavior, not the STA impulse shape. This is a real prediction to
+  test, not a validated fact; there is no substitute for capturing a real raw window during actual
+  rain at this installation, which the 10-day field trial is the first real opportunity to do.
+- **Two papers that looked like the best possible match for the full multi-species ask were found but
+  not retrievable at all**, and are worth someone with institutional journal access chasing down
+  directly rather than treating as closed: Steinmann et al. 2025, "Decoding the footsteps of the
+  African savanna: Classifying wildlife using seismic signals and machine learning" (*Methods in
+  Ecology and Evolution*, DOI 10.1111/2041-210X.70021) — a real multi-species savanna wildlife
+  seismic classifier including elephants; and a TechRxiv preprint, "A Hybrid CNN-BiLSTM Model for
+  Seismic Signal Based Wildlife Detection Nearby Railway Tracks" — both 403'd on every mirror tried
+  (publisher direct, ResearchGate). Either would directly inform the `ml/seismic` TinyML design once
+  it starts.
+
+Status: open — this is a research/scoping entry, not a code change. (a) the field-flag real
+sample-rate re-measurement and (b) the real human stomp test both landed 2026-08-14 — see the next
+entry for the full derivation. Remains open on (c): a decision on whether/when `ml/seismic` TinyML
+work starts for true multi-class discrimination, and on the boar/rain gaps stated above, neither of
+which this session had literature or data to fill.
+
+## STA/LTA field-flag rate re-measurement and real stomp-test calibration (14 Aug)
+
+Closes the two open items the literature review above left outstanding. Referenced from
+`config.h`'s STA/LTA block and `device/mcu/README.md`'s bench stomp-test section — this entry is the
+full derivation both point to.
+
+**Real sample rate, lean field-flag build:** measured `geophone_service()` at **226.98 Hz** with
+every `SEISMIC_DEBUG_*` flag, `FIRE_TEST_HARNESS`, and `SEISMIC_DEMO_MODE` at 0 — the actual
+field-deployment configuration, not the debug/Bridge-streaming build the earlier ~61.5 Hz figure
+(see the sample-rate entry above) was measured under. Confirms that gap was overhead from
+`SEISMIC_DEBUG_STREAM_RAW`'s `Bridge.update()`/`Bridge.notify()` path, not a hardware ceiling.
+
+**STA/LTA window sizes in real elapsed time, vs. literature:** at 226.98 Hz, `STA_SAMPLES=25` is
+~110 ms and `LTA_SAMPLES=250` is ~1.10 s. Literature targets (Wijayakulasooriya et al.,
+arXiv:2406.05140, elephant footfall predominant frequency 26.13 ± 6.43 Hz → dominant period ≈38 ms;
+Trnkoczy/Güralp STA/LTA sizing guidance, STA ≈ 1 dominant period, LTA ≥ period of the lowest
+frequency of interest — here the analog band-pass's 2 Hz low edge, ≥0.5 s) put STA in a ≈40-150 ms
+ballpark and LTA at ≥0.5 s. Both real-world window durations land inside their targets. **No change
+made to `STA_SAMPLES` or `LTA_SAMPLES`** — per the hard boundary, these are set from real hardware
+measurement plus literature comparison only, never retuned speculatively, and this check gave no
+reason to retune them.
+
+**Real human stomp test** (`device/mcu/README.md`'s "Bench stomp test" procedure, Rung 1's exit
+criterion): run on real hardware, geophone ground-coupled, on the same lean field-flag build with
+`SEISMIC_DEBUG_VERBOSE` temporarily set to 1 for one ~89 s capture to get quantified quiet-floor
+numbers directly comparable to the trigger event, then reverted to 0 immediately after (raw log:
+`scripts/bench-logs/stomp_test_20260814_verbose.log`; two earlier, less-controlled attempts —
+`stomp_test_20260814.log`, `stomp_test_20260814_clean.log` — produced consistent-magnitude trigger
+ratios of 4.02-4.53 but no quiet-floor baseline, and are kept only as corroborating evidence, not the
+basis for any number below).
+
+- **Quiet floor:** ratio held 1.03-1.13 across ~35 s before the stomp and ~46 s after it (no false
+  triggers either side of the real event) — a stable, real-measured noise-floor ceiling.
+- **Real stomp:** a firm stomp near the geophone produced `[trigger] ... ratio=4.60`, with the
+  `[window]` raw-volts CSV dump on that trigger showing a genuine transient (peak samples around
+  ±0.02 V against a ~0.0003-0.0004 V baseline, roughly a 65x amplitude jump) — real waveform proof,
+  not just a ratio number.
+- **Margin:** `STA_LTA_TRIGGER_RATIO=4.0` sits ~3.5x above the observed floor ceiling (1.13) and the
+  real stomp clears it by ~15% (4.60 vs 4.00). **Value kept unchanged** — the real data confirmed the
+  existing constant rather than calling for a retune.
+- **`STA_LTA_DETRIGGER_RATIO=1.5` could not be validated the same way and stays open, as dead code,
+  not as an unvalidated calibration.** Confirmed by `grep` that `DETRIGGER_RATIO` appears nowhere in
+  the codebase outside its own `#define` — `state_machine.cpp`'s `kEvent` state has exactly one exit
+  condition, `elapsed_since_entry(now_ms) >= EVENT_MAX_MS`, and no ratio-based detrigger check exists
+  anywhere in `sta_lta.cpp` or `state_machine.cpp`. There is no live logic to point real data at, so
+  the value is left untouched rather than set from data that can't actually exercise it. If a
+  ratio-based detrigger is ever implemented, this constant needs a real validation pass of its own
+  before being trusted.
+
+**Secondary observation, not yet acted on:** `log_window_csv()`'s `[window]` CSV dump (bench-only,
+`SEISMIC_DEBUG_VERBOSE && !SEISMIC_DEMO_MODE`) took roughly **6.7 s** of wall-clock time to complete
+on this capture (host-arrival timestamp on the CSV line vs. the `[trigger]` line's own timestamp,
+~6.7 s apart), during which the printed ratio was observed frozen at exactly `4.60` for ~8.5 s post
+-trigger before returning to the quiet-floor range. `state_machine.cpp`'s own comment on this dump
+describes the stall as "several hundred ms" — the real measurement is over an order of magnitude
+longer than that comment claims. This only affects the bench-only verbose path (never compiled into
+the field build), so it does not block the Aug 20 trial, but the comment itself is now known to be
+wrong and should be corrected in a future bench-focused session. Not investigated further this
+session (root cause not profiled — plausibly `Serial.print`'s blocking behavior over 512
+comma-separated floats at whatever baud rate is configured).
+
+Status: **closed** — real field-flag sample rate measured, STA/LTA window sizes checked against
+literature and found adequate (unchanged), real stomp test run and `STA_LTA_TRIGGER_RATIO` validated
+with margin (unchanged), `STA_LTA_DETRIGGER_RATIO` reclassified from "unvalidated" to "confirmed dead
+code" (tracked as its own open item, not a calibration gap). The `log_window_csv()` timing-comment
+discrepancy is noted as a loose end for a future bench session, not reopened here.
+
+## Raw seismic trigger data does not reach the MPU or survive anywhere in the real field build (14 Aug)
+
+Checked as part of confirming the Aug 20 field trial will actually produce usable data for the
+future `ml/seismic` classifier, per `CONTEXT.md`'s framing of the 10-day deployment as the first
+labeled dataset opportunity. It will not, as the code stands today.
+
+Every STA/LTA trigger's raw window or feature data is gated behind flags `config.h` itself documents
+as "MUST be 0 before any field sync": `log_window_csv()` (the `[window]` CSV dump used in the bench
+stomp test above) is compiled only under `#if SEISMIC_DEBUG_VERBOSE && !SEISMIC_DEMO_MODE`, and
+`SEISMIC_DEBUG_STREAM_RAW`'s `Bridge.notify()` relay path is a separate bench-only flag with the same
+discipline. Both are correctly off in the real field-flag build — that part is working as intended.
+
+The problem is that the schema-documented *real* path never got built: `bridge/schema.md` defines
+`report_footfall_event(schema_version, probability, sta_lta_ratio, feature_vector: float[8])` as the
+notify that's supposed to carry every trigger's data to the MPU, and the MPU side is fully
+implemented and tested — `device/mpu/main.py`'s `_on_footfall_event` and
+`device/mpu/services/reflex_loop.py`'s `handle_footfall_event` exist, are unit-tested
+(`device/mpu/tests/test_reflex_loop.py`), and are ready to receive real calls. But nothing on the MCU
+side ever calls it: `state_machine.cpp`'s `kEvent` case (where the call belongs, right after a
+trigger) is a comment-only stub — "Entry stub: this is where deterrence policy (report_footfall_event
+notify, which actuator fires at what gain/duration) belongs once fusion/bandit land" — with no actual
+`Bridge.notify()` call anywhere in the file. The MPU-side registration is also still commented out in
+`main.py` ("NOT YET ENABLED — see module docstring's 'Registration state' paragraph"), consistent
+with the Bridge `provide()` registration gap already tracked above, but that's a second, independent
+blocker on top of the missing MCU-side call — enabling the registration alone would not fix this,
+since there is still nothing on the MCU side to call it.
+
+**Net effect for the Aug 20 field trial as the code stands today: every STA/LTA trigger produces a
+bare timestamp in the console log and nothing else.** No raw window, no `sta_lta_ratio`, no feature
+vector reaches the MPU, gets logged, or survives in any persistent store. Ten days of field data
+would currently yield trigger *counts* only — not the labeled raw/feature dataset the future
+classifier needs, and not recoverable retroactively once the trial window has passed.
+
+High severity — this directly undercuts the stated purpose of the field trial as a data-collection
+opportunity, not just a live-detection proof. Effort: wire one real `Bridge.notify("report_footfall_event", ...)`
+call into `state_machine.cpp`'s `kEvent` entry (populating `sta_lta_ratio` from the existing
+`sta_lta_result_t`; `feature_vector` can be a placeholder/zeroed 8-float array until real features
+are designed, since none are computed today — that itself is a separate, not-yet-scoped gap), then
+uncomment and hardware-verify the MPU-side registration in `main.py` one function at a time per the
+existing Bridge `provide()` registration discipline already tracked above. Status: open, flagged
+before Aug 20 so this is a decision made with eyes open rather than discovered after the trial ends.

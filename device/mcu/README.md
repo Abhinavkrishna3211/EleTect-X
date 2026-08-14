@@ -162,8 +162,16 @@ Run this after wiring the table above and syncing/flashing:
    zero-fill-on-timeout contract. If every window reads as flat zero, check the `Wire`/`Wire1`
    question above before assuming the geophone itself is at fault.
 
-**Status: pending hardware.** This procedure has not yet been run against real hardware — see
-`docs/KNOWN_GAPS.md`.
+**Status: done, 2026-08-14.** Run against real hardware on a lean field-flag build
+(`SEISMIC_DEBUG_VERBOSE` temporarily set to 1 for the pass to get quantified quiet-floor
+numbers alongside the trigger, then reverted to 0 immediately after). Quiet floor held a
+ratio of 1.03–1.13 across ~89 s (before and after the stomp, no false triggers); a firm
+stomp near the geophone produced `ratio=4.60`, with the `[window]` CSV dump confirming a
+real ~65x amplitude transient over the noise floor. `STA_LTA_TRIGGER_RATIO` (4.0) clears
+the observed floor ceiling by ~3.5x and the stomp clears the threshold by ~15% — see
+`docs/KNOWN_GAPS.md`'s 2026-08-14 entry for the full write-up, including why
+`STA_LTA_DETRIGGER_RATIO` could not be validated the same way (it's dead code — never
+read outside its own `#define`).
 
 ## Layout
 
