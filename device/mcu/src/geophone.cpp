@@ -21,6 +21,13 @@ float g_ring[SEISMIC_WINDOW_SAMPLES] = {};
 size_t g_write_index = 0;
 size_t g_samples_written = 0;  // saturates at SEISMIC_WINDOW_SAMPLES
 uint32_t g_last_fill_ms = 0;   // millis() at last successful sample write
+uint32_t g_last_poll_ms = 0;   // millis() at last *accepted* ADC poll attempt
+// Never saturates, unlike g_samples_written above - state_machine.cpp's
+// kSensing case compares successive reads of this to know whether a new
+// sample has landed since it last ran the STA/LTA slide, so it must keep
+// counting past SEISMIC_WINDOW_SAMPLES for that comparison to keep working
+// for the life of the device.
+uint32_t g_sample_count = 0;
 bool g_ok = false;
 
 // Writes the ADS1115 config register, starting a continuous conversion at the
@@ -77,11 +84,47 @@ void geophone_init() {
 
   g_write_index = 0;
   g_samples_written = 0;
+  g_sample_count = 0;
   g_last_fill_ms = millis();
+  g_last_poll_ms = millis();
   g_ok = ads1115_write_config(ADS1115_CONFIG_WORD);
 }
 
 void geophone_service() {
+  const uint32_t now_ms = millis();
+
+  // Proactive staleness check, run every call regardless of the cadence gate
+  // below. state_machine.cpp's kSensing case now only calls
+  // read_seismic_window() when geophone_sample_count() has advanced (see its
+  // own comment) - read_seismic_window() can no longer be relied on to keep
+  // g_ok current in real time if the sensor stops producing samples
+  // entirely, since nothing would call it again. Same formula
+  // read_seismic_window() itself uses, just applied here too so a genuinely
+  // dead sensor still flips geophone_ok() to false within
+  // GEOPHONE_WINDOW_STALE_MS instead of being stuck at its last value
+  // forever.
+  if (g_ok && (now_ms - g_last_fill_ms) > GEOPHONE_WINDOW_STALE_MS) {
+    g_ok = false;
+  }
+
+  // Cadence gate (KNOWN_GAPS.md: "ads1115_read_conversion never polls the
+  // ready bit"). ADS1115_CFG_COMP_DISABLE leaves ALERT/RDY unused, and in
+  // ADS1115_CFG_MODE_CONTINUOUS the config register's OS bit only reflects
+  // conversion-in-progress in single-shot mode - it is not a usable
+  // new-data-ready signal here, so a millis() gate at the nominal conversion
+  // period is the fix, not an OS-bit poll. loop() (main.cpp) calls this every
+  // iteration with no delay of its own, far faster than a new conversion
+  // becomes available at ADS1115_CFG_DR_250SPS (4 ms); without this gate,
+  // back-to-back calls read and ring-buffer the same conversion register
+  // value more than once. Unsigned subtraction makes this rollover-safe
+  // (same idiom as rule_gate_apply()). Gates the attempt itself, not just a
+  // successful read, so a run of I2C failures cannot be retried faster than
+  // real hardware would ever produce a new sample.
+  if (now_ms - g_last_poll_ms < (1000 / SEISMIC_SAMPLE_RATE_HZ)) {
+    return;
+  }
+  g_last_poll_ms = now_ms;
+
   int16_t raw = 0;
   if (!ads1115_read_conversion(&raw)) {
     // A single failed poll does not immediately fail the sensor - the
@@ -146,6 +189,7 @@ void geophone_service() {
   if (g_samples_written < SEISMIC_WINDOW_SAMPLES) {
     ++g_samples_written;
   }
+  ++g_sample_count;
   g_last_fill_ms = millis();
   g_ok = true;
 }
@@ -169,3 +213,5 @@ void read_seismic_window(float out[SEISMIC_WINDOW_SAMPLES]) {
 }
 
 bool geophone_ok() { return g_ok; }
+
+uint32_t geophone_sample_count() { return g_sample_count; }

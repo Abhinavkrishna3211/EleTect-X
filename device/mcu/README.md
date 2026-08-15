@@ -169,9 +169,9 @@ ratio of 1.03–1.13 across ~89 s (before and after the stomp, no false triggers
 stomp near the geophone produced `ratio=4.60`, with the `[window]` CSV dump confirming a
 real ~65x amplitude transient over the noise floor. `STA_LTA_TRIGGER_RATIO` (4.0) clears
 the observed floor ceiling by ~3.5x and the stomp clears the threshold by ~15% — see
-`docs/KNOWN_GAPS.md`'s 2026-08-14 entry for the full write-up, including why
-`STA_LTA_DETRIGGER_RATIO` could not be validated the same way (it's dead code — never
-read outside its own `#define`).
+`docs/KNOWN_GAPS.md`'s 2026-08-14 entry for the full write-up. `STA_LTA_DETRIGGER_RATIO`
+was never validated this way and was removed 2026-08-15 as dead code — `kEvent` only ever
+exits on `EVENT_MAX_MS` elapsed, never a ratio; see `docs/KNOWN_GAPS.md`'s 2026-08-15 entry.
 
 ## Layout
 
