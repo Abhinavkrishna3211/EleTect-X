@@ -114,17 +114,23 @@ criteria — see each entry's status.
   power draws. Medium severity. Status: open.
 - **GNSS → Bridge → dashboard forum thread** (`DEVICE_DEVELOPMENT_WORKFLOW.md` §3) — carried
   forward as a reference link, not yet acted on. Low severity. Status: open.
-- **Geophone damping resistor (1 kΩ, ADR 0001 addendum) is calculated and documented but not yet
-  wired or bench-verified.** Without it the SM-24's h=0.25 open-circuit damping will ring at its
-  10 Hz resonance after every stomp, which could distort or duplicate `[trigger]` events during
-  Rung 1. High severity — resolve in the same bench session as the stomp test, before trusting its
-  results. Status: open, pending hardware.
-- **INA333 (Rajiv Electronics module) `REF` pin bias is unconfirmed.** The board's own listed
-  interfaces omit `REF`, though the INA333 IC always has one. If it's internally tied to GND
-  rather than a mid-supply bias, the geophone's AC signal clips on its negative half. Check by
-  shorting `IN+`/`IN-` and measuring `OUT` against `GND` — ~VCC/2 is correct, ~0V is not. High
-  severity (silently corrupts every reading if wrong, no error, just a bad waveform). Status:
-  open, pending hardware, resolve before trusting any bench signal from this front-end.
+- **Geophone damping resistor (1 kΩ, ADR 0001 addendum) — physically verified on hardware,
+  2026-08-16, closed.** Without it the SM-24's h=0.25 open-circuit damping would ring at its 10 Hz
+  resonance after every stomp, distorting or duplicating `[trigger]` events. Checked directly on
+  the bench, not inferred: confirmed a 1 kΩ resistor wired directly across the SM-24's own two
+  leads, before the burial cable, per `device/mcu/README.md`'s wiring section — plus the separate
+  1 kΩ series input-protection resistors in each leg between the damping-resistor node and the
+  INA333's `VIN+`/`VIN-` inputs, also present as documented. Corroborating, not primary, evidence:
+  the 15 Aug 12-stomp protocol's trigger data was tight and single-peaked (mean ratio 4.232, stdev
+  0.166, n=11 — see this document's "Multi-trial stomp validation protocol" entry) with no sign of
+  the post-stomp ringing/envelope-smearing an undamped h=0.25 SM-24 would be expected to produce;
+  the physical check above, not this data, is the primary evidence for closure. Status: **closed**.
+- **INA333 (Rajiv Electronics module) `REF` pin bias — checked against real hardware, 2026-07-30,
+  closed.** The board's own listed interfaces omit `REF`, though the INA333 IC always has one; had
+  it been internally tied to GND rather than a mid-supply bias, the geophone's AC signal would clip
+  on its negative half. Status: **closed** — see the "Build-call 5" section's first entry near the
+  end of this document for the full derivation (`[bias-check] raw≈26890 volts≈1.6806V`, stable
+  across multiple readings) and `device/mcu/README.md`'s "Result (2026-07-30)" line.
 - **Lightning/ESD clamp protection for the geophone's buried cable run is deferred**, not decided.
   A small TVS/clamp across the INA333 differential input pair is worth adding before DFO field
   deployment; not required for bench testing. Low severity now, revisit before burial. Status: open.
