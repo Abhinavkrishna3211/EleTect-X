@@ -270,6 +270,31 @@ criteria — see each entry's status.
   This is still an invented placeholder, not the field-accuracy-derived value `cognition/config.py`
   describes; it must be revisited once real labelled events exist. Status: open, now scoped to
   `services/reflex_loop.py`'s `ALERT_PROBABILITY_THRESHOLD` constant specifically.
+- **`report_footfall_event`'s `probability` and `feature_vector` are an honest placeholder, not the
+  on-MCU TinyML model `device/mpu/services/reflex_loop.py`'s module docstring assumes exists
+  (`config.h`'s `FOOTFALL_PROBABILITY_SATURATION_C`, `state_machine.cpp`/`footfall_features.cpp`,
+  2026-08-14).** `ml/seismic/` is empty — only STA/LTA exists on the MCU today, so there is no trained
+  model to produce a real `probability` or a real 8-feature `feature_vector` behind it. Rather than
+  invent an unrelated number, `footfall_features.cpp` derives `probability` from `peak_ratio` via a
+  saturating function anchored on the two real bench data points this project has (the quiet-floor
+  ceiling ratio 1.13 and the real stomp ratio 4.60, both from the bench stomp-test entry above).
+  **Originally `1 - exp(-k*(ratio-1))`; changed same day to `x^2/(x^2+c^2)` (`x = peak_ratio - 1`,
+  `c = FOOTFALL_PROBABILITY_SATURATION_C = 1.2`)** — the exponential form does not link on the real
+  board (`expf`'s `undefined reference to '__errno'` against `libm_nano.a`; full derivation in the
+  "Raw seismic trigger data..." entry above), a failure invisible to `pio test -e native`'s host libc.
+  The replacement needs only multiplication/division, no libm transcendental call, so no toolchain
+  errno dependency; re-solved from the same stomp anchor (`c` chosen so `x^2/(x^2+c^2) = 0.9` at
+  `x=3.60`) and checked, not independently fit, against the quiet-floor anchor (maps to ~0.012, even
+  tighter than the exponential's ~0.08). `feature_vector` is populated with eight real per-window
+  statistics (`sta`, `lta`, `peak_ratio`, `trigger_index`, window min/max/mean/population stdev)
+  rather than zeros. Both are documented in `footfall_features.h`/`.cpp` as stand-ins, same labeling
+  discipline as the `ALERT_PROBABILITY_THRESHOLD` entry directly above this one. Medium-high severity:
+  every `report_footfall_event` the field trial produces carries this placeholder, not a real model
+  confidence — any fusion/decision output downstream of it inherits the same caveat. Confirmed working
+  end to end on real hardware, 2026-08-14 (see the log capture above) — `mcu_probability=0.865` for a
+  real `sta_lta_ratio=4.040` tap, consistent with this formula. Status: open, pending `ml/seismic`'s
+  not-yet-started TinyML model; the saturating-function shape and the eight chosen features are this
+  session's engineering judgement, not a validated feature design.
 - **The horn-only "request the wire protocol's max, let the MCU clamp" deterrence policy
   (`services/reflex_loop.py`'s `ALERT_HORN_GAIN_PCT=100.0`/`ALERT_HORN_DURATION_MS=65535`) is an
   invented placeholder standing in for the contextual bandit that is supposed to pick which
@@ -918,10 +943,85 @@ would currently yield trigger *counts* only — not the labeled raw/feature data
 classifier needs, and not recoverable retroactively once the trial window has passed.
 
 High severity — this directly undercuts the stated purpose of the field trial as a data-collection
-opportunity, not just a live-detection proof. Effort: wire one real `Bridge.notify("report_footfall_event", ...)`
-call into `state_machine.cpp`'s `kEvent` entry (populating `sta_lta_ratio` from the existing
-`sta_lta_result_t`; `feature_vector` can be a placeholder/zeroed 8-float array until real features
-are designed, since none are computed today — that itself is a separate, not-yet-scoped gap), then
-uncomment and hardware-verify the MPU-side registration in `main.py` one function at a time per the
-existing Bridge `provide()` registration discipline already tracked above. Status: open, flagged
-before Aug 20 so this is a decision made with eyes open rather than discovered after the trial ends.
+opportunity, not just a live-detection proof.
+
+**Status: closed on the MCU/host side, 2026-08-14.** `state_machine.cpp`'s `kSensing` case now calls
+a real `Bridge.notify("report_footfall_event", schema_version, probability, sta_lta_ratio,
+feature_vector)` on every trigger, right before the `kEvent` transition (not from inside `kEvent` as
+originally scoped above — `kSensing` is where the triggering window and `sta_lta_result` are still in
+scope, and the notify needs both). `sta_lta_ratio` is the real `result.peak_ratio`; `feature_vector` is
+no longer a zeroed placeholder — `footfall_features.cpp`'s `footfall_feature_vector()` computes eight
+real per-window statistics (`sta`, `lta`, `peak_ratio`, `trigger_index`, window min/max/mean/population
+stdev). `probability` is a real, honestly-derived saturating function of `peak_ratio`, not the model
+output the schema was originally written assuming — see the new entry below for why that gap is
+tracked separately rather than closed here. All of this is host-tested
+(`tests/test_footfall_features/`) and `pio run -e native` / `pio test -e native` are green (35/35).
+
+Resolving this also required making `Bridge.begin()`/`Bridge.update()` unconditional in `main.cpp`
+rather than gated behind the bench-only `SEISMIC_DEBUG_STREAM_RAW` flag — see the dedicated entry
+below.
+
+**Real-hardware linker failure found and fixed, same day, before the live session below could run.**
+`footfall_probability_from_ratio()`'s original formula (`1 - exp(-k*(ratio-1))`) passed `pio test -e
+native` / `pio run -e native` cleanly but failed to link on the real board:
+`arm-zephyr-eabi-g++`/`ld` reported `undefined reference to '__errno'` from `libm_nano.a`'s `expf`
+(`wf_exp.c`). Root cause: the real UNO Q firmware build links `--specs=nano.specs --specs=nosys.specs
+-nostdlib` against a minimal picolibc-nano math library that does not provide `__errno`, which `expf`
+needs internally for domain/range error signaling — a full host libc (used by `pio test -e native`)
+always provides `__errno`, so this class of failure is invisible to the host build entirely. Fixed by
+replacing the formula with `x^2/(x^2+c^2)` (`x = peak_ratio - 1`, `config.h`'s
+`FOOTFALL_PROBABILITY_SATURATION_C = 1.2f`), which needs only multiplication/division and pulls in no
+libm transcendental call — re-solved against the same two real anchors (quiet floor 1.13 -> ~0.012,
+real stomp 4.60 -> 0.9), re-verified `pio test -e native`/`pio run -e native` green (35/35), then
+re-flashed and confirmed the real board links and boots clean. See the probability-placeholder entry
+below for the updated formula documentation. **Lesson for future MCU work: a host-green build is
+necessary but not sufficient proof of hardware-buildability for any code calling a libm transcendental
+function (`exp`, `log`, `pow`, trig, ...) on this toolchain — `sqrt`/`sqrtf` did not hit this (already
+in `footfall_features.cpp` for the feature vector's stdev, links fine), but that has not been checked
+against every libm entry point, only confirmed empirically for the two actually used here.**
+
+**Closed end to end, live hardware session, 2026-08-14.** With the fix above flashed, the MPU-side
+registration (`main.py`'s `Bridge.provide("report_footfall_event", _on_footfall_event)`) was
+uncommented and pushed — `debug_stream_raw_seismic_sample` (the previously-registered function)
+reconfirmed still running clean afterward (app status `running`, no crash loop, per
+`docs/DEVICE_DEVELOPMENT_WORKFLOW.md` §3's discipline). A real firm tap near the geophone then
+produced this real MPU-side log line (`arduino-app-cli app logs user:eletect-x --follow`):
+
+```text
+INFO:services.reflex_loop:footfall event: mcu_probability=0.865 sta_lta_ratio=4.040 fused_P=0.980 alert=True used=['seismic'] dropped=['acoustic', 'vision'] feature_vector=[0.00387, 0.000958, 4.0397, 511.0, -0.0198, 0.0167, -0.000285, 0.00144]
+INFO:services.reflex_loop:[SAFE_MODE] would call drive_horn(schema_version=1, gain_pct=100.0, duration_ms=65535) - not calling (dry run)
+```
+
+This is the first real trigger this project has ever gotten end to end from the geophone through
+STA/LTA, the notify, `handle_footfall_event`'s fusion/decision, and out the other side as a (dry-run,
+`SAFE_MODE`-gated) deterrence decision. `sta_lta_ratio=4.040` maps to `mcu_probability=0.865` under the
+fixed formula, consistent with the anchors above; `trigger_index=511` and the other seven feature
+values are real per-window statistics, not placeholders; `fused_P=0.980`/`alert=True` show
+`cognition.fusion`/`decision` consuming a real MCU-sourced reading for the first time; the horn was
+correctly not fired, since `SAFE_MODE` was left on (its code default) for this session. Status:
+**closed** — both directions (MCU notify, MPU registration) are proven on real hardware, not just
+host-tested.
+
+## `Bridge.begin()`/`Bridge.update()` moved from bench-only to unconditional production infrastructure (14 Aug)
+
+`main.cpp` previously ran `Bridge.begin()`/`Bridge.update()` (and included `Arduino_RouterBridge.h`)
+gated behind `SEISMIC_DEBUG_STREAM_RAW` — a flag `config.h` itself documents as "MUST be 0 before any
+field sync." `main.cpp`'s own comment had explicitly flagged this as an unresolved decision: reusing a
+debug-only flag name to gate production Bridge wiring would be misleading once a real notify or
+actuator RPC needed to go live. Closing the raw-seismic-trigger gap above forced the decision — with
+the old gate left in place, `state_machine.cpp`'s new `Bridge.notify("report_footfall_event", ...)`
+call could never fire in the real field-flag build, silently reintroducing the same gap it was meant
+to close.
+
+Resolution: `Bridge.begin()`/`Bridge.update()`/the `Arduino_RouterBridge.h` include are now
+unconditional in `main.cpp`. `SEISMIC_DEBUG_STREAM_RAW` itself is untouched and still correctly gates
+its own bench-only raw-sample relay in `geophone.cpp` — only the Bridge transport lifecycle moved.
+Confirmed safe on both sides this change touches: on real hardware, `Arduino_RouterBridge.h` "only
+exists as a real library on the board" (this document's UNO Q board-support entry above) — the old
+`#if` was a compile-scope choice, not a hardware necessity, so Bridge is available regardless of any
+flag. On the host build, `hostshim/host_shim.cpp` already declares `BridgeClass Bridge` and its
+`begin()`/`update()` unconditionally (no `#if` guard), so `pio test -e native` needed no hostshim
+changes. The still-commented `Bridge.provide()` actuator registrations in `main.cpp` are unaffected —
+this change makes the *notify* direction reachable, it does not register a `provide()` handler or
+change the one-at-a-time hardware-verification discipline those still require. Status: **closed** —
+decision made and recorded; host build/test green.

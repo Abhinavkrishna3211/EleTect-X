@@ -1,4 +1,4 @@
-# EleTect X — Handover (last updated 14 Aug 2026, night — real stomp test + field-flag rate done)
+# EleTect X — Handover (last updated 14 Aug 2026, night — report_footfall_event closed end to end, real hardware)
 
 This file exists so work can continue with zero lost context if the planning session moves to a
 different Claude account/session. Read this file, then `CONTEXT.md`, before doing anything else.
@@ -106,15 +106,58 @@ what the field test produces (see `edge-impulse-hackster-writeup` skill when tha
       `EVENT_MAX_MS` elapsed, no ratio-based detrigger logic exists anywhere. Left unchanged since
       there's no live logic to point real data at. Tracked as an open item in `KNOWN_GAPS.md`, not a
       closed calibration.
-    - **New high-severity finding: no raw trigger data reaches the MPU in the real field build.**
-      `log_window_csv()` and `SEISMIC_DEBUG_STREAM_RAW`'s relay are both correctly bench-only-gated
-      (as intended), but the schema-documented real path — `report_footfall_event`, MPU side fully
-      built and tested — is never called from the MCU: `state_machine.cpp`'s `kEvent` case is a
-      comment-only stub, no `Bridge.notify()` call exists anywhere in the file. **As the code stands
-      today, the Aug 20 field trial would produce bare trigger timestamps only — no raw window, no
-      feature vector, nothing usable for the future `ml/seismic` classifier.** Full writeup in
-      `KNOWN_GAPS.md`'s "Raw seismic trigger data does not reach the MPU..." entry. Not fixed this
-      session — flagged before Aug 20 so it's a decision made with eyes open.
+    - **Raw trigger data reaching the MPU: closed on the MCU/host side, later 14 Aug session.**
+      `state_machine.cpp`'s `kSensing` case now calls a real
+      `Bridge.notify("report_footfall_event", schema_version, probability, sta_lta_ratio,
+      feature_vector)` on every STA/LTA trigger, right before the `kEvent` transition. `sta_lta_ratio`
+      is the real `result.peak_ratio`; `feature_vector` is 8 real per-window statistics (`sta`, `lta`,
+      `peak_ratio`, `trigger_index`, window min/max/mean/population stdev) computed by the new
+      `footfall_features.cpp`/`.h`, host-tested (`tests/test_footfall_features/`, 6 known-answer
+      tests). `probability` is a real, honestly-derived saturating function of `peak_ratio` — **not**
+      the on-MCU TinyML model output the schema was originally written assuming; `ml/seismic/` is
+      still empty, so this is a documented placeholder, tracked as its own open gap in
+      `KNOWN_GAPS.md` right next to the `ALERT_PROBABILITY_THRESHOLD` entry. Closing this also
+      required making `Bridge.begin()`/`Bridge.update()` unconditional in `main.cpp` (previously
+      gated behind the bench-only `SEISMIC_DEBUG_STREAM_RAW` flag, which would have silently kept the
+      new notify from ever firing in the real field build) — confirmed safe on real hardware and the
+      host build alike, full reasoning in `KNOWN_GAPS.md`'s dedicated entry for that decision.
+      `pio run -e native` and `pio test -e native` are both green, 35/35 tests passing.
+      **Real-hardware linker failure found and fixed, same night, before the live session below could
+      run.** The original `probability` formula (`1 - exp(-k*(ratio-1))`) passed the host build cleanly
+      but failed to link on the real board: `arm-zephyr-eabi-g++`/`ld` reported `undefined reference to
+      '__errno'` from `libm_nano.a`'s `expf`. Root cause: the real UNO Q firmware build links
+      `--specs=nano.specs --specs=nosys.specs -nostdlib` against a minimal picolibc-nano math library
+      that doesn't provide `__errno`, which `expf` needs internally for domain/range error signaling —
+      invisible to `pio test -e native` because the host build always has a full libc. Fixed by
+      replacing the formula with `x^2/(x^2+c^2)` (`x = peak_ratio - 1`, `config.h`'s
+      `FOOTFALL_PROBABILITY_SATURATION_C = 1.2f`), which needs only multiplication/division and calls no
+      libm transcendental function — re-solved against the same two real anchors (quiet floor 1.13 ->
+      ~0.012, real stomp 4.60 -> 0.9), re-verified host-green (35/35), then re-flashed and confirmed the
+      real board links and boots clean. **Lesson for future MCU work:** a host-green build proves
+      nothing about hardware-buildability for code calling a libm transcendental function (`exp`, `log`,
+      `pow`, trig, ...) on this toolchain — `sqrt`/`sqrtf` (already used in `footfall_features.cpp` for
+      the feature vector's stdev) does link fine, but that's only confirmed for the two functions
+      actually used here, not the whole libm surface. Full derivation in `KNOWN_GAPS.md`.
+
+      **Closed end to end, live hardware session, 14 Aug night.** With the fix above flashed, the
+      MPU-side registration (`Bridge.provide("report_footfall_event", _on_footfall_event)` in `main.py`)
+      was uncommented and pushed — `debug_stream_raw_seismic_sample` reconfirmed still running clean
+      afterward (`app list` -> `running`, no crash loop), satisfying the one-at-a-time discipline. A real
+      firm tap near the geophone then produced this real MPU-side log line:
+
+      ```text
+      INFO:services.reflex_loop:footfall event: mcu_probability=0.865 sta_lta_ratio=4.040 fused_P=0.980 alert=True used=['seismic'] dropped=['acoustic', 'vision'] feature_vector=[0.00387, 0.000958, 4.0397, 511.0, -0.0198, 0.0167, -0.000285, 0.00144]
+      INFO:services.reflex_loop:[SAFE_MODE] would call drive_horn(schema_version=1, gain_pct=100.0, duration_ms=65535) - not calling (dry run)
+      ```
+
+      This is the first real trigger this project has gotten end to end from the geophone through
+      STA/LTA, the notify, `handle_footfall_event`'s fusion/decision, and out the other side as a
+      (dry-run, `SAFE_MODE`-gated) deterrence decision — real per-window `feature_vector`, not
+      placeholders; `fused_P=0.980`/`alert=True` show `cognition.fusion`/`decision` consuming a real
+      MCU-sourced reading for the first time; horn correctly not fired since `SAFE_MODE` was left on.
+      Full writeup, including the exact linker error text, in `KNOWN_GAPS.md`'s "Raw seismic trigger
+      data does not reach the MPU..." entry, now marked **closed** — both directions (MCU notify, MPU
+      registration) proven on real hardware, not just host-tested.
 - **`device/mpu`** — **no longer a bench-only stub.** `main.py` is now the real entry point:
   `cognition/decision.py` (pure `decide()`) and `services/reflex_loop.py` (the imperative shell —
   `handle_footfall_event`/`handle_acoustic_event`) implement the actual sense→fuse→decide→actuate loop,
@@ -132,13 +175,14 @@ what the field test produces (see `edge-impulse-hackster-writeup` skill when tha
   (vision uses a fixed pretrained detector per CONTEXT.md §4), but relevant to the "scientifically
   rigorous" goal and the Hackster write-up's DSP/model section.
 
-**Explicit reprioritization, decided 14 Aug evening, now satisfied:** finishing and hardening the
+**Explicit reprioritization, decided 14 Aug evening, now fully satisfied:** finishing and hardening the
 geophone subsystem was to come before flashing/firing the fire-test harness and before any live Bridge
 registration. The geophone bring-up items (I2C bus confirmation, cadence-fix verified on real hardware,
-real field-flag sample rate, real stomp test) are now all done as of 14 Aug night — see above. The
-raw-data-to-MPU gap (new top item above) is the next thing that should be closed before Bridge
-registration/fire-test-harness work resumes, since it's the same "make the geophone subsystem actually
-useful for the field trial" thread, not a new distraction.
+real field-flag sample rate, real stomp test) and the raw-data-to-MPU gap (`report_footfall_event`,
+including the one live Bridge registration it required) are all done and closed on real hardware as of
+14 Aug night — see above. The fire-test harness (flash + fire on a real actuator) and the remaining
+`drive_horn`/`drive_led`/`pulse_ir`/`get_system_state` Bridge registrations are next in this thread,
+same one-at-a-time discipline.
 
 `docs/ELETECT_X_PITCH.md` — a full project pitch/description doc was also written this session
 (problem, solution, how it works, full tech stack, honest current status, contest tie-in). Useful if
@@ -204,14 +248,21 @@ kept up to date live through tonight's session. Highest-priority items as of the
    rate (226.98 Hz), and the real human stomp test are all done and confirmed on hardware — see
    `device/mcu` section above and `docs/KNOWN_GAPS.md`'s "STA/LTA field-flag rate re-measurement and
    real stomp-test calibration" entry. `STA_LTA_TRIGGER_RATIO` is now validated (kept at 4.0), not
-   assumed. **New replacement top item: no raw trigger data reaches the MPU in the field build** —
-   `report_footfall_event` is never called from `state_machine.cpp` (comment-only stub), so the Aug 20
-   trial would currently yield trigger timestamps only, nothing usable for `ml/seismic`. High severity,
-   see `KNOWN_GAPS.md`'s "Raw seismic trigger data does not reach the MPU..." entry for the fix.
+   assumed. **`report_footfall_event` is now closed end to end, real hardware, 14 Aug night** —
+   `state_machine.cpp` calls `Bridge.notify()` with real `sta_lta_ratio`/`feature_vector` and a
+   documented placeholder `probability` on every trigger, a real-hardware `expf`/`__errno` linker
+   failure was found and fixed same night, the MPU-side registration was uncommented and pushed with no
+   regression to `debug_stream_raw_seismic_sample`, and a real stomp produced a real captured MPU log
+   line (`mcu_probability=0.865`, `fused_P=0.980`, `alert=True`). See `device/mcu` section above and
+   `KNOWN_GAPS.md`'s "Raw seismic trigger data does not reach the MPU..." entry, now marked **closed**.
+   `SAFE_MODE` is still on (code default) — the horn was correctly not fired. Remaining before the
+   field trial itself: `ELETECT_SAFE_MODE=0` is an explicit live-session step, not yet done, and only
+   for a session with a human present.
 2. **The MPU integration loop is no longer missing** — it exists now (`device/mpu/main.py`,
-   `services/reflex_loop.py`), dry-run by default via `SAFE_MODE`. What's left is a live, one-at-a-time
-   Bridge registration session on both the MCU and MPU sides (code is written and commented out, ready
-   to go) — deliberately deferred behind the geophone work above.
+   `services/reflex_loop.py`), dry-run by default via `SAFE_MODE`. `report_footfall_event`'s
+   registration is now live and proven on hardware (item 1 above); `report_acoustic_event`'s
+   registration is still written and commented out, same one-at-a-time discipline, deliberately out of
+   scope for this pass.
 3. **The fire-test harness is built and host-verified but never flashed or fired on real hardware.**
    Also deliberately behind the geophone work in the current priority order.
 4. **LoRa `Serial` vs `Serial1` conflict with Bridge — mostly resolved on paper, not yet on hardware.**
