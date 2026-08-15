@@ -1104,36 +1104,56 @@ end. Hard boundary respected — `git diff` on `config.h` touches zero character
 mentioning their names by name, and the unrelated `GEOPHONE_WINDOW_STALE_MS`/`STA_LTA_DETRIGGER_RATIO`
 lines above/below them).
 
-**Multi-trial stomp validation protocol — proposed, not yet run (15 Aug).** The single-stomp bench
-test above (14 Aug) validated `STA_LTA_TRIGGER_RATIO` against exactly one real stomp; it cannot say
+**Multi-trial stomp validation protocol — run 15 Aug, real hardware.** The single-stomp bench test
+above (14 Aug) validated `STA_LTA_TRIGGER_RATIO` against exactly one real stomp; it could not say
 anything about trial-to-trial variance in a real human stomp's ratio, or about `report_footfall_event`
-firing reliably across repeated triggers rather than once. Requires Abhinav physically present at the
-board to stomp — not run yet. Proposed protocol, to hand to him as-is:
+firing reliably across repeated triggers rather than once. Executed against real hardware (build
+flashed via `arduino-app-cli app stop`/`app start` over SSH, board discovered at `192.168.1.10` since
+mDNS resolution of `eletect-x.local` fails from both Windows git-bash and WSL2 — see
+`docs/eletect-x-applab-notes.md`), field config (`SEISMIC_DEMO_MODE=0`,
+`EVENT_MAX_MS=15000`/`COOLDOWN_MS=20000`), `SEISMIC_DEBUG_VERBOSE=1` temporarily during the run, 12
+stomps at 60 s intervals, 60 s quiet baseline before the first stomp. Console captured via
+`scripts/capture_geophone_console.py` over the board's existing socat/nc bridge
+(`scripts/bench-logs/stomp_protocol_20260815.log`, gitignored, reproducible via the script).
 
-- **Build config for the run:** field values (`SEISMIC_DEMO_MODE=0`, so `EVENT_MAX_MS=15000` /
-  `COOLDOWN_MS=20000` — the actual deployed cycle, not the shortened demo one), `SEISMIC_DEBUG_VERBOSE=1`
-  temporarily (same as the single-stomp test, for quantified ratio numbers around every event; revert to
-  `0` immediately after the session, same discipline as before).
-- **12 stomps** (within the suggested 10-15 range: enough for a real mean/stdev without an
-  unreasonably long single bench session).
-- **60 s between the start of each stomp and the next.** `EVENT_MAX_MS + COOLDOWN_MS = 35 s` is the
-  hard floor for the state machine to cycle `kEvent -> kCooldown -> kIdle -> kSensing` and be ready to
-  arm again; 60 s gives ~25 s of margin for confirming on the console that the cycle actually completed
-  (state returns to armed) before the next stomp, not just guessing the timing.
-- **60 s of quiet baseline before the first stomp and 60 s after the last one** (comparable to the
-  ~35 s/~46 s halves the single-stomp test already used, slightly longer here since a 12-trial run makes
-  the baseline itself worth characterizing more precisely — mean/stdev of the quiet-floor ratio, not
-  just its range).
-- **Total session length: ~14 minutes** (60 s + 12x60 s + 60 s).
-- **Capture per trial:** the `[trigger]` line's `ratio=`, the `[notify]` line's `probability=`, and
-  (from the MPU-side console/log, same as the 14 Aug end-to-end example) whether
-  `report_footfall_event` actually fired and what `fused_P`/`alert` it produced — not just "it worked."
-  Also note any false trigger (a `[trigger]` line with no corresponding real stomp) or missed trigger (a
-  real stomp with no `[trigger]` line) during either baseline period or a trial window.
-- **Report afterward:** real computed mean and standard deviation of the 12 stomp ratios, detection
-  rate (stomps that produced a trigger / 12), false-trigger count across both baselines, and whether
-  `report_footfall_event` fired correctly on every real trigger — not a qualitative "it worked" summary.
+**MCU-side results (from `[trigger]`/`[notify]` console lines):**
 
-Status: **open** — protocol designed, blocked on Abhinav's physical presence to execute. Will be
-updated with real computed statistics once run, and the corresponding commit will be kept separate
-from this session's code-only commit.
+- **11/12 stomps detected (91.7%).** Trigger ratios: 4.18, 4.01, 4.20, 4.34, 4.05, 4.18, 4.32, 4.36,
+  4.11, 4.60, 4.20 — mean **4.232**, stdev **0.166**, n=11.
+- `[notify]` probabilities: mean **0.8784**, stdev **0.0105**, n=11.
+- **One genuine near-miss** (stomp 4 of 12, between the t=313251 and t=432745 triggers): peak ratio
+  **3.80**, just under the 4.0 threshold — confirmed via the surrounding `[seismic]` lines, not an
+  unexplained gap. A real human stomp landed below threshold; not a bug.
+- **Zero false triggers** across the full pre-stomp quiet baseline (n=688 samples, mean ratio
+  **1.149**, stdev **0.031**, range 1.08–1.23).
+- Post-trigger-12 tail: ratio decayed back to the quiet floor (~1.10–1.21) within ~9 s of the last
+  trigger and stayed quiet through the rest of the capture. The capture window (`--duration 820`)
+  ended at t=871966 ms, before the state machine's `EVENT_MAX_MS + COOLDOWN_MS` (35 s) dwell from the
+  last trigger completed (would re-arm to `kSensing` at t≈888619 ms) — so this run captured a quiet
+  *sensor reading* during the tail of `kCooldown`, not a full 60 s trailing baseline with the system
+  back in armed `kSensing`. Not a gap in the result (the sensor's return to quiet floor is the thing
+  being checked), just a scope note on what wasn't captured.
+
+**MPU-side results (`report_footfall_event` → `reflex_loop.handle_footfall_event`):** confirmed via
+the raw Docker json-log file on the board (`docker logs` itself fails on this container with
+`invalid character '\x00' looking for beginning of value` — the log file has accumulated across
+multiple days/restarts without rotation and its stream reader chokes partway through; worked around
+by reading the file directly, `docker run --rm -v /var/lib/docker/containers:/logs:ro alpine grep/head/tail
+...` using the `arduino` user's `docker` group membership, since passwordless `sudo` isn't configured
+on the board). All **11/11** MCU-side triggers produced a matching MPU-side `footfall event` log line,
+timestamps 18:09:11–18:20:13 UTC, all with `alert=True`:
+
+- MPU-computed `sta_lta_ratio` matches the MCU's own value to logging precision (e.g. 4.182≈4.18,
+  4.596≈4.60) — mean **4.234**, stdev **0.165**.
+- `fused_P`: 0.982, 0.979, 0.982, 0.984, 0.980, 0.982, 0.983, 0.984, 0.981, 0.986, 0.982 — mean
+  **0.9823**, stdev **0.00195**.
+- Zero MPU-side false alerts logged outside these 11 events in the surrounding window.
+- Each event followed by the expected `[SAFE_MODE] would call drive_horn(...) - not calling (dry run)`
+  line — reflex loop is still in dry-run mode, horn actuator not actually driven (expected, unrelated
+  to this validation).
+
+Status: **closed** — 11/12 physical detection rate with the one miss explained by a genuine
+sub-threshold stomp (not a system fault), zero false positives on either side of the Bridge, and
+`report_footfall_event`/`fused_P`/`alert` confirmed end-to-end for every MCU trigger. Board re-synced
+and re-flashed with `SEISMIC_DEBUG_VERBOSE` reverted to `0` after the run, confirmed quiet
+(ratio 1.09–1.15) on the console before leaving it.

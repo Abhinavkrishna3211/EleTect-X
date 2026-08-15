@@ -1,4 +1,4 @@
-# EleTect X — Handover (last updated 14 Aug 2026, night — report_footfall_event closed end to end, real hardware)
+# EleTect X — Handover (last updated 15 Aug 2026, night — multi-trial stomp validation closed, MCU+MPU confirmed on real hardware)
 
 This file exists so work can continue with zero lost context if the planning session moves to a
 different Claude account/session. Read this file, then `CONTEXT.md`, before doing anything else.
@@ -130,11 +130,21 @@ what the field test produces (see `edge-impulse-hackster-writeup` skill when tha
       `device/mcu/README.md` updated to match. **Hard boundary respected**: `git diff` on `config.h`
       touches zero characters of the `STA_LTA_TRIGGER_RATIO`/`STA_SAMPLES`/`LTA_SAMPLES` `#define`
       lines themselves.
-    - **Not yet done, this same pass:** flashing to real hardware to confirm on a live console (needs
-      Abhinav physically present to operate the board / stomp) and the multi-trial stomp validation
-      protocol's actual execution (also needs Abhinav present) — both blocked pending his explicit
-      go-ahead, per his instruction mid-session. The protocol design itself and everything host-testable
-      is done; see `docs/KNOWN_GAPS.md` for the proposed protocol once it's written up.
+    - **Real hardware flash + multi-trial stomp validation: done, 15 Aug.** Flashed and confirmed on a
+      live console (board discovered at `192.168.1.10` — mDNS `eletect-x.local` doesn't resolve from
+      Windows git-bash or WSL2; see `docs/eletect-x-applab-notes.md`). Quiet floor unchanged post-fix
+      (1.09–1.15, matching the 14 Aug baseline). Ran the 12-stomp/60s-interval protocol against a
+      lean-flag-toggle build: **11/12 detected** (mean trigger ratio 4.232, stdev 0.166; mean notify
+      probability 0.8784, stdev 0.0105), one genuine sub-threshold miss (peak ratio 3.80, explained via
+      the surrounding `[seismic]` lines, not dismissed), **zero false triggers** across a 688-sample
+      quiet baseline (mean 1.149, stdev 0.031). MPU-side confirmed all **11/11** triggers produced a
+      matching `report_footfall_event` with `alert=True` and `fused_P` 0.979–0.986 — required reading
+      the board's raw Docker json-log directly (`docker run --rm -v /var/lib/docker/containers:/logs:ro
+      alpine ...`, using the `arduino` user's `docker` group access) since `docker logs` itself fails on
+      this container with a stream-corruption error and passwordless `sudo` isn't configured on the
+      board. Full statistics and methodology in `docs/KNOWN_GAPS.md`'s 2026-08-15 multi-trial entry,
+      now marked **closed**. Board left synced and re-flashed with `SEISMIC_DEBUG_VERBOSE=0` (lean field
+      build), confirmed quiet before ending the session.
     - **Raw trigger data reaching the MPU: closed on the MCU/host side, later 14 Aug session.**
       `state_machine.cpp`'s `kSensing` case now calls a real
       `Bridge.notify("report_footfall_event", schema_version, probability, sta_lta_ratio,
