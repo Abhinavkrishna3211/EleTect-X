@@ -173,6 +173,15 @@ the observed floor ceiling by ~3.5x and the stomp clears the threshold by ~15% �
 was never validated this way and was removed 2026-08-15 as dead code — `kEvent` only ever
 exits on `EVENT_MAX_MS` elapsed, never a ratio; see `docs/KNOWN_GAPS.md`'s 2026-08-15 entry.
 
+**Multi-trial follow-up: done, 2026-08-15.** 12 stomps at 60 s intervals against the same
+lean-flag-toggle build; 11/12 detected (mean trigger ratio 4.232, stdev 0.166), one genuine
+sub-threshold miss (peak ratio 3.80) explained rather than dismissed, zero false triggers
+across a 688-sample quiet baseline (mean ratio 1.149). MPU-side `report_footfall_event` fired
+for all 11/11 triggers with matching `sta_lta_ratio` and `fused_P` 0.979–0.986 — confirmed via
+the board's raw Docker json-log (`docker logs` itself fails on this container with a stream
+corruption error; see `docs/KNOWN_GAPS.md`'s 2026-08-15 multi-trial entry for the workaround
+and full statistics).
+
 ## Layout
 
 ```text
