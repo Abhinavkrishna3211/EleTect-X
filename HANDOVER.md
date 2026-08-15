@@ -1,4 +1,4 @@
-# EleTect X — Handover (last updated 15 Aug 2026, night — multi-trial stomp validation closed, MCU+MPU confirmed on real hardware)
+# EleTect X — Handover (last updated 15 Aug 2026, night — multi-trial stomp validation closed on real hardware; fire-test harness software path verified on real hardware, physical actuators not yet wired)
 
 This file exists so work can continue with zero lost context if the planning session moves to a
 different Claude account/session. Read this file, then `CONTEXT.md`, before doing anything else.
@@ -41,9 +41,14 @@ what the field test produces (see `edge-impulse-hackster-writeup` skill when tha
   doc's last version) added a lot — read `docs/KNOWN_GAPS.md` in full, it's the accurate record, this
   bullet is just a pointer:**
   - `src/fire_test.h`/`.cpp` — manual serial-command fire-test harness (`docs/specs/mcu-fire-test-harness.md`),
-    host-built and host-tested, gated behind `FIRE_TEST_HARNESS` (default 0, **never yet flashed to real
-    hardware or fired on a real actuator** — that step was queued for a live session that hadn't happened
-    when the account switch hit).
+    host-built and host-tested, gated behind `FIRE_TEST_HARNESS` (default 0). **Software path run on
+    real hardware, 15 Aug:** flashed with the flag on, all four commands (`1`/`2`/`3`/`4`) produced the
+    correct full `[firetest]` ack, and pressing `1` twice inside 30 s correctly refused the second
+    attempt (`allowed=0`, cooldown gate working). **Physical activation not confirmed — horn, LED, and
+    IR are not wired to the board yet**, so this only proves the command-parse/rule-gate/ack-print
+    path, not that any actuator actually switches on. Flag reverted to `0` and re-flashed before ending
+    the session, console confirmed silent. Re-run once wiring exists, watching/listening this time —
+    see `docs/KNOWN_GAPS.md`'s fire-test-harness entry for the full detail.
   - `src/bridge_handlers.h`/`.cpp` — MCU-side Bridge adapters for `drive_horn`/`drive_led`/`pulse_ir`/
     `get_system_state`, written and host-tested. The four `Bridge.provide()` lines in `main.cpp` are
     written but commented out, one per line, explicitly pending a live one-at-a-time hardware
@@ -302,8 +307,9 @@ kept up to date live through tonight's session. Highest-priority items as of the
    registration is now live and proven on hardware (item 1 above); `report_acoustic_event`'s
    registration is still written and commented out, same one-at-a-time discipline, deliberately out of
    scope for this pass.
-3. **The fire-test harness is built and host-verified but never flashed or fired on real hardware.**
-   Also deliberately behind the geophone work in the current priority order.
+3. **The fire-test harness's software path is now verified on real hardware (15 Aug)** — correct
+   `[firetest]` acks and cooldown refusal for all four commands. **Physical activation is not yet
+   confirmed: horn, LED, and IR are not wired to the board.** Re-run once wiring exists.
 4. **LoRa `Serial` vs `Serial1` conflict with Bridge — mostly resolved on paper, not yet on hardware.**
    A documentation pass (official datasheet + `Arduino_RouterBridge` README + Arduino Forum reports,
    citations in `docs/eletect-x-applab-notes.md`) found a real lean toward `Serial1` being Bridge's own

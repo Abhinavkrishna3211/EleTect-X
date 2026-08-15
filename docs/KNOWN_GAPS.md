@@ -56,7 +56,9 @@ criteria — see each entry's status.
   trigger-to-audio-seek latency backs it.** `horn.cpp`'s fire sequence depends on this value being
   long enough to cover DFPlayer seek (avoiding a pop) but not so long it clips the start of the
   deterrence clip. Medium severity. Effort: bench measurement with an oscilloscope or audio
-  capture across a range of trigger-to-`AMP_ENABLE` delays. Status: open.
+  capture across a range of trigger-to-`AMP_ENABLE` delays. Confirmed 15 Aug: the horn is not yet
+  wired to the board at all, so this cannot be bench-measured until wiring exists — the fire-test
+  harness (see its own entry below) is ready to drive the measurement once it does. Status: open.
 - **`drive_horn`'s `gain_pct` clamp is acknowledged but not yet wired to a physical volume
   control.** `horn.cpp` clamps and acks `gain_pct` via `rule_gate_apply()`, but nothing today
   actually varies DFPlayer output volume or amp gain by that percentage — the horn always plays at
@@ -557,10 +559,21 @@ criteria — see each entry's status.
   `drive_horn`/`drive_led`/`pulse_ir` directly and see the full ack (`allowed`/`duration_ms`/
   `gain_pct`/`clamped`) printed as `[firetest] ...` — the tool `HORN_AMP_ENABLE_DELAY_MS` (invented,
   see above) and the horn/LED/IR burst-cap and cooldown entries (also invented, see above) need for
-  a real bench pass, but running that pass is still a hardware session that has not happened. Gated
-  behind `FIRE_TEST_HARNESS` (`config.h`, default 0), same discipline as the seismic bench flags.
-  Status: open — tool built and host-tested (`pio test -e native`), not yet run against real
-  hardware; does not close the delay/burst-cap/cooldown gaps above, only supplies the mechanism to.
+  a real bench pass. Gated behind `FIRE_TEST_HARNESS` (`config.h`, default 0), same discipline as the
+  seismic bench flags. **Software path run against real hardware, 15 Aug:** flashed with
+  `FIRE_TEST_HARNESS=1`, all four commands (`1`/`2`/`3`/`4`) sent over the board's console bridge and
+  each produced the expected full `[firetest]` ack (`allowed=1`, correct `duration_ms`/`gain_pct` per
+  the bench defaults, `clamped=0`); pressing `1` a second time immediately after produced
+  `allowed=0 duration_ms=0 gain_pct=0.00 clamped=0` — the `HORN_COOLDOWN_MS` gate refusing correctly,
+  not a bug. **Physical activation NOT confirmed — horn, LED, and IR are not yet wired to the board**
+  (confirmed with Abhinav before running the sequence), so this run only proves
+  `fire_test_parse_command()`/`fire_test_service()`/`rule_gate_apply()`/the ack print path are wired
+  correctly end to end on real firmware, not that the actuators themselves switch on. `config.h`
+  reverted to `FIRE_TEST_HARNESS=0` and re-flashed immediately after; console confirmed silent (no
+  `[firetest]` response to a test keystroke) before ending the session. Status: **open, narrower
+  scope** — the software path is verified, but `HORN_AMP_ENABLE_DELAY_MS`'s real value and the
+  burst-cap/cooldown constants' physical behavior still cannot be measured until the actuators are
+  wired; re-run the same checklist once wiring exists, this time watching/listening for each fire.
 - **`SEISMIC_DEBUG_STREAM_RAW`'s committed default (`config.h`, `1`) broke `pio test -e native` and
   `pio run -e native` outright, for the whole tree, not just the fire-test harness's own additions.**
   Found running that harness's verification checklist: at `=1`, `main.cpp` and `geophone.cpp` both
