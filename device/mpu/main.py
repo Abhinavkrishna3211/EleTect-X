@@ -1,46 +1,61 @@
-"""BENCH-ONLY placeholder Python entry point for the eletect-x Arduino App.
+"""Production Python entry point for the eletect-x Arduino App.
 
-This is NOT the production MPU entry point. It exists only so App Lab's
-`app.yaml` parser accepts the app and `arduino-app-cli app restart` has
-something to build/run - arduino-app-cli requires a `main.py` at the root of
-`python/` by convention (not something `app.yaml` itself declares), and this
-repo has never tracked one (confirmed via `git log -- device/mpu/main.py`
-before this file was added). A file matching this name previously existed
-on the board only, untracked, most likely left over from App Lab's original
-"New App" scaffolding wizard - a `sync-to-board.sh` run legitimately deleted
-it (`--delete` mirrors the repo exactly, and the repo had nothing here), which
-is what broke the app tonight (docs/KNOWN_GAPS.md, "eletect-x python/main.py
-missing" entry).
+The real sense -> fuse -> decide -> actuate loop (CONTEXT.md 4) is wired
+against cognition.fusion (via services/reflex_loop.py) and against
+bridge/rpc.py's schema - reflex_loop.py's handler signatures and
+AcousticClass usage match rpc.py's stubs, and are checked against them by
+eye at every edit; rpc.py itself stays signature-only and is never called
+here (raise NotImplementedError bodies - see that module's own header for
+why). The loop logic lives in services/reflex_loop.py, not in this file, so
+it can be pytest-tested on a dev laptop with no board attached
+(tests/test_reflex_loop.py) - this file only wires the real
+arduino.app_utils.Bridge in and registers handlers, mirroring
+device/mpu/bench/ping/python/main.py's own thin-wiring pattern.
 
-The real production entry point - wiring `bridge/`, `cognition/`,
-`perception/`, and `services/` together into the actual sense -> fuse ->
-decide -> actuate loop - is untracked, missing, and needs its own design
-pass before field deployment. Nothing below should be read as a preview of
-that design; this file deliberately does not import or call anything from
-`bridge/rpc.py` (every function there is a signatures-only stub that raises
-`NotImplementedError` - see that module's own header) or from `cognition/`,
-`perception/`, `services/`. Wiring any of those in here would misrepresent
-unfinished integration work as done.
+SAFE_MODE (services/reflex_loop.py, default on) gates the one real side
+effect this loop can have - drive_horn - behind a dry-run log. Flipping it
+off is an explicit environment step for a live session with a human present
+(`export ELETECT_SAFE_MODE=0`), never a code default.
 
-Mirrors device/mpu/bench/ping/python/main.py's own pattern in every other
-respect: import the Bridge SDK (so a real import-time failure of the App Lab
-Python environment surfaces here rather than being masked), block forever.
-Same UNVERIFIED caveat as that file: it is not confirmed whether App Lab's
-own runtime keeps the process alive after registration alone or whether the
-script itself must block - blocking is the safe assumption either way.
+Registration state, per the one-at-a-time discipline
+`DEVICE_DEVELOPMENT_WORKFLOW.md` 3 documents (a live, reproducible bug where
+an additional `Bridge.provide()` broke previously-working ones on the same
+sketch - "not paranoia, a documented current failure mode",
+`ENGINEERING_CONVENTIONS.md` 8): `debug_stream_raw_seismic_sample` and
+`_on_footfall_event` are the two functions registered below as of the
+2026-08-14 live session wiring up report_footfall_event end to end -
+`_on_footfall_event` was added second, per that discipline, with
+`debug_stream_raw_seismic_sample`'s continued operation checked afterward
+(see docs/KNOWN_GAPS.md for that session's result). `_on_acoustic_event` is
+written and ready - reflex_loop.py's logic behind it is host-tested - but
+its `Bridge.provide()` call stays commented out until a future live session
+flashes/tests it against real hardware, same discipline as the MCU-side
+actuator registrations (device/mcu/src/main.cpp). Do not uncomment more
+than one per test cycle; confirm the existing registrations still work
+after each addition before moving to the next.
 
-One registration, per the one-at-a-time discipline `DEVICE_DEVELOPMENT_WORKFLOW.md`
-3 documents (a live, reproducible bug where an additional `Bridge.provide()`
-broke previously-working ones on the same sketch): the receive side of
-SEISMIC_DEBUG_STREAM_RAW's second, Bridge.notify()-based delivery path
-(device/mcu/src/geophone.cpp - see config.h for the full rationale). This is
-still schema-free and disposable, same as the rest of this file; it does not
-touch bridge/rpc.py's stubs.
+Same UNVERIFIED caveat this file has always carried: it is not confirmed
+whether App Lab's own runtime keeps the process alive after registration
+alone or whether the script itself must block - blocking is the safe
+assumption either way.
 """
 
+import logging
 import time
 
 from arduino.app_utils import Bridge
+
+from bridge.rpc import AcousticClass
+from services import config, reflex_loop
+
+logging.basicConfig(level=getattr(logging, config.LOG_LEVEL))
+logger = logging.getLogger(__name__)
+
+logger.info(
+    "eletect-x reflex loop starting, SAFE_MODE=%s (export ELETECT_SAFE_MODE=0 "
+    "to disable dry-run for a live session)",
+    reflex_loop.SAFE_MODE,
+)
 
 
 def debug_stream_raw_seismic_sample(volts: float) -> None:
@@ -60,10 +75,56 @@ def debug_stream_raw_seismic_sample(volts: float) -> None:
         volts: Raw geophone reading in volts, as sent by geophone_cpp's
             Bridge.notify("debug_stream_raw_seismic_sample", volts) call.
     """
-    print(f"{volts:.6f}")
+    # flush=True: stdout is captured via `docker logs`, not a TTY, so Python
+    # defaults to block-buffering here - without an explicit flush, samples
+    # sit in the buffer and reach the log in delayed bursts instead of as
+    # they arrive, which reads as a discontinuous/gappy line on the live plot.
+    print(f"{volts:.6f}", flush=True)
 
 
 Bridge.provide("debug_stream_raw_seismic_sample", debug_stream_raw_seismic_sample)
+
+
+def _on_footfall_event(
+    schema_version: int,
+    probability: float,
+    sta_lta_ratio: float,
+    feature_vector: list[float],
+) -> None:
+    """Bridge.provide() adapter for report_footfall_event - see schema.md.
+
+    Thin wrapper: the real logic is reflex_loop.handle_footfall_event(),
+    tested independently in tests/test_reflex_loop.py. This function exists
+    only to bind the real Bridge.call-backed drive_horn in as the injected
+    dependency reflex_loop's signature requires.
+    """
+    reflex_loop.handle_footfall_event(
+        schema_version,
+        probability,
+        sta_lta_ratio,
+        feature_vector,
+        drive_horn=lambda sv, gain_pct, duration_ms: Bridge.call(
+            "drive_horn", sv, gain_pct, duration_ms
+        ),
+    )
+
+
+def _on_acoustic_event(
+    schema_version: int,
+    class_label: AcousticClass,
+    confidence: float,
+    capture_ref: int,
+) -> None:
+    """Bridge.provide() adapter for report_acoustic_event - see schema.md."""
+    reflex_loop.handle_acoustic_event(schema_version, class_label, confidence, capture_ref)
+
+
+# NOT YET ENABLED - see module docstring's "Registration state" paragraph.
+# Uncomment ONE of these, flash, and confirm on real hardware (including
+# that debug_stream_raw_seismic_sample above still works) before uncommenting
+# the other.
+Bridge.provide("report_footfall_event", _on_footfall_event)
+# Bridge.provide("report_acoustic_event", _on_acoustic_event)
 
 # UNVERIFIED: whether App Lab's own runtime keeps this process alive after
 # registration, or whether the script itself must block. Blocking here is

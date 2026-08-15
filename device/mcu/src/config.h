@@ -284,6 +284,38 @@
 #endif
 
 // ---------------------------------------------------------------------------
+// Footfall probability placeholder - pending ml/seismic TinyML model
+// ---------------------------------------------------------------------------
+// report_footfall_event (device/mpu/bridge/schema.md) needs a real
+// probability, not just the raw STA/LTA ratio - but ml/seismic/ is empty
+// today, so there is no trained model to produce one. footfall_features.cpp
+// derives an honest saturating placeholder from peak_ratio instead of
+// inventing an unrelated number, same labeling discipline as
+// device/mpu/services/reflex_loop.py's ALERT_PROBABILITY_THRESHOLD comment.
+// See docs/KNOWN_GAPS.md - this is a stand-in, not a resolved model.
+
+// Originally an exponential saturation (1 - exp(-k*(ratio-1))), but that
+// pulled expf() in from the real board's libm_nano.a - a minimal picolibc
+// (--specs=nano.specs -nostdlib) that does not provide __errno, which
+// wf_exp.c's expf needs for domain/range error signaling. That link failure
+// only shows up on the real arm-zephyr-eabi hardware build, never on
+// `pio test -e native` (full host libc always provides __errno) - found the
+// hard way flashing this change (docs/KNOWN_GAPS.md, 2026-08-14). Replaced
+// with a Hill/generalized-logistic saturation, x^2/(x^2+c^2) where
+// x = peak_ratio - 1, that needs only multiplication and division - no libm
+// transcendental call, so no errno dependency on any toolchain.
+//
+// Solved against the same two real data points device/mcu/README.md's bench
+// stomp test produced: the real stomp ratio (4.60, x=3.60) should saturate
+// near 0.9, not exactly 1.0 - a single clean trial should not become a hard
+// ceiling. x^2/(x^2+c^2) = 0.9 at x=3.60 => c^2 = x^2*(1-0.9)/0.9 = 1.44 =>
+// c = 1.2. Checked, not separately fitted, against the same session's
+// quiet-floor ceiling (1.13, x=0.13): this c maps it to ~0.012, i.e.
+// genuinely "near 0" as intended (tighter than the exponential's ~0.08),
+// not just correct at the one anchor it was solved from.
+#define FOOTFALL_PROBABILITY_SATURATION_C 1.2f
+
+// ---------------------------------------------------------------------------
 // Audio deterrence - DFPlayer -> TPA3116D2 (single BTL) -> Ahuja SUH-15
 // ---------------------------------------------------------------------------
 // Both pins below are owned exclusively by src/actuators/horn.cpp.
