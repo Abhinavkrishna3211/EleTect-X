@@ -195,8 +195,11 @@
 // within 1.5x the time that should take, the sampler is not keeping up and the
 // window is stale. Same failure response as a hard I2C timeout: zero-filled
 // array, geophone_ok cleared, event logged - a degraded window rather than a
-// crashed state machine (ENGINEERING_CONVENTIONS.md 7).
-#define GEOPHONE_WINDOW_STALE_MS 3072
+// crashed state machine (ENGINEERING_CONVENTIONS.md 7). 3384 ms = 512 samples
+// / 226.98 Hz (the same measured field-flag rate STA_SAMPLES/LTA_SAMPLES
+// below are grounded against, not the nominal 250 Hz) * 1.5, matching this
+// comment's own formula - see docs/KNOWN_GAPS.md's 2026-08-14 entry.
+#define GEOPHONE_WINDOW_STALE_MS 3384
 
 // ---------------------------------------------------------------------------
 // Manual fire-test harness - MUST be 0 before any field sync
@@ -231,8 +234,9 @@
 // al. (arXiv:2406.05140) and Trnkoczy/Guralp STA/LTA sizing guidance.
 // STA_LTA_TRIGGER_RATIO was checked against a real human stomp test on
 // hardware (quiet floor 1.03-1.13, stomp ratio 4.60, real waveform capture
-// confirming a genuine ~65x amplitude transient). STA_LTA_DETRIGGER_RATIO is
-// still unvalidated - see its own comment below, it is currently dead code.
+// confirming a genuine ~65x amplitude transient). STA_LTA_DETRIGGER_RATIO was
+// removed 2026-08-15 as dead code - see the note where it used to be defined,
+// below, and docs/KNOWN_GAPS.md.
 
 // 25 samples: at the measured 226.98 Hz field rate this is ~110 ms, inside
 // the ~40-150 ms literature ballpark for a few periods of a ~26 Hz elephant
@@ -259,8 +263,6 @@
 #if SEISMIC_DEMO_MODE
 // Ratio at which a window is declared a trigger.
 #define STA_LTA_TRIGGER_RATIO 2.0f
-// Ratio the signal must fall back below before a new trigger can be declared.
-#define STA_LTA_DETRIGGER_RATIO 1.2f
 #else
 // Ratio at which a window is declared a trigger. Validated on hardware
 // 2026-08-14: a real human stomp test (see device/mcu/README.md's Bench
@@ -271,17 +273,18 @@
 // clears 4.0 by ~15% - real margin in both directions, so kept at the value
 // already here rather than retuned from a single clean trial.
 #define STA_LTA_TRIGGER_RATIO 4.0f
-
-// Ratio the signal must fall back below before a new trigger can be declared,
-// set well under the trigger ratio so one event does not chatter into many.
-// DEAD CODE as of 2026-08-14 (KNOWN_GAPS): grepping device/mcu for
-// DETRIGGER_RATIO finds no reference outside this #define. state_machine.cpp's
-// kEvent case only checks EVENT_MAX_MS elapsed, never this ratio - there is no
-// detrigger logic to calibrate yet, so no real stomp data can validate this
-// value. Left unchanged per the hard rule that these four constants are only
-// set from real stomp data, not literature or invention.
-#define STA_LTA_DETRIGGER_RATIO 1.5f
 #endif
+
+// STA_LTA_DETRIGGER_RATIO removed 2026-08-15 (docs/KNOWN_GAPS.md): it was
+// dead code - state_machine.cpp's kEvent case only ever checked EVENT_MAX_MS
+// elapsed, never a ratio, so there was no detrigger logic left to calibrate
+// this against. Decision: timeout-only exit from kEvent is judged fine for
+// now (EVENT_MAX_MS already bounds how long an event stays "active"), so the
+// unused constant was deleted rather than kept indefinitely as an unwired
+// placeholder. Revisit as a real feature (exit kEvent early once the ratio
+// falls back under some threshold, saving EVENT_MAX_MS-COOLDOWN_MS of
+// deterrence latency) only alongside real multi-event stomp data to validate
+// a specific value against - see docs/KNOWN_GAPS.md for the full writeup.
 
 // ---------------------------------------------------------------------------
 // Footfall probability placeholder - pending ml/seismic TinyML model

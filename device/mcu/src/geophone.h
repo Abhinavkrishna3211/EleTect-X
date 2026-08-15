@@ -14,6 +14,7 @@
 #define SENSORS_GEOPHONE_H
 
 #include <cstddef>
+#include <cstdint>
 
 #include "config.h"
 
@@ -21,10 +22,17 @@
 // continuous-conversion mode. Call once from setup().
 void geophone_init();
 
-// Call every loop() iteration. Drains any ready ADS1115 conversion into the
-// ring buffer without blocking - if no new conversion is ready yet, returns
-// immediately. This is what read_seismic_window() later snapshots; it is the
-// only place that talks to the ADC.
+// Call every loop() iteration. Never blocks: returns immediately both when
+// gated (see below) and when the I2C read itself fails or times out. This is
+// what read_seismic_window() later snapshots; it is the only place that
+// talks to the ADC.
+//
+// Internally rate-gated to one ADC poll per nominal sample period
+// (1000/SEISMIC_SAMPLE_RATE_HZ ms) via millis(), not a hardware ready-bit -
+// the ADS1115 runs in continuous-conversion mode with ALERT/RDY unused, so
+// there is no ready signal to poll. This is what stops a fast loop() from
+// reading and ring-buffering the same conversion register value twice
+// (KNOWN_GAPS.md).
 void geophone_service();
 
 // Copies the most recent SEISMIC_WINDOW_SAMPLES samples into out. Never waits
@@ -40,7 +48,17 @@ void read_seismic_window(float out[SEISMIC_WINDOW_SAMPLES]);
 
 // Last-known health, published via report_system_status / get_system_state
 // (device/mpu/bridge/schema.md) so a failing sensor is reported, not silently
-// zeroed.
+// zeroed. Kept current even if nothing calls read_seismic_window(): geophone_
+// service() also flips this false on its own once GEOPHONE_WINDOW_STALE_MS
+// has passed since the last accepted sample.
 bool geophone_ok();
+
+// Monotonically increasing count of samples geophone_service() has accepted
+// into the ring buffer since geophone_init(). Never saturates (unlike the
+// ring-buffer-fullness tracking behind read_seismic_window()) - callers that
+// only care whether a new sample has landed since they last checked (e.g.
+// state_machine.cpp's kSensing case, to avoid re-running the STA/LTA slide
+// on an unchanged window) just compare successive reads for inequality.
+uint32_t geophone_sample_count();
 
 #endif  // SENSORS_GEOPHONE_H

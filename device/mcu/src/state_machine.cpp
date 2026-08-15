@@ -83,6 +83,21 @@ void log_verbose_ratio(const sta_lta_result &result, uint32_t now_ms) {
   Serial.println(result.peak_ratio);
 }
 
+// Bench-only, demo visual aid: reruns the same read+detect kSensing's own
+// case below already does, purely so this console's ratio line stays alive
+// through EVENT/COOLDOWN instead of going dark for the whole dead zone - the
+// real reflex logic never sees this call or its result, it only acts on the
+// copy computed inside the kSensing case, so the "don't re-trigger mid-event"
+// gating this function's caller sits outside of is completely unaffected by
+// this existing.
+void log_verbose_ratio_now(uint32_t now_ms) {
+  float window[SEISMIC_WINDOW_SAMPLES];
+  read_seismic_window(window);
+  const sta_lta_result result = sta_lta_detect(window, SEISMIC_WINDOW_SAMPLES, STA_SAMPLES,
+                                                LTA_SAMPLES, STA_LTA_TRIGGER_RATIO);
+  log_verbose_ratio(result, now_ms);
+}
+
 // Bench-only: the raw window as CSV volts, for scripts/plot_seismic_window.py
 // to render - Part C2's sensitivity/waveform-characterization pass, not the
 // REF-bias check. Fires alongside every existing [trigger] line, not on its
@@ -121,6 +136,26 @@ void state_machine_tick(uint32_t now_ms) {
       break;
 
     case reflex_state::kSensing: {
+      // Efficiency gate (KNOWN_GAPS.md): loop() calls state_machine_tick()
+      // unthrottled, far faster than geophone_service()'s own cadence gate
+      // admits new samples - without this, kSensing re-ran the full
+      // read_seismic_window() + sta_lta_detect() slide (~72k float ops)
+      // every single loop() iteration even when the window had not changed
+      // at all since the last check. static persists across state
+      // transitions on purpose: geophone_service() keeps sampling through
+      // kEvent/kCooldown (see loop()'s own comment), so the count will
+      // already have advanced by the time control returns here, and this
+      // must not skip that first real window. Sentinel start value is never
+      // a real sample count on the first tick (geophone_sample_count()
+      // starts at 0), so the very first kSensing tick always runs the
+      // detector, same as before this gate existed.
+      static uint32_t s_last_processed_sample_count = 0xFFFFFFFFu;
+      const uint32_t sample_count = geophone_sample_count();
+      if (sample_count == s_last_processed_sample_count) {
+        break;
+      }
+      s_last_processed_sample_count = sample_count;
+
       float window[SEISMIC_WINDOW_SAMPLES];
       read_seismic_window(window);
 
@@ -137,7 +172,15 @@ void state_machine_tick(uint32_t now_ms) {
       // never triggers - sta_lta_detect's own zero-guard handles that.
       if (result.triggered) {
         log_trigger(result, now_ms);
-#if SEISMIC_DEBUG_VERBOSE
+#if SEISMIC_DEBUG_VERBOSE && !SEISMIC_DEMO_MODE
+        // Skipped in demo mode: printing all SEISMIC_WINDOW_SAMPLES (512)
+        // floats over Serial blocks loop() for several hundred ms on every
+        // trigger - with demo mode's easy-to-trigger tuning that reads as
+        // the whole device freezing (and, once the ratio/raw streams both
+        // go silent for that long right as EVENT/COOLDOWN blank them too,
+        // as if it restarted) on every tap. Re-enable by reverting
+        // SEISMIC_DEMO_MODE to 0 for the actual Part C2 bench
+        // waveform-capture workflow this dump exists for.
         log_window_csv(window, SEISMIC_WINDOW_SAMPLES, now_ms);
 #endif
         notify_footfall_event(window, result, now_ms);
@@ -155,6 +198,9 @@ void state_machine_tick(uint32_t now_ms) {
       // actuator fires at what gain/duration) belongs once fusion/bandit
       // land. For now this state only bounds how long an event is
       // considered "active" before cooldown begins.
+#if SEISMIC_DEBUG_VERBOSE
+      log_verbose_ratio_now(now_ms);
+#endif
       if (elapsed_since_entry(now_ms) >= EVENT_MAX_MS) {
         enter(reflex_state::kCooldown, now_ms);
       }
@@ -163,6 +209,9 @@ void state_machine_tick(uint32_t now_ms) {
     case reflex_state::kCooldown:
       // Exit condition: once COOLDOWN_MS has elapsed since cooldown began,
       // return to idle and allow a new detection cycle.
+#if SEISMIC_DEBUG_VERBOSE
+      log_verbose_ratio_now(now_ms);
+#endif
       if (elapsed_since_entry(now_ms) >= COOLDOWN_MS) {
         enter(reflex_state::kIdle, now_ms);
       }

@@ -101,11 +101,40 @@ what the field test produces (see `edge-impulse-hackster-writeup` skill when tha
       no false triggers); a real stomp produced `ratio=4.60` with a raw-volts CSV dump confirming a
       genuine ~65x amplitude transient. `STA_LTA_TRIGGER_RATIO=4.0` clears the floor by ~3.5x and the
       stomp clears the threshold by ~15% — kept unchanged, now validated rather than assumed.
-    - **`STA_LTA_DETRIGGER_RATIO=1.5` confirmed dead code**, not validated — `grep` shows it's
-      referenced nowhere outside its own `#define`; `state_machine.cpp`'s `kEvent` state only exits on
-      `EVENT_MAX_MS` elapsed, no ratio-based detrigger logic exists anywhere. Left unchanged since
-      there's no live logic to point real data at. Tracked as an open item in `KNOWN_GAPS.md`, not a
-      closed calibration.
+    - **`STA_LTA_DETRIGGER_RATIO=1.5` confirmed dead code** on 14 Aug — `grep` showed it referenced
+      nowhere outside its own `#define`; `state_machine.cpp`'s `kEvent` state only exits on
+      `EVENT_MAX_MS` elapsed, no ratio-based detrigger logic existed anywhere. **Since removed
+      outright, 15 Aug** — see below — rather than left as an indefinite unwired placeholder.
+  - **`kSensing` efficiency fix, `GEOPHONE_WINDOW_STALE_MS` fix, `STA_LTA_DETRIGGER_RATIO` removal —
+    15 Aug, geophone-only completion pass.** Full derivation in `docs/KNOWN_GAPS.md`'s "`kSensing`
+    redundant STA/LTA re-run..." entry; summary here:
+    - **Redundant STA/LTA re-run fixed.** `state_machine_tick()`'s `kSensing` case was re-running the
+      full `read_seismic_window()` + `sta_lta_detect()` slide (~72k float ops) on every unthrottled
+      `loop()` iteration, not just when a new sample had actually landed. `geophone.cpp`/`geophone.h`
+      gained `geophone_sample_count()` (monotonic, non-saturating); `kSensing` now skips the
+      read+detect entirely when it hasn't advanced since the last check — same trigger behavior and
+      timing, just not recomputed redundantly. A correctness risk this created (`geophone_ok()`
+      going stale forever if nothing calls `read_seismic_window()` on a dead sensor) was closed in the
+      same pass by adding an unconditional proactive staleness check inside `geophone_service()`
+      itself. Host-tested (`tests/test_geophone/`, 2 new cases); a real bug this surfaced —
+      `geophone_init()` wasn't resetting the new counter — was fixed alongside. `pio run -e native` /
+      `pio test -e native` green, 37/37 test cases.
+    - **`GEOPHONE_WINDOW_STALE_MS` fixed to match its own documented formula.** Was `3072` ms (1.5x
+      the *nominal* 250 Hz fill time), but the constant's own comment says 1.5x the real fill time —
+      at the real measured 226.98 Hz rate that's `3384` ms. Updated the constant, not the comment,
+      since the formula is deliberate real-hardware margin.
+    - **`STA_LTA_DETRIGGER_RATIO` removed entirely** (both `SEISMIC_DEMO_MODE` branches in
+      `config.h`, plus its comments). Decision: timeout-only exit from `kEvent` (`EVENT_MAX_MS`) is
+      fine as the current design; a real ratio-based early-exit remains a legitimate future feature
+      but only once real multi-event stomp data exists to set a threshold against — not before.
+      `device/mcu/README.md` updated to match. **Hard boundary respected**: `git diff` on `config.h`
+      touches zero characters of the `STA_LTA_TRIGGER_RATIO`/`STA_SAMPLES`/`LTA_SAMPLES` `#define`
+      lines themselves.
+    - **Not yet done, this same pass:** flashing to real hardware to confirm on a live console (needs
+      Abhinav physically present to operate the board / stomp) and the multi-trial stomp validation
+      protocol's actual execution (also needs Abhinav present) — both blocked pending his explicit
+      go-ahead, per his instruction mid-session. The protocol design itself and everything host-testable
+      is done; see `docs/KNOWN_GAPS.md` for the proposed protocol once it's written up.
     - **Raw trigger data reaching the MPU: closed on the MCU/host side, later 14 Aug session.**
       `state_machine.cpp`'s `kSensing` case now calls a real
       `Bridge.notify("report_footfall_event", schema_version, probability, sta_lta_ratio,

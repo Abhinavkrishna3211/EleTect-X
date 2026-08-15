@@ -43,15 +43,15 @@ criteria — see each entry's status.
   this check. `STA_LTA_TRIGGER_RATIO=4.0` was then validated against a real human stomp test (see
   the "Bench stomp-test trigger log" entry above and the full derivation entry near the end of this
   document): quiet floor 1.03-1.13, real stomp 4.60, both constants left numerically unchanged
-  because the real data confirmed rather than contradicted them. `STA_LTA_DETRIGGER_RATIO` is a
-  **separate, still-open item** — confirmed by `grep` to be dead code (referenced nowhere outside
-  its own `#define`; `state_machine.cpp`'s `kEvent` state only exits on `EVENT_MAX_MS` elapsed, no
-  ratio-based detrigger check exists anywhere), so there is no live logic to validate it against and
-  no real data can set it meaningfully until one exists. Status: **closed for `STA_SAMPLES` and
-  `STA_LTA_TRIGGER_RATIO`; open for `STA_LTA_DETRIGGER_RATIO`**, tracked as dead code, not a
-  calibration gap — see the "Literature review" section near the end of this document for the wider
-  scientific grounding and the honest scope line between STA/LTA tuning and true multi-species
-  classification.
+  because the real data confirmed rather than contradicted them. `STA_LTA_DETRIGGER_RATIO` was a
+  separate item, confirmed by `grep` to be dead code (referenced nowhere outside its own `#define`;
+  `state_machine.cpp`'s `kEvent` state only exits on `EVENT_MAX_MS` elapsed, no ratio-based detrigger
+  check exists anywhere) — since removed entirely (15 Aug, see the "`kSensing` redundant STA/LTA
+  re-run..." entry near the end of this document) rather than kept as an unwired placeholder. Status:
+  **closed** for all three — `STA_SAMPLES`/`STA_LTA_TRIGGER_RATIO` validated and kept, `STA_LTA_
+  DETRIGGER_RATIO` removed as dead code — see the "Literature review" section near the end of this
+  document for the wider scientific grounding and the honest scope line between STA/LTA tuning and
+  true multi-species classification.
 - **`HORN_AMP_ENABLE_DELAY_MS = 150` (`config.h`) is invented — no measured DFPlayer Mini
   trigger-to-audio-seek latency backs it.** `horn.cpp`'s fire sequence depends on this value being
   long enough to cover DFPlayer seek (avoiding a pop) but not so long it clips the start of the
@@ -889,7 +889,10 @@ basis for any number below).
   anywhere in `sta_lta.cpp` or `state_machine.cpp`. There is no live logic to point real data at, so
   the value is left untouched rather than set from data that can't actually exercise it. If a
   ratio-based detrigger is ever implemented, this constant needs a real validation pass of its own
-  before being trusted.
+  before being trusted. **Update, 15 Aug:** rather than stay open indefinitely, the constant was
+  removed outright — see the "`kSensing` redundant STA/LTA re-run..." entry near the end of this
+  document for the decision and rationale. This paragraph is kept as the historical record of why it
+  was dead code in the first place.
 
 **Secondary observation, not yet acted on:** `log_window_csv()`'s `[window]` CSV dump (bench-only,
 `SEISMIC_DEBUG_VERBOSE && !SEISMIC_DEMO_MODE`) took roughly **6.7 s** of wall-clock time to complete
@@ -906,8 +909,9 @@ comma-separated floats at whatever baud rate is configured).
 Status: **closed** — real field-flag sample rate measured, STA/LTA window sizes checked against
 literature and found adequate (unchanged), real stomp test run and `STA_LTA_TRIGGER_RATIO` validated
 with margin (unchanged), `STA_LTA_DETRIGGER_RATIO` reclassified from "unvalidated" to "confirmed dead
-code" (tracked as its own open item, not a calibration gap). The `log_window_csv()` timing-comment
-discrepancy is noted as a loose end for a future bench session, not reopened here.
+code" here and later removed outright (15 Aug, see the "`kSensing` redundant STA/LTA re-run..." entry
+near the end of this document). The `log_window_csv()` timing-comment discrepancy is noted as a loose
+end for a future bench session, not reopened here.
 
 ## Raw seismic trigger data does not reach the MPU or survive anywhere in the real field build (14 Aug)
 
@@ -1025,3 +1029,111 @@ changes. The still-commented `Bridge.provide()` actuator registrations in `main.
 this change makes the *notify* direction reachable, it does not register a `provide()` handler or
 change the one-at-a-time hardware-verification discipline those still require. Status: **closed** —
 decision made and recorded; host build/test green.
+
+## `kSensing` redundant STA/LTA re-run, `GEOPHONE_WINDOW_STALE_MS` drift, and `STA_LTA_DETRIGGER_RATIO` disposition (15 Aug)
+
+**Redundant detector re-run — closed.** `state_machine_tick()`'s `kSensing` case called
+`read_seismic_window()` + `sta_lta_detect()` (the ~72k-float-op STA/LTA slide) on every single
+`loop()` iteration, unthrottled — `loop()` has no delay of its own, so this ran far more often than
+`geophone_service()`'s own cadence gate actually admits new samples (once per
+`1000/SEISMIC_SAMPLE_RATE_HZ` ms), recomputing an identical result against an unchanged window most
+of the time. Fix: `geophone.cpp`/`geophone.h` gained `geophone_sample_count()`, a monotonically
+increasing (non-saturating, unlike `g_samples_written`) count of samples `geophone_service()` has
+actually accepted into the ring buffer. `kSensing` now compares successive reads of this against a
+`static` local and skips the read+detect entirely when it has not advanced since the last check — same
+samples, same STA/LTA logic, same trigger behavior and timing, just not recomputed on iterations where
+nothing new arrived. The `static` sentinel (`0xFFFFFFFFu`) guarantees the very first `kSensing` tick
+after boot always runs the detector, since `geophone_sample_count()` itself starts at 0 and can never
+collide with the sentinel on a real first read.
+
+One correctness risk this introduced and had to be closed in the same pass: `geophone_ok()`'s
+liveness previously depended on something calling `read_seismic_window()` regularly enough to notice a
+dead sensor via its own staleness check. With `kSensing` now skipping that call whenever the sample
+count hasn't moved, a genuinely dead sensor (no new samples arriving at all) would never trip that
+check again and `geophone_ok()` would stay stuck at its last value forever. Fix: `geophone_service()`
+itself now runs the same `(now_ms - g_last_fill_ms) > GEOPHONE_WINDOW_STALE_MS` check unconditionally,
+before its own cadence gate, every time `loop()` calls it (`loop()` still services the geophone every
+iteration regardless of reflex state) — so a dead sensor is caught independently of whether anything
+downstream is still asking for windows.
+
+Host-tested in isolation (`tests/test_geophone/test_geophone.cpp`, same host-shim approach the
+existing cadence-gate tests use): `geophone_sample_count()` advances only on accepted samples (not on
+calls the cadence gate rejects), by exactly one per accepted sample, and keeps counting past
+`SEISMIC_WINDOW_SAMPLES` rather than saturating. A companion test asserting the proactive staleness
+check flips `geophone_ok()` false for a truly dead sensor was written but dropped — `hostshim/Wire.h`
+is explicit that it "always succeeds" and is documented as deliberately not modeling real I2C failure
+("only ever validated on the bench against a real ADS1115"), so a dead-sensor scenario cannot be
+produced against the current host stub without extending that stub beyond this task's scope. `pio run
+-e native` and `pio test -e native` both green (37/37 test cases) after this change; a fix discovered
+in the same pass — `geophone_init()` was not resetting `g_sample_count`, leaking count state across a
+re-init (surfaced immediately by the new tests running in the same binary) — is bundled in since it is
+required for the new counter to behave correctly at all, not a separate gap.
+
+**`GEOPHONE_WINDOW_STALE_MS` vs. the real measured field-flag rate — closed.** The constant's own
+comment says it should be "1.5x the time [a full window] should take" to fill; it was `3072` ms, which
+is 1.5x the *nominal* 250 Hz fill time (`512/250*1000=2048`, `*1.5=3072`), not the real measured
+226.98 Hz rate `STA_SAMPLES`/`LTA_SAMPLES` are already grounded against elsewhere in the same file
+(this document's "STA/LTA field-flag rate re-measurement" entry). At 226.98 Hz the same formula gives
+`512/226.98*1000≈2256`, `*1.5≈3384` ms. Code and documented rationale disagreed — fixed by updating the
+constant to `3384` (comment's formula honored, not weakened) rather than editing the comment to match
+the stale value, since the formula is deliberately conservative real-hardware margin, not a number to
+retune down to match convenience.
+
+**`STA_LTA_DETRIGGER_RATIO` — closed, removed as dead code.** Previously carried as an unused
+`#define` in both `SEISMIC_DEMO_MODE` branches of `config.h`, flagged dead since the "STA/LTA
+field-flag rate re-measurement" entry above: `grep`ping `device/mcu` for `DETRIGGER_RATIO` found no
+reference outside its own `#define`, and `state_machine.cpp`'s `kEvent` case only ever exits on
+`EVENT_MAX_MS` elapsed, never a ratio — there was no detrigger logic to calibrate this value against.
+Decision: remove the constant rather than either (a) invent real ratio-based detrigger logic in
+`kEvent` with no data to validate a threshold against, which would violate the hard rule that these
+constants are only set from real stomp data, or (b) leave an unwired placeholder indefinitely. Judged
+that timeout-only exit from `kEvent` is fine as the current design — `EVENT_MAX_MS` already bounds how
+long an event stays "active" before cooldown, which is the actual thing this state exists to bound.
+A real ratio-based early-exit (saving `EVENT_MAX_MS`-minus-actual-decay-time of deterrence latency
+per event) remains a legitimate future feature, but only alongside real multi-event stomp data
+(see the "multi-trial stomp validation protocol" work this document/`HANDOVER.md` track separately) to
+set a specific threshold against — not before. `device/mcu/README.md`'s bench stomp-test write-up
+updated to match (previously described `STA_LTA_DETRIGGER_RATIO` as extant-but-dead-code; now
+describes it as removed). Status: **closed** — decision made, documented, and reflected in code,
+`config.h`'s comments, and `README.md`; nothing left `#define`d but uncalibrated.
+
+All three items verified together: `pio run -e native` and `pio test -e native` both green (37/37 test
+cases, including the 2 new `test_geophone` cases) after each change in this section, not just at the
+end. Hard boundary respected — `git diff` on `config.h` touches zero characters of the
+`STA_LTA_TRIGGER_RATIO`, `STA_SAMPLES`, or `LTA_SAMPLES` `#define` lines themselves (only comment text
+mentioning their names by name, and the unrelated `GEOPHONE_WINDOW_STALE_MS`/`STA_LTA_DETRIGGER_RATIO`
+lines above/below them).
+
+**Multi-trial stomp validation protocol — proposed, not yet run (15 Aug).** The single-stomp bench
+test above (14 Aug) validated `STA_LTA_TRIGGER_RATIO` against exactly one real stomp; it cannot say
+anything about trial-to-trial variance in a real human stomp's ratio, or about `report_footfall_event`
+firing reliably across repeated triggers rather than once. Requires Abhinav physically present at the
+board to stomp — not run yet. Proposed protocol, to hand to him as-is:
+
+- **Build config for the run:** field values (`SEISMIC_DEMO_MODE=0`, so `EVENT_MAX_MS=15000` /
+  `COOLDOWN_MS=20000` — the actual deployed cycle, not the shortened demo one), `SEISMIC_DEBUG_VERBOSE=1`
+  temporarily (same as the single-stomp test, for quantified ratio numbers around every event; revert to
+  `0` immediately after the session, same discipline as before).
+- **12 stomps** (within the suggested 10-15 range: enough for a real mean/stdev without an
+  unreasonably long single bench session).
+- **60 s between the start of each stomp and the next.** `EVENT_MAX_MS + COOLDOWN_MS = 35 s` is the
+  hard floor for the state machine to cycle `kEvent -> kCooldown -> kIdle -> kSensing` and be ready to
+  arm again; 60 s gives ~25 s of margin for confirming on the console that the cycle actually completed
+  (state returns to armed) before the next stomp, not just guessing the timing.
+- **60 s of quiet baseline before the first stomp and 60 s after the last one** (comparable to the
+  ~35 s/~46 s halves the single-stomp test already used, slightly longer here since a 12-trial run makes
+  the baseline itself worth characterizing more precisely — mean/stdev of the quiet-floor ratio, not
+  just its range).
+- **Total session length: ~14 minutes** (60 s + 12x60 s + 60 s).
+- **Capture per trial:** the `[trigger]` line's `ratio=`, the `[notify]` line's `probability=`, and
+  (from the MPU-side console/log, same as the 14 Aug end-to-end example) whether
+  `report_footfall_event` actually fired and what `fused_P`/`alert` it produced — not just "it worked."
+  Also note any false trigger (a `[trigger]` line with no corresponding real stomp) or missed trigger (a
+  real stomp with no `[trigger]` line) during either baseline period or a trial window.
+- **Report afterward:** real computed mean and standard deviation of the 12 stomp ratios, detection
+  rate (stomps that produced a trigger / 12), false-trigger count across both baselines, and whether
+  `report_footfall_event` fired correctly on every real trigger — not a qualitative "it worked" summary.
+
+Status: **open** — protocol designed, blocked on Abhinav's physical presence to execute. Will be
+updated with real computed statistics once run, and the corresponding commit will be kept separate
+from this session's code-only commit.
