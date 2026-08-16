@@ -562,6 +562,24 @@ criteria — see each entry's status.
   already used to read the real `bridge.h`), or bench-test a real LoRa AT command exchange on both
   `Serial` and `Serial1` with Bridge simultaneously active and see which one the E5 actually answers
   on. Status: open, tracked in Cowork's task list, priority re-check before any LoRa bench session.
+  **Local-grep option checked and ruled out, 16 Aug:** searched this Windows dev machine for the
+  installed `arduino:zephyr` core / UNO Q board-support source, the same way the real `bridge.h` was
+  read earlier — `.platformio/packages` (only ESP32/Renesas/DFU-util packages present), Arduino15's
+  `packages` dir (avr/esp32/esp8266/rp2040/Seeeduino/teensy only, no zephyr package), App Lab's
+  `flasher_cache/*.tar.zst` (a raw QRB2210 flash image — GPT partitions and firmware blobs, not a
+  browsable filesystem tree; `tar -tf` over the decompressed stream lists no `zephyr`/board-overlay/
+  `bridge.h` entries because none of its members are individual rootfs files), the App Lab temp
+  workspace (mirrors this repo's own sketch source only), and every `fqbn` this machine has ever
+  locally compiled per `arduino-cli`'s `build.options.json` history and `arduino-cli.yaml`'s
+  configured board-index URLs (AVR/ESP32/ESP8266/RP2040/Seeeduino/Renesas/Silabs/Teensy — no UNO Q /
+  zephyr index configured at all). Conclusion: this core has never been cached or compiled on this
+  machine — the earlier `bridge.h` read must have come from direct SSH access to the board's own
+  Linux filesystem, done by hand per this project's standing SSH rule
+  (`docs/eletect-x-applab-notes.md`), not from anything locally greppable. The local-grep path is a
+  dead end here, not just unresolved; the live bench test (or a session where the SSH rule's human
+  runs the same grep directly on the board) remains the only way to close this. `config.h`'s
+  `LORA_SERIAL` default is left unchanged (`Serial1`) — nothing found here settles it either way, so
+  flipping it would be a coin flip, not a fix.
 - **The manual serial fire-test harness (`device/mcu/src/fire_test.*`,
   `docs/specs/mcu-fire-test-harness.md`) now exists as the intended mechanism to close two open
   items above rather than closing them itself.** It gives a human a one-keystroke way to call
