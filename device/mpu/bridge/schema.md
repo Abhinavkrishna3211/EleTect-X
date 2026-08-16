@@ -23,9 +23,25 @@ actuator commands (the MPU needs to know the action actually executed before dec
 | Function | Args | Return | MCU-side failure behavior |
 |---|---|---|---|
 | `drive_horn` | `schema_version, gain_pct: float (0–100), duration_ms: uint16` | `ack: bool` | MCU enforces its own burst-duration cap and cooldown (ADR 0003) regardless of what's requested — an out-of-bounds request is clamped, not rejected, and `ack` reports the values actually used. Never blocks past the physical burst duration. |
-| `drive_led` | `schema_version, pattern_id: uint8, duration_ms: uint16` | `ack: bool` | Same cooldown/cap discipline as `drive_horn`, independent counters. |
-| `pulse_ir` | `schema_version, duration_ms: uint16` | `ack: bool` | Gated by the IR MOSFET's own thermal/duty limits (`config.h`); over-duration requests clamp, and the clamp is reported in `ack`, never silently dropped. |
+| `drive_led` | `schema_version, pattern_id: uint8, duration_ms: uint16` | `ack: bool` | Same cooldown/cap discipline as `drive_horn`, independent counters. No `gain_pct` wire field — always driven at `config.h`'s `LED_GAIN_MAX_PCT` internally (see "Actuator gain defaults" below). |
+| `pulse_ir` | `schema_version, duration_ms: uint16` | `ack: bool` | Gated by the IR MOSFET's own thermal/duty limits (`config.h`); over-duration requests clamp, and the clamp is reported in `ack`, never silently dropped. No `gain_pct` wire field — always driven at `config.h`'s `IR_GAIN_MAX_PCT` internally (see "Actuator gain defaults" below). |
 | `get_system_state` | `schema_version` | `battery_v: float, geophone_ok: bool, acoustic_ok: bool, uptime_s: uint32` | Never blocks past one cached-struct read (same struct `report_system_status` pushes periodically) — not a fresh sensor poll. |
+
+### Actuator gain defaults
+
+`drive_horn` carries an explicit `gain_pct` wire field because horn deterrence intensity is a real,
+call-to-call tunable the MPU-side policy needs. `drive_led` and `pulse_ir` do not, and this is a
+deliberate contract decision, not an oversight: both are on/off flash-or-illuminate actuators —
+`LED_GAIN_MAX_PCT` and `IR_GAIN_MAX_PCT` (`config.h`) are both `100.0f` today, i.e. full duty is the
+only duty either has ever driven — and unlike the horn, no per-call variation has any established use
+case. `pattern_id` selects *which* LED channel fires (`led_channel_for_pattern_id()`,
+`device/mcu/src/bridge_handlers.h`), a separate axis from brightness; it does not and should not also
+select gain, since `pulse_ir` has no `pattern_id` to map from and would need its own fixed default
+regardless. Both MCU-side adapters (`device/mcu/src/bridge_handlers.cpp`) request their config max
+unconditionally. If a real LED/IR intensity requirement shows up, add `gain_pct` to these rows as a
+breaking schema change (bump `schema_version`) rather than overloading `pattern_id` — see
+`docs/KNOWN_GAPS.md` for the pattern-semantics gap this does *not* resolve (what `pattern_id` values
+should mean beyond channel selection).
 
 ## Same-side function contracts (MCU-internal, not Bridge calls — per `ENGINEERING_CONVENTIONS.md` §1/§2)
 
