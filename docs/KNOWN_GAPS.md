@@ -67,15 +67,18 @@ criteria — see each entry's status.
   DFPlayer serial-command volume-set path (UART, not the GPIO trigger this session wired), or
   dropped from the contract if hardware can't support it. Status: open.
 - **`drive_led`/`pulse_ir`'s internal `gain_pct` representation doesn't match the Bridge schema's
-  wire args.** `schema.md` specifies `drive_led(pattern_id: uint8, duration_ms)` and
-  `pulse_ir(duration_ms)` — neither carries a `gain_pct` field, but `led.cpp`/`ir.cpp` (this
-  session's MCU-internal implementation) clamp and drive a `gain_pct`-shaped PWM duty cycle
-  because `config.h`'s `LED_GAIN_MAX_PCT`/`IR_GAIN_MAX_PCT` already existed when those files were
-  written. The Bridge wrapper (not built this session, see below) will need to either map
-  `pattern_id` onto a fixed internal gain/channel choice, or the schema needs a documented default
-  gain for these two calls. Medium severity — a real mismatch, not just an open question. Effort:
-  small, needs a decision recorded (schema update or wrapper-side mapping) before Bridge wiring.
-  Status: open.
+  wire args — resolved, decision recorded.** `schema.md` specifies `drive_led(pattern_id: uint8,
+  duration_ms)` and `pulse_ir(duration_ms)` — neither carries a `gain_pct` field, but
+  `led.cpp`/`ir.cpp` clamp and drive a `gain_pct`-shaped PWM duty cycle because `config.h`'s
+  `LED_GAIN_MAX_PCT`/`IR_GAIN_MAX_PCT` already existed when those files were written. Decision:
+  option (a) — `schema.md` now documents (see its "Actuator gain defaults" section) that both
+  calls always drive at their `config.h` max internally; `pattern_id`/`duration_ms` stay the only
+  wire args. Rejected option (b) (mapping `pattern_id` onto a fixed gain choice) because `pulse_ir`
+  has no `pattern_id` to map from and would need an identical fixed default anyway, and because
+  gain and channel are separate axes that don't belong conflated onto one field. Superseded by, and
+  now consistent with, the Bridge wrapper's actual implementation — see the `bridge_handlers.h/.cpp`
+  entry below, which already made this same call in code before it was written down here. Status:
+  closed.
 - **AT command syntax and response strings in `lora/mac.cpp` are unverified against the source
   manual.** The file cites Seeed's *Grove LoRa-E5 AT Command Specification* but was written from
   memory of typical AT-command LoRaWAN modems, not checked line-by-line against it. Every command
@@ -633,16 +636,14 @@ criteria — see each entry's status.
 - **`drive_led`'s adapter invents a `pattern_id → led_channel` mapping (0 → white, 1 → blue,
   anything else → white) that has no basis in schema.md or any design doc.** schema.md's `drive_led`
   row (`schema_version, pattern_id: uint8, duration_ms: uint16`) never defines what `pattern_id`
-  values mean, and no LED strobe-pattern design exists anywhere in this repo. `LED_GAIN_MAX_PCT`
-  (`config.h`) is requested for every call — "request the config max, let `rule_gate_apply()`'s
-  existing clamp resolve it," the same placeholder policy `device/mpu/services/reflex_loop.py`
-  documents for its own horn request — since `gain_pct` isn't part of `drive_led`'s schema row
-  either. `pulse_ir`'s adapter makes the identical choice for `IR_GAIN_MAX_PCT`, for the same reason
-  (`pulse_ir`'s schema row has no `gain_pct` field). Medium severity: harmless until `drive_led` is
-  actually registered and called, but a real LED deterrence pattern design (what `pattern_id` values
-  should exist, whether they should vary gain/color/timing, not just channel) is undesigned work
-  hiding behind this placeholder. Status: open, blocked on an LED pattern design pass this build call
-  did not attempt.
+  values mean, and no LED strobe-pattern design exists anywhere in this repo. The separate question
+  of *gain* is now settled (`schema.md`'s "Actuator gain defaults" section, and the closed entry
+  above) — `LED_GAIN_MAX_PCT`/`IR_GAIN_MAX_PCT` are the deliberate, permanent internal defaults, not
+  a placeholder pending a decision. What's still genuinely undesigned is `pattern_id` itself: whether
+  channel selection (white/blue) is all it should ever mean, or whether a real LED deterrence pattern
+  design (strobe timing, color sequencing) should exist and use more of the `uint8` range than two
+  values. Medium severity: harmless until `drive_led` is actually registered and called. Status:
+  open, blocked on an LED pattern design pass this build call did not attempt.
 - **`get_system_state`'s adapter cannot honestly report `battery_v` or `acoustic_ok` — both are
   fixed placeholder values, not live readings.** No battery-monitor driver or ADC pin exists anywhere
   in `config.h`; `battery_v` always returns `0.0f`, chosen as an "unknown" sentinel rather than a
