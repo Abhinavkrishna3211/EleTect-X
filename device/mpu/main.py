@@ -12,9 +12,10 @@ it can be pytest-tested on a dev laptop with no board attached
 arduino.app_utils.Bridge in and registers handlers, mirroring
 device/mpu/bench/ping/python/main.py's own thin-wiring pattern.
 
-SAFE_MODE (services/reflex_loop.py, default on) gates the one real side
-effect this loop can have - drive_horn - behind a dry-run log. Flipping it
-off is an explicit environment step for a live session with a human present
+SAFE_MODE (services/reflex_loop.py, default on) gates every real side effect
+this loop can have - drive_horn/drive_led/pulse_ir plus the camera/storage
+capture that rides alongside them - behind a dry-run log. Flipping it off is
+an explicit environment step for a live session with a human present
 (`export ELETECT_SAFE_MODE=0`), never a code default.
 
 Registration state, per the one-at-a-time discipline
@@ -46,6 +47,8 @@ import time
 from arduino.app_utils import Bridge
 
 from bridge.rpc import AcousticClass
+from perception.camera import Camera
+from perception.storage import save_burst
 from services import config, reflex_loop
 
 logging.basicConfig(level=getattr(logging, config.LOG_LEVEL))
@@ -84,6 +87,13 @@ def debug_stream_raw_seismic_sample(volts: float) -> None:
 
 Bridge.provide("debug_stream_raw_seismic_sample", debug_stream_raw_seismic_sample)
 
+# One Camera per process, reused across events - not opened here.
+# Camera.__init__ does no I/O (perception/camera.py), so constructing this
+# at module scope is safe even before Bridge/hardware are confirmed ready;
+# only reflex_loop's own open()/close() calls around each alert touch the
+# device, so the camera is never left held open between events.
+_camera = Camera()
+
 
 def _on_footfall_event(
     schema_version: int,
@@ -95,8 +105,9 @@ def _on_footfall_event(
 
     Thin wrapper: the real logic is reflex_loop.handle_footfall_event(),
     tested independently in tests/test_reflex_loop.py. This function exists
-    only to bind the real Bridge.call-backed drive_horn in as the injected
-    dependency reflex_loop's signature requires.
+    only to bind the real Bridge.call-backed drive_horn/drive_led/pulse_ir,
+    the real Camera, and the real save_burst in as the injected
+    dependencies reflex_loop's signature requires.
     """
     reflex_loop.handle_footfall_event(
         schema_version,
@@ -106,6 +117,12 @@ def _on_footfall_event(
         drive_horn=lambda sv, gain_pct, duration_ms: Bridge.call(
             "drive_horn", sv, gain_pct, duration_ms
         ),
+        drive_led=lambda sv, pattern_id, duration_ms: Bridge.call(
+            "drive_led", sv, pattern_id, duration_ms
+        ),
+        pulse_ir=lambda sv, duration_ms: Bridge.call("pulse_ir", sv, duration_ms),
+        camera=_camera,
+        save_frames=save_burst,
     )
 
 

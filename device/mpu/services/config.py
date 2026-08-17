@@ -145,6 +145,25 @@ CAMERA_BURST_FRAMES = 5
 CAMERA_BURST_INTERVAL_S = 0.0
 
 # ---------------------------------------------------------------------------
+# Deterrent-event capture storage (perception/storage.py)
+# ---------------------------------------------------------------------------
+# Where reflex_loop.py's alert-path frame burst gets written, tagged with the
+# triggering event's own metadata. Module-relative like DATA_DIR/MODELS_DIR
+# above, for the same reason - lands inside the App's own folder on the
+# board, not /tmp.
+CAPTURE_DIR = _MODULE_DIR / "data" / "captures"
+
+# perception/storage.py logs a warning (never fails silently, per
+# ENGINEERING_CONVENTIONS.md 3's zero-filled-read precedent for "degrade
+# loudly, don't go silent") when free space at CAPTURE_DIR drops below this.
+# INVENTED - no measured field JPEG-size/trigger-frequency data backs this
+# number yet; picked as a conservative "still room for hundreds more bursts"
+# floor against the real board's ~3.6GB usable /home/arduino partition
+# (.agents/skills/build-arduino-uno-q-app-lab/references/REFERENCE.md), not
+# a tuned figure. See docs/KNOWN_GAPS.md.
+CAPTURE_LOW_DISK_HEADROOM_BYTES = 500 * 1024 * 1024  # 500 MB
+
+# ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
 
