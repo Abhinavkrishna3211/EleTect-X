@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EleTect X — Geophone Bench Excitation Tool</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #141a22;
+    --panel-2: #1a222c;
+    --border: #253040;
+    --text: #e6edf5;
+    --muted: #93a1b3;
+    --accent: #4fd1c5;
+    --accent-2: #f0a860;
+    --danger: #e06c75;
+    --good: #7ec87e;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    padding: 24px 16px 60px;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 {
+    font-size: 1.35rem;
+    font-weight: 650;
+    margin: 0 0 4px;
+    letter-spacing: -0.01em;
+  }
+  .sub { color: var(--muted); font-size: 0.92rem; margin: 0 0 22px; line-height: 1.5; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    margin-bottom: 16px;
+  }
+  .card h2 {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin: 0 0 14px;
+    font-weight: 650;
+  }
+  .notice {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent-2);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 0.86rem;
+    line-height: 1.55;
+    color: var(--text);
+    margin-bottom: 16px;
+  }
+  .notice b { color: var(--accent-2); }
+  .notice.danger { border-left-color: var(--danger); }
+  .notice.danger b { color: var(--danger); }
+  .tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    padding: 9px 14px;
+    font-size: 0.85rem;
+    color: var(--muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    user-select: none;
+  }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .mode-panel { display: none; }
+  .mode-panel.active { display: block; }
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 14px;
+  }
+  .row label { font-size: 0.86rem; color: var(--text); white-space: nowrap; }
+  .row .val { font-size: 0.86rem; color: var(--accent); font-variant-numeric: tabular-nums; min-width: 64px; text-align: right; }
+  input[type="range"] {
+    flex: 1;
+    accent-color: var(--accent);
+    height: 4px;
+  }
+  input[type="number"] {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 6px 8px;
+    width: 80px;
+    font-size: 0.86rem;
+  }
+  .btn-row { display: flex; gap: 10px; margin-top: 18px; }
+  button {
+    flex: 1;
+    padding: 12px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--text);
+    font-size: 0.92rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter 0.15s ease;
+  }
+  button:hover { filter: brightness(1.15); }
+  button.primary {
+    background: var(--accent);
+    color: #06201d;
+    border-color: var(--accent);
+  }
+  button.stop {
+    background: var(--danger);
+    color: #2a0d0f;
+    border-color: var(--danger);
+  }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .status {
+    margin-top: 14px;
+    font-size: 0.82rem;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    font-variant-numeric: tabular-nums;
+  }
+  .status .live { color: var(--good); }
+  .status.idle .live { color: var(--muted); }
+  .presets { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .preset {
+    font-size: 0.78rem;
+    padding: 6px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .preset:hover { color: var(--text); border-color: var(--accent); }
+  footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.76rem;
+    margin-top: 28px;
+    line-height: 1.6;
+  }
+  code {
+    background: var(--panel-2);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 0.85em;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>EleTect X — Geophone Bench Excitation Tool</h1>
+  <p class="sub">
+    Drives your laptop/speaker to produce a controlled, repeatable mechanical stimulus for
+    cross-checking the SM-24 → INA333 → ADS1115 → STA/LTA chain — a companion to, not a
+    replacement for, a real human stomp test.
+  </p>
+
+  <div class="notice">
+    <b>Coupling matters more than volume.</b> This only excites the geophone if the speaker
+    is mechanically coupled to the same surface the sensor is coupled to — set your laptop
+    (or an external speaker) directly on the desk/floor the geophone is resting on or
+    touching, not across the room. Airborne sound alone at these frequencies does very little.
+  </div>
+  <div class="notice danger">
+    <b>Small speakers roll off hard below ~60–100&nbsp;Hz.</b> Elephant footfall centers
+    around ~20–24&nbsp;Hz (ADR 0001) — most laptop speakers can't reproduce that acoustically
+    at all. What still gets through at low frequency is mostly driver/chassis motion coupling
+    into the desk, not true low-frequency sound — real, but weaker and less linear than the
+    tool's frequency readout implies. Treat this as a repeatability/sanity check, not a
+    calibrated shaker table. If you have an external subwoofer or bass speaker, use it instead
+    of the bare laptop speaker for anything below ~60&nbsp;Hz.
+  </div>
+
+  <div class="card">
+    <div class="tabs">
+      <div class="tab active" data-mode="tone">Continuous tone</div>
+      <div class="tab" data-mode="sweep">Frequency sweep</div>
+      <div class="tab" data-mode="impulse">Impulse train (thump)</div>
+    </div>
+
+    <!-- Continuous tone -->
+    <div class="mode-panel active" id="panel-tone">
+      <h2>Steady sine tone</h2>
+      <div class="presets">
+        <div class="preset" data-freq="10">10 Hz (SM-24 resonance)</div>
+        <div class="preset" data-freq="20">20 Hz</div>
+        <div class="preset" data-freq="24">24 Hz (footfall mean)</div>
+        <div class="preset" data-freq="50">50 Hz (band-pass edge)</div>
+      </div>
+      <div class="row">
+        <label>Frequency</label>
+        <input type="range" id="toneFreq" min="2" max="200" step="0.5" value="24">
+        <span class="val"><span id="toneFreqVal">24.0</span> Hz</span>
+      </div>
+    </div>
+
+    <!-- Sweep -->
+    <div class="mode-panel" id="panel-sweep">
+      <h2>Linear frequency sweep (2–50 Hz band pass)</h2>
+      <div class="row">
+        <label>Start freq</label>
+        <input type="number" id="sweepStart" min="1" max="500" step="0.5" value="2">
+        <span class="val">Hz</span>
+      </div>
+      <div class="row">
+        <label>End freq</label>
+        <input type="number" id="sweepEnd" min="1" max="500" step="0.5" value="60">
+        <span class="val">Hz</span>
+      </div>
+      <div class="row">
+        <label>Duration</label>
+        <input type="number" id="sweepDur" min="2" max="120" step="1" value="20">
+        <span class="val">s</span>
+      </div>
+      <p class="sub" style="margin:6px 0 0;">
+        Good for a rough frequency-response sanity check — watch the live plot's ratio panel
+        and note whether the response rises/falls the way a 2–50&nbsp;Hz band-pass + 10&nbsp;Hz
+        resonance should.
+      </p>
+    </div>
+
+    <!-- Impulse train -->
+    <div class="mode-panel" id="panel-impulse">
+      <h2>Repeated thump — closer proxy for footfall's transient shape</h2>
+      <p class="sub" style="margin:0 0 14px;">
+        A continuous tone is a poor stand-in for a footfall's actual shape (a sharp transient,
+        not a sustained oscillation). This fires short enveloped bursts at a set rate instead —
+        closer in character to a repeated stomp, still fully synthetic.
+      </p>
+      <div class="row">
+        <label>Burst tone</label>
+        <input type="range" id="impFreq" min="2" max="120" step="0.5" value="24">
+        <span class="val"><span id="impFreqVal">24.0</span> Hz</span>
+      </div>
+      <div class="row">
+        <label>Burst length</label>
+        <input type="range" id="impDur" min="20" max="500" step="5" value="80">
+        <span class="val"><span id="impDurVal">80</span> ms</span>
+      </div>
+      <div class="row">
+        <label>Rate</label>
+        <input type="range" id="impRate" min="20" max="120" step="1" value="60">
+        <span class="val"><span id="impRateVal">60</span> BPM</span>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:6px;">
+      <label>Output level</label>
+      <input type="range" id="gain" min="0" max="100" step="1" value="25">
+      <span class="val"><span id="gainVal">25</span>%</span>
+    </div>
+
+    <div class="btn-row">
+      <button class="primary" id="playBtn">▶ Start</button>
+      <button class="stop" id="stopBtn" disabled>■ Stop</button>
+    </div>
+
+    <div class="status idle" id="statusRow">
+      <span>Status: <span id="statusText">idle</span></span>
+      <span class="live" id="liveReadout"></span>
+    </div>
+  </div>
+
+  <footer>
+    Start the output level low (10–20%) and increase gradually — check the geophone's live
+    console/plot for clipping before raising volume further.<br>
+    This tool runs entirely in your browser via the Web Audio API — nothing is recorded or sent
+    anywhere.
+  </footer>
+</div>
+
+<script>
+let audioCtx = null;
+let activeNodes = [];
+let sweepTimer = null;
+let impulseTimer = null;
+let running = false;
+
+const tabs = document.querySelectorAll('.tab');
+const panels = { tone: document.getElementById('panel-tone'), sweep: document.getElementById('panel-sweep'), impulse: document.getElementById('panel-impulse') };
+let currentMode = 'tone';
+
+tabs.forEach(tab => {
+  tab.addEventListener('click', () => {
+    if (running) stop();
+    tabs.forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    Object.values(panels).forEach(p => p.classList.remove('active'));
+    currentMode = tab.dataset.mode;
+    panels[currentMode].classList.add('active');
+  });
+});
+
+function bindSlider(id, valId, fmt) {
+  const el = document.getElementById(id);
+  const valEl = document.getElementById(valId);
+  el.addEventListener('input', () => { valEl.textContent = fmt(el.value); });
+}
+bindSlider('toneFreq', 'toneFreqVal', v => parseFloat(v).toFixed(1));
+bindSlider('impFreq', 'impFreqVal', v => parseFloat(v).toFixed(1));
+bindSlider('impDur', 'impDurVal', v => Math.round(v));
+bindSlider('impRate', 'impRateVal', v => Math.round(v));
+bindSlider('gain', 'gainVal', v => Math.round(v));
+
+document.querySelectorAll('.preset').forEach(p => {
+  p.addEventListener('click', () => {
+    document.getElementById('toneFreq').value = p.dataset.freq;
+    document.getElementById('toneFreqVal').textContent = parseFloat(p.dataset.freq).toFixed(1);
+  });
+});
+
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+function currentGain() {
+  return document.getElementById('gain').value / 100 * 0.9; // headroom cap
+}
+
+function setStatus(text, live) {
+  document.getElementById('statusText').textContent = text;
+  document.getElementById('liveReadout').textContent = live || '';
+  document.getElementById('statusRow').classList.toggle('idle', !running);
+}
+
+function stopAllNodes() {
+  activeNodes.forEach(n => { try { n.stop(); } catch (e) {} try { n.disconnect(); } catch (e) {} });
+  activeNodes = [];
+}
+
+function playTone() {
+  const ctx = getAudioCtx();
+  const freq = parseFloat(document.getElementById('toneFreq').value);
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(0, ctx.currentTime);
+  gain.gain.linearRampToValueAtTime(currentGain(), ctx.currentTime + 0.15);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start();
+  activeNodes.push(osc, gain);
+  setStatus('running — continuous tone', freq.toFixed(1) + ' Hz');
+}
+
+function playSweep() {
+  const ctx = getAudioCtx();
+  const start = parseFloat(document.getElementById('sweepStart').value);
+  const end = parseFloat(document.getElementById('sweepEnd').value);
+  const dur = parseFloat(document.getElementById('sweepDur').value);
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(start, ctx.currentTime);
+  osc.frequency.linearRampToValueAtTime(end, ctx.currentTime + dur);
+  gain.gain.setValueAtTime(0, ctx.currentTime);
+  gain.gain.linearRampToValueAtTime(currentGain(), ctx.currentTime + 0.15);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start();
+  activeNodes.push(osc, gain);
+
+  const startTime = performance.now();
+  sweepTimer = setInterval(() => {
+    const elapsed = (performance.now() - startTime) / 1000;
+    if (elapsed >= dur) {
+      setStatus('sweep complete', end.toFixed(1) + ' Hz');
+      clearInterval(sweepTimer);
+      stop();
+      return;
+    }
+    const f = start + (end - start) * (elapsed / dur);
+    setStatus('running — sweep', f.toFixed(1) + ' Hz  (t=' + elapsed.toFixed(1) + 's / ' + dur + 's)');
+  }, 150);
+}
+
+function fireBurst() {
+  const ctx = getAudioCtx();
+  const freq = parseFloat(document.getElementById('impFreq').value);
+  const durMs = parseFloat(document.getElementById('impDur').value);
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  const g = currentGain();
+  const now = ctx.currentTime;
+  osc.type = 'sine';
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(g, now + 0.008);
+  gain.gain.setValueAtTime(g, now + durMs / 1000 - 0.01);
+  gain.gain.linearRampToValueAtTime(0, now + durMs / 1000);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(now);
+  osc.stop(now + durMs / 1000 + 0.02);
+}
+
+function playImpulse() {
+  const rate = parseFloat(document.getElementById('impRate').value); // BPM
+  const intervalMs = 60000 / rate;
+  let beat = 0;
+  fireBurst();
+  impulseTimer = setInterval(() => {
+    beat++;
+    fireBurst();
+    setStatus('running — impulse train', 'beat ' + beat + '  @ ' + rate + ' BPM');
+  }, intervalMs);
+  setStatus('running — impulse train', 'beat 0  @ ' + rate + ' BPM');
+}
+
+function start() {
+  if (running) return;
+  running = true;
+  document.getElementById('playBtn').disabled = true;
+  document.getElementById('stopBtn').disabled = false;
+  if (currentMode === 'tone') playTone();
+  else if (currentMode === 'sweep') playSweep();
+  else if (currentMode === 'impulse') playImpulse();
+}
+
+function stop() {
+  running = false;
+  document.getElementById('playBtn').disabled = false;
+  document.getElementById('stopBtn').disabled = true;
+  if (sweepTimer) { clearInterval(sweepTimer); sweepTimer = null; }
+  if (impulseTimer) { clearInterval(impulseTimer); impulseTimer = null; }
+  stopAllNodes();
+  setStatus('idle', '');
+}
+
+document.getElementById('playBtn').addEventListener('click', start);
+document.getElementById('stopBtn').addEventListener('click', stop);
+</script>
+</body>
+</html>

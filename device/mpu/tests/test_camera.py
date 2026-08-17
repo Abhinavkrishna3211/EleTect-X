@@ -120,7 +120,7 @@ def test_open_discards_exactly_warmup_frames():
 def test_open_raises_when_device_not_opened():
     """A device that never reports isOpened() raises CameraError, not a silent no-op."""
     factory = _factory(frames=[], opened=False)
-    camera = Camera(warmup_frames=0, capture_factory=factory)
+    camera = Camera(warmup_frames=0, open_retries=1, capture_factory=factory)
 
     with pytest.raises(CameraError, match="failed to open"):
         camera.open()
@@ -129,11 +129,67 @@ def test_open_raises_when_device_not_opened():
 def test_open_raises_when_warmup_grab_fails():
     """A failed grab during warmup raises and releases the handle, not a partial open."""
     factory = _factory(frames=[(True, "ok"), (False, None)])
-    camera = Camera(warmup_frames=2, capture_factory=factory)
+    camera = Camera(warmup_frames=2, open_retries=1, capture_factory=factory)
 
     with pytest.raises(CameraError, match="failed during warmup"):
         camera.open()
     assert factory.capture.released, "a failed warmup must still release the handle"
+
+
+# ---------------------------------------------------------------------------
+# open() retry policy
+# ---------------------------------------------------------------------------
+
+
+def _stateful_factory(captures):
+    """Build a capture_factory that returns a new capture object per call, in order.
+
+    Unlike `_factory()` (one fixed capture reused for the whole test), this
+    models a real retry: each open() attempt gets a fresh handle from a
+    fresh cv2.VideoCapture() call, which is what `open_v4l2_capture` (and
+    the real cv2.VideoCapture constructor) actually does.
+    """
+    captures = list(captures)
+    calls = []
+
+    def factory(device, width, height, fourcc):
+        calls.append((device, width, height, fourcc))
+        return captures.pop(0)
+
+    factory.calls = calls
+    return factory
+
+
+def test_open_retries_and_succeeds_after_transient_failure():
+    """A device that isn't opened yet on attempt 1 but is by attempt 2 still succeeds."""
+    captures = [
+        _FakeCapture(frames=[], opened=False),
+        _FakeCapture(frames=[(True, "ok")]),
+    ]
+    factory = _stateful_factory(captures)
+    camera = Camera(
+        warmup_frames=1, open_retries=3, open_retry_backoff_s=0.0, capture_factory=factory
+    )
+
+    camera.open()
+
+    assert len(factory.calls) == 2
+    assert captures[0].released, "the failed first attempt's handle must be released"
+
+
+def test_open_gives_up_after_exhausting_retries():
+    """A device that never opens raises after exactly open_retries attempts, not fewer or more."""
+    captures = [_FakeCapture(frames=[], opened=False) for _ in range(3)]
+    factory = _stateful_factory(captures)
+    camera = Camera(
+        warmup_frames=0, open_retries=3, open_retry_backoff_s=0.0, capture_factory=factory
+    )
+
+    with pytest.raises(CameraError, match="failed to open"):
+        camera.open()
+
+    assert len(factory.calls) == 3
+    assert all(c.released for c in captures)
 
 
 def test_open_caches_negotiated_info_not_requested_values():

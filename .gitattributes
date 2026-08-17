@@ -1,0 +1,14 @@
+# Normalize line endings to LF in the repository regardless of the
+# committing editor/OS's own settings or core.autocrlf. Without this, a
+# CRLF-saving editor on Windows produces diffs that touch every line of a
+# file instead of the real change (see git history 17 Aug 2026).
+* text=auto eol=lf
+
+# Binary assets - never touched by line-ending normalization.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.step binary
+*.stl binary
+*.xlsx binary
+*.pdf binary

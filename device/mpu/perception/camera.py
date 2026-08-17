@@ -190,6 +190,8 @@ class Camera:
         height: int = config.CAMERA_FRAME_HEIGHT,
         pixel_format: str = config.CAMERA_PIXEL_FORMAT,
         warmup_frames: int = config.CAMERA_WARMUP_FRAMES,
+        open_retries: int = config.CAMERA_OPEN_RETRIES,
+        open_retry_backoff_s: float = config.CAMERA_OPEN_RETRY_BACKOFF_S,
         capture_factory: Any = open_v4l2_capture,
     ) -> None:
         """Configure a camera without opening it - open() does the I/O.
@@ -202,6 +204,11 @@ class Camera:
             warmup_frames: Frames to grab and discard in open() before
                 caching CameraInfo and returning - covers UVC AE/AGC
                 settling (config.CAMERA_WARMUP_FRAMES's own rationale).
+            open_retries: Attempts open() makes (factory call + isOpened()
+                check + warmup) before raising CameraError. 1 means no
+                retry. See config.CAMERA_OPEN_RETRIES's own rationale.
+            open_retry_backoff_s: Seconds to sleep between failed open()
+                attempts. Ignored when open_retries <= 1.
             capture_factory: Callable(device, width, height, fourcc) ->
                 capture handle. Defaults to `open_v4l2_capture` (real
                 OpenCV/V4L2). The one injection seam in this module, and it
@@ -218,6 +225,8 @@ class Camera:
         self._height = height
         self._pixel_format = pixel_format
         self._warmup_frames = warmup_frames
+        self._open_retries = open_retries
+        self._open_retry_backoff_s = open_retry_backoff_s
         self._capture_factory = capture_factory
         self._capture: _CaptureHandle | None = None
         self._info: CameraInfo | None = None
@@ -236,40 +245,71 @@ class Camera:
     def open(self) -> None:
         """Open the device, apply format/resolution, and discard warmup frames.
 
-        A camera that fails to open is a real fault worth surfacing loudly
-        at startup - unlike capture_frame()'s per-grab failure handling,
-        there is no "degraded but still running" state for a device that
-        never came up at all.
+        Retries up to `open_retries` times (config.CAMERA_OPEN_RETRIES),
+        sleeping `open_retry_backoff_s` between attempts, before raising -
+        a fresh capture handle is requested from `capture_factory` each
+        attempt, since a device that failed to open or dropped mid-warmup
+        needs a new handle, not a retried read() on the old one. A camera
+        that still hasn't come up after all attempts is a real fault worth
+        surfacing loudly - unlike capture_frame()'s per-grab failure
+        handling, there is no "degraded but still running" state for a
+        device that never came up at all.
 
         Raises:
-            CameraError: If the device fails to open, or if fewer than
-                `warmup_frames` frames can be grabbed during warmup.
+            CameraError: If the device still fails to open, or fewer than
+                `warmup_frames` frames can be grabbed during warmup, after
+                `open_retries` attempts.
         """
-        capture = self._capture_factory(
-            self._device, self._width, self._height, self._pixel_format
-        )
-        if not capture.isOpened():
-            raise CameraError(f"failed to open camera device {self._device!r}")
-        self._capture = capture
+        last_error = ""
+        for attempt in range(1, self._open_retries + 1):
+            capture = self._capture_factory(
+                self._device, self._width, self._height, self._pixel_format
+            )
+            if not capture.isOpened():
+                capture.release()
+                last_error = f"failed to open camera device {self._device!r}"
+            else:
+                last_error = self._consume_warmup_frames(capture)
+                if not last_error:
+                    self._capture = capture
+                    self._info = CameraInfo(
+                        device=self._device,
+                        width=int(capture.get(_CAP_PROP_FRAME_WIDTH)),
+                        height=int(capture.get(_CAP_PROP_FRAME_HEIGHT)),
+                        fourcc=_read_fourcc(capture),
+                        fps=float(capture.get(_CAP_PROP_FPS)),
+                    )
+                    logger.info("camera opened: %s", self._info)
+                    return
 
+            if attempt < self._open_retries:
+                logger.warning(
+                    "camera %s: open attempt %d/%d failed (%s), retrying in %.1fs",
+                    self._device,
+                    attempt,
+                    self._open_retries,
+                    last_error,
+                    self._open_retry_backoff_s,
+                )
+                time.sleep(self._open_retry_backoff_s)
+
+        raise CameraError(f"{last_error} (after {self._open_retries} attempt(s))")
+
+    def _consume_warmup_frames(self, capture: _CaptureHandle) -> str:
+        """Grab and discard `warmup_frames` frames; release and return an error on failure.
+
+        Returns:
+            "" on success, else a message describing which warmup frame failed.
+        """
         for i in range(self._warmup_frames):
             ok, _ = capture.read()
             if not ok:
                 capture.release()
-                self._capture = None
-                raise CameraError(
+                return (
                     f"camera {self._device!r} failed during warmup "
                     f"(frame {i + 1}/{self._warmup_frames})"
                 )
-
-        self._info = CameraInfo(
-            device=self._device,
-            width=int(capture.get(_CAP_PROP_FRAME_WIDTH)),
-            height=int(capture.get(_CAP_PROP_FRAME_HEIGHT)),
-            fourcc=_read_fourcc(capture),
-            fps=float(capture.get(_CAP_PROP_FPS)),
-        )
-        logger.info("camera opened: %s", self._info)
+        return ""
 
     def capture_frame(self) -> Frame | None:
         """Capture a single frame.

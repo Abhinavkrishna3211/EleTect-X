@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "Arduino_RouterBridge.h"
 #include "Wire.h"
 
 namespace {
@@ -180,6 +181,12 @@ int TwoWire::read() { return 0; }
 
 TwoWire Wire;
 TwoWire Wire1;
+
+void BridgeClass::begin() {}
+
+void BridgeClass::update() {}
+
+BridgeClass Bridge;
 
 #ifndef PIO_UNIT_TESTING
 // The firmware's entry points are setup()/loop(), which the Arduino Core

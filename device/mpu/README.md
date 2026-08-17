@@ -91,7 +91,7 @@ silently gives no positive confirmation it was received at all. See the precisio
    since this app is throwaway):
 
    ```bash
-   rsync -avz device/mpu/bench/ping/ arduino@<board-host>:/home/arduino/arduino_apps/ping-bench/
+   rsync -avz device/mpu/bench/ping/ arduino@<board-host>:/home/arduino/ArduinoApps/ping-bench/
    ```
 
 2. Open the app in App Lab (or `ssh` in and use the Arduino App CLI) and build/run it.

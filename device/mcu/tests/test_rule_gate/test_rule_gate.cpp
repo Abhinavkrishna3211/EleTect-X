@@ -6,7 +6,7 @@
 
 #include <cstdint>
 
-#include "actuators/rule_gate.h"
+#include "rule_gate.h"
 
 void setUp() {}
 void tearDown() {}

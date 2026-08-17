@@ -225,7 +225,7 @@ def main() -> int:
 
     if len(burst) > 1:
         intervals = [
-            b.timestamp_s - a.timestamp_s for a, b in zip(burst, burst[1:], strict=True)
+            b.timestamp_s - a.timestamp_s for a, b in zip(burst[:-1], burst[1:], strict=True)
         ]
         print(f"  inter-frame intervals (s): {[round(i, 4) for i in intervals]}")
 
