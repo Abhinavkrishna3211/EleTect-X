@@ -310,12 +310,21 @@ kept up to date live through tonight's session. Highest-priority items as of the
 3. **The fire-test harness's software path is now verified on real hardware (15 Aug)** — correct
    `[firetest]` acks and cooldown refusal for all four commands. **Physical activation is not yet
    confirmed: horn, LED, and IR are not wired to the board.** Re-run once wiring exists.
-4. **LoRa `Serial` vs `Serial1` conflict with Bridge — mostly resolved on paper, not yet on hardware.**
-   A documentation pass (official datasheet + `Arduino_RouterBridge` README + Arduino Forum reports,
-   citations in `docs/eletect-x-applab-notes.md`) found a real lean toward `Serial1` being Bridge's own
-   internal link and `Serial` being what actually reaches the Grove LoRa-E5 — opposite of `config.h`'s
-   current `LORA_SERIAL Serial1` default. Not confirmed on this board yet. Needs a live test: both
-   objects active simultaneously, see which one the E5 actually answers on.
+4. **LoRa `Serial` vs `Serial1` conflict — closed, 18 Aug; module itself is now the open item.** Grove
+   LoRa-E5 physically wired for the first time (D0/D1 = USART1). Confirmed `Serial` (not `Serial1`) is
+   correct by reading the board's own devicetree overlay directly plus a live `journalctl -u
+   arduino-router` cross-check (both no-sudo, over plain SSH) — `config.h` updated and committed
+   (`47785ec`). But the real join test on the corrected wire got **zero response bytes from the module**
+   across all 6 AT-probe retries (90 s capture, port-7500 console tap). So the "+JOIN: Done" AT-sequence
+   fix in `mac.cpp` (already committed, `b69799f`) is still unproven on hardware — join never gets past
+   the first "AT". Two untested candidate causes needing physical hands, not more SSH: a 5V-power/3.3V-MCU-TX
+   logic-level mismatch on the module's RX line, or the module not being in AT-command mode out of the
+   box. Full capture, wiring photo description, and a third possible cause in
+   `docs/KNOWN_GAPS.md`'s 18 Aug entry. Also newly found: the console debug prints and LoRa AT traffic
+   permanently share this one physical wire now (`Serial` is both), which is fine today (defaults are
+   quiet) but will corrupt an in-flight join if a real footfall trigger fires mid-sequence — needs a fix
+   before the field trial, tracked separately. Wiring-status table in `UNO_Q_PINOUT_REFERENCE.md` stays
+   at **P** (wired, not confirmed working) — not flipped to **W**.
 5. **USB-C host-mode-under-VIN-power is unverified.** If the camera doesn't enumerate under VIN power
    (not USB-C power), the whole vision pipeline architecture needs rework. Check this early, once past
    the geophone work. **Related (not a substitute) check done 17 Aug on USB-C/PD power, not VIN:**
