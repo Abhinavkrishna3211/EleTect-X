@@ -405,16 +405,23 @@ repeated field service, echoing the old infographic's own "Modular Replacement: 
 idea, which is worth keeping outright - a ranger should be able to swap one failed pod without opening the
 main hatch.
 
-**Camera + IR window, real numbers.** The Arducam B0496 module's own datasheet gives a real lens spec:
-98(D) x 85(H) x 69(V) FOV, M12 mount, 3.9mm effective focal length, F1.0, **fixed focus 3m-infinity**. The
-fixed-focus range is a real optical constraint worth designing around deliberately, not discovering in
-footage afterward: anything closer than ~3m from the lens will be soft, which includes the most dramatic
-moment this project wants on camera - an elephant close enough to react to the horn/LED/IR burst. Nothing
-in the enclosure design fixes that (it needs a different lens if it matters enough to fix), but it's worth
-flagging plainly here since it directly bears on where footage quality will and won't hold up. Separately
-and more urgently: whether this specific camera can see the 940nm illuminator at all is now an open,
-unverified risk - see the new entry in docs/KNOWN_GAPS.md (17 Aug) - and that needs a bench answer before
-the IR window/baffle details below are worth finishing.
+**Camera + IR window, real numbers.** Corrected 17 Aug 2026 - the real camera is Arducam ASIN
+B0CQ4QDCXN / metal-case variant B0490 (confirmed via the real product listing, not a mis-matched
+datasheet - see docs/KNOWN_GAPS.md's same-day correction entry), not the unrelated B0496 module first
+(wrongly) checked. Real lens spec: 95(D) x 83(H) x 67(V) FOV, M12 mount, 3.9mm effective focal length,
+F1.0, **manual focus** (not fixed) - meaning focus needs to be set correctly once during assembly/install
+rather than trusted to auto-resolve, and at F1.0's inherently shallow depth of field, worth deliberately
+focusing on the expected mid-range engagement distance (once the outdoor range test below has a real
+number) rather than leaving it at whatever the module ships focused to. Real day/night IR-cut switching
+is automatic (photosensitive-resistor-driven), and the module already carries 6x onboard 940nm IR LEDs
+of its own (~3m native range) - the separately purchased 48-LED external board is a real range
+extension on top of this, not the sole IR source, so the two need to work together rather than be
+designed as if only one exists. Board itself is small: 32x32mm, 28x28mm mounting hole pitch, ships in
+its own metal case, USB 2.0, B4B-ZR connector, 5V/1.2W max - all real numbers to design the shared
+window and standoff mounts against directly, no more assumed footprint needed here. One easy-to-miss
+detail: the module includes its own single onboard microphone - not this project's real acoustic path
+(that's the separate INMP441 I2S mic per CONTEXT.md 3), don't let the two get confused during wiring or
+in any BOM/schema reference.
 
 **Camera tilt angle - method, not a fixed number.** Real corridor distance to the mounted node is not yet
 known (the outdoor detection-range characterization test is still open per the sprint tracker), so bake in
@@ -426,16 +433,19 @@ atan((mount_height - target_center_height) / target_distance). At a 2.75m mount 
 (~1.5m) at an assumed ~15m engagement distance gives atan(1.25/15) ~= 4.8 degrees down from level - a
 small, plausible number, not a large fixed downward cant. Re-tune once real distance data exists.
 
-**IR illuminator co-alignment.** The real board in hand is a 68mm x 50mm bare, non-waterproof PC board
-(48 x 940nm LEDs, DC12V/300mA/3W, 600mm pigtail) - it must live fully inside the sealed window cavity,
-never at the surface, which the existing baffled/standoffed shared-window plan (see "Cross-component
-interference review" above) already accounts for. Its real beam angle isn't documented on the purchased
-listing; comparable 48-LED 940nm boards on the market commonly run 90-120 degrees, which would be wider
-than the camera's own 85(H)/69(V) FOV - a good outcome if true, since a wider illumination cone than the
-capture FOV means no dark corners in-frame and mounting doesn't need precision alignment, just
-co-location and a roughly parallel boresight. Worth a five-minute bench check once the IR-sensitivity
-question above is resolved: power the board in a dark room, mark the illuminated circle's edge on a wall
-at a measured distance, compute the half-angle - cheap, and turns an assumption into a real number.
+**IR illuminator co-alignment.** The external board in hand is a 68mm x 50mm bare, non-waterproof PC
+board (48 x 940nm LEDs, DC12V/300mA/3W, 600mm pigtail) - it must live fully inside the sealed window
+cavity, never at the surface, which the existing baffled/standoffed shared-window plan (see
+"Cross-component interference review" above) already accounts for. It works alongside, not instead of,
+the camera module's own 6x onboard 940nm LEDs (~3m native range per the corrected spec above) - the
+onboard LEDs cover close range, the external board is what actually reaches the 30-40m class distances
+this project needs. Its real beam angle isn't documented on the purchased listing; comparable 48-LED
+940nm boards on the market commonly run 90-120 degrees, which would be wider than the camera's own
+83(H)/67(V) FOV - a good outcome if true, since a wider illumination cone than the capture FOV means no
+dark corners in-frame and mounting doesn't need precision alignment, just co-location and a roughly
+parallel boresight. Worth a five-minute bench check regardless: power the board in a dark room, mark the
+illuminated circle's edge on a wall at a measured distance, compute the half-angle - cheap, and turns an
+assumption into a real number.
 
 **LED deterrence spread.** Keep the old infographic's 20-30 degree outward angle for each side pod - a
 physically reasonable peripheral-coverage figure, consistent with the pod's own mounting geometry once

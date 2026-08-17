@@ -1334,3 +1334,17 @@ and re-flashed with `SEISMIC_DEBUG_VERBOSE` reverted to `0` after the run, confi
 **Camera's IR-cut filter may be fixed/visible-light-only, not day/night switchable - urgent, unverified against the physical unit, flagged 17 Aug 2026.** The camera module in the BOM (Arducam IMX462, product B0496) has its own published datasheet stating "Integral IR-cut Filter, visible light only" (blog.arducam.com/downloads/datasheet/B0496_IMX462_USB3.0_Camera_Module_Datasheet.pdf), with no day/night ICR-switching mentioned - a fixed filter, not a switchable one. Arducam separately sells a distinct IMX462 SKU explicitly marketed as "Day and IR Night Vision" with automatic IR-cut switching and bundled 940nm LEDs - a different product from B0496. If the physical camera actually in hand is the fixed-filter B0496 variant, the filter blocks the 940nm band before it reaches the sensor: the IR illuminator already purchased (hardware/bom/procurement-status.md 2) would be producing light the camera cannot see, and night footage would be visible-light-only - effectively black in the field, since no visible illumination source is planned. Not caught in ~3 weeks of camera bring-up because every confirmed test so far (V4L2 device discovery, capture_check.py, MJPG/YUYV format confirmation) exercised daylight/visible capture only, never IR sensitivity specifically.
 
 Cheap, decisive test, not yet run: in a dark room, power the real IR illuminator board next to the real camera and grab a frame via capture_check.py (or App Lab's live view). If the illuminated scene is visible in the capture, the sensor is IR-sensitive regardless of what the datasheet says for a differently-labeled SKU; if the frame is black, the filter is blocking it as the datasheet suggests. Severity: high if confirmed - directly threatens the stated contest-footage goal for any dusk/night elephant activity, and the field deployment's most likely detection windows. Effort: about 10 minutes of bench time to test; if confirmed bad, remediation (sourcing the actual day/night SKU, or a NoIR conversion) needs lead time against the 20 Aug deadline. Status: open, unverified - test before any further camera/IR window work this week.
+
+**Correction, same day (17 Aug 2026): the risk above was researched against the wrong SKU - closed,
+not a real gap.** The datasheet fetched was for Arducam B0496, an unrelated fixed-focus/fixed-IR-cut
+module never actually specified anywhere in this project. The real camera this project has always
+specified (ADR 0001, `hardware/bom/bom.md`, `CONTEXT.md`) is ASIN B0CQ4QDCXN, metal-case variant
+B0490 - confirmed via the real product listing (fabtolab.com/arducam-b0490-2mp-imx462-day-ir-night-vision-usb-camera-metal-case):
+"Dual Bandpass Filter Visible + 940nm NIR" with automatic day/night switching via a photosensitive
+resistor, plus 6x onboard 940nm IR LEDs of its own (~3m range - the separately purchased 48-LED
+external board is a real-range extension on top of this, not the sole IR source). Real FOV is
+95(D) x 83(H) x 67(V) degrees (not B0496's 98/85/69), manual focus (not B0496's fixed 3m-infinity),
+USB 2.0 (not USB 3.0), 32x32mm board / 28x28mm mounting hole pitch, 5V / 1.2W max, B4B-ZR connector,
+includes its own single onboard mic (not the project's INMP441 acoustic path - don't confuse the two).
+`hardware/cad/enclosure-design-concept.md`'s take-four section corrected to match. Status: closed -
+day/night IR sensing is real and intact as originally designed; no remediation needed.
