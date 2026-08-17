@@ -47,10 +47,15 @@ device/mpu/models/**/*.tflite
 # --- Design export cache (keep the .dc.html spec + assets, not the paste cache) ---
 docs/design-reference/uploads/
 
+# --- Bench-session capture artifacts (reproducible via scripts/, not source) ---
+scripts/bench-logs/
+device/mpu/bench/camera_check/output/
+
 # --- OS / editor ---
 .DS_Store
 Thumbs.db
 *.swp
+.~lock.*#
 
 # --- Secrets ---
 secrets/
