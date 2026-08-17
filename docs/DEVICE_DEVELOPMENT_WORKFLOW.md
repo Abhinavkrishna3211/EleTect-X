@@ -112,8 +112,10 @@ fail or mislead if assumed otherwise.
 **Bricks** are pre-built, attachable modules (Web Server, Camera, Object Detection, Climate/Modulino,
 **and — critical for us — pre-built Edge Impulse demo bricks**, see §4).
 
-**App files live on the board's own Linux filesystem** (`/home/arduino/arduino_apps/<app>/`), not your PC
-— even in "PC mode" over USB. Confirmed independently and consistent with Arduino's own setup docs, which
+**App files live on the board's own Linux filesystem** (`/home/arduino/ArduinoApps/<app>/` — CamelCase,
+confirmed on real hardware 30 Jul 2026 via `arduino-app-cli config get`'s own "Apps Directory" field; an
+earlier pass at this document had it as lowercase `arduino_apps`, which does not exist on the board), not
+your PC — even in "PC mode" over USB. Consistent with Arduino's own setup docs, which
 explicitly recommend **VS Code Remote-SSH** as a first-class way to work on the board — with one real
 gotcha, straight from Arduino's own documentation: **disable GitHub Copilot and similar heavy extensions
 when Remote-SSH'd into the board — they can cause memory issues on this low-RAM device.**
@@ -134,10 +136,13 @@ sudo ssh-keygen -A
 sudo systemctl start sshd
 
 # From your dev machine
-ssh arduino@<board-ip>                        # default password: arduino
+ssh arduino@<board-ip>                        # factory default password: arduino
 ```
-Default Linux login is `arduino`/`arduino` — change it (`adb shell` → `sudo passwd arduino`) before this
-node ever leaves the bench, this is a real production-auth item per the deployment bar in `CLAUDE.md`.
+Factory-default Linux login is `arduino`/`arduino` — change it (`adb shell` → `sudo passwd arduino`)
+before this node ever leaves the bench, this is a real production-auth item per the deployment bar in
+`CLAUDE.md`. **Confirmed already done for the `EleTect-X` board** (Rung 0, §7 below) — `arduino`/`arduino`
+no longer authenticates against it. The current password is intentionally not recorded in this repo
+(no secrets in git, per `CLAUDE.md`); get it out-of-band from whoever ran Rung 0 if you need bench access.
 
 **Simpler confirmed path, read directly from App Lab's own Learn pages (28 Jul 2026), supersedes the manual
 adb dance above for day-to-day use once First Setup has run once:** App Lab's First Setup wizard (already
