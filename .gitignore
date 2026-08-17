@@ -2,6 +2,7 @@
 # Machine-local tooling notes are excluded via .git/info/exclude, which is not
 # committed — this file stays free of local tool names.
 .cursor/
+.agents/
 *.local.md
 
 # --- Python ---
