@@ -18,6 +18,32 @@ uploaded PDF/datasheet directly — see the corrections marked below). Every sec
 **[HIGH CONFIDENCE]** (unambiguous from the start) or **[CONFIRMED]** (corrected against the real PDF).
 No remaining `[VERIFY VISUALLY]` items.
 
+## Wiring status — physical board, live tracker
+
+This section tracks what is actually soldered/jumpered to the real board right now, as distinct from
+the pin *assignments* in the tables below (which are just what `config.h` claims a pin is for). Same
+discipline as `hardware/bom/procurement-status.md` tracking real-world part status separately from
+`bom.md`'s static spec — **update this table directly as wiring changes; don't let it go stale.**
+
+Snapshot: **18 Aug 2026.**
+
+Legend: **W** = wired and confirmed on hardware · **P** = wiring in progress today · **U** = unwired
+
+| Pin(s) | MCU pin | Function | Status | Note |
+|---|---|---|---|---|
+| D20 / D21 | PB11 / PB10 | Geophone front-end, I2C2 (ADS1115 bench stand-in) | **W** | Confirmed wired. |
+| D0 / D1 | PB7 / PB6 | Grove LoRa-E5, USART1 | **P** | Physically wired 18 Aug (Yellow=module TX→D0, White=module RX→D1, Red=VCC→5V, Black=GND→GND). `LORA_SERIAL` confirmed to be `Serial` (not `Serial1`) via the board's own devicetree overlay + live `journalctl -u arduino-router` cross-check — `config.h` updated. Left at **P**, not **W**: live join test over the correct wire got zero response bytes from the module across 6 AT-probe retries — see `docs/KNOWN_GAPS.md`'s 18 Aug entry for the full capture and candidate causes (logic-level mismatch at 5V power vs 3.3V MCU TX, or module not in AT-command mode). Needs physical follow-up before this flips to **W**. |
+| D2 | PB3 | Audio trigger — DFPlayer IO/ADKEY | **U** | Not wired. Last confirmed unwired 15 Aug (`docs/KNOWN_GAPS.md` fire-test-harness entry, confirmed with Abhinav); re-confirmed still unwired 18 Aug. |
+| D4 | PA12 | Horn amp enable — TPA3116D2 shutdown | **U** | Not wired. Same 15/18 Aug confirmation as D2. |
+| D5 | PA11 | LED white | **U** | Not wired. Same 15/18 Aug confirmation as D2. |
+| D6 | PB1 | LED blue | **U** | Not wired. Same 15/18 Aug confirmation as D2. |
+| D7 | PB2 | IR illuminator | **U** | Not wired. Same 15/18 Aug confirmation as D2. |
+
+The fire-test harness's software path (`docs/specs/mcu-fire-test-harness.md`) is already verified end to
+end on real firmware — see `docs/KNOWN_GAPS.md`'s 15 Aug entry — but physical activation of horn/LED/IR
+cannot be confirmed until D2/D4/D5/D6/D7 above move to **W**. Re-run that checklist, this time
+watching/listening for each fire, once they are.
+
 ## Top-level architecture
 
 Two independent processors, one board, one USB-C port:

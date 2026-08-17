@@ -714,6 +714,64 @@ criteria — see each entry's status.
   runs the same grep directly on the board) remains the only way to close this. `config.h`'s
   `LORA_SERIAL` default is left unchanged (`Serial1`) — nothing found here settles it either way, so
   flipping it would be a coin flip, not a fix.
+- **`LORA_SERIAL` Serial-vs-Serial1 question above is now resolved — `Serial` is correct — but
+  resolving it exposed a bigger, still-open problem: the physically wired Grove LoRa-E5 does not
+  answer AT commands at all, 18 Aug.** Module was physically wired for the first time this session
+  (Yellow=module TX→D0, White=module RX→D1, Red=VCC→5V, Black=GND→GND; D0/D1 = USART1 = PB7/PB6,
+  confirmed against `hardware/references/UNO_Q_PINOUT_REFERENCE.md`'s own pin table, no conflict with
+  the geophone's I2C2 on D20/D21). Resolved which `HardwareSerial` object is real by reading the
+  board's own installed `arduino:zephyr` core devicetree overlay directly over SSH (no sudo needed):
+  `&usart1` (D0/D1) is bound to `zephyr,console`, while `arduino,router-serial = <&lpuart1>` — a
+  separate, header-inaccessible internal peripheral — is what Bridge uses; the overlay's own comment
+  reads "'Serial' is provided by the Monitor". Independently cross-checked live: `journalctl -u
+  arduino-router` (also no sudo) shows arduino-router opening `/dev/ttyHS1`, the Linux-side node for
+  that same `lpuart1` link. Both sources agree: `Serial`, not `Serial1`, is what reaches the physical
+  E5 — the community forum reports cited above were right. `config.h`'s `LORA_SERIAL` has been changed
+  to `Serial` on this evidence (committed this session).
+  Once pointed at the right object, ran the real join sequence on hardware (`arduino-app-cli app
+  restart`, captured raw bytes off the port-7500 console-bridge tap that HANDOVER.md's 14 Aug entry
+  documents). Result: `mac.cpp`'s `kIdle`→`kProbing` state machine transmitted "AT\r\n" exactly six
+  times (one initial attempt + `LORA_JOIN_MAX_RETRIES`=5 retries, all within ~12 s) then correctly
+  entered `kFailed` and stopped — but **zero bytes came back from the module at any point**, across
+  the full 90 s capture window. The firmware-side logic is behaving exactly as designed; the module
+  itself is not answering. This means the "+JOIN: Done" AT-string fix in `mac.cpp`/`mac.h` (already
+  committed, `b69799f`) is still **unproven on hardware** — the join sequence never gets past the very
+  first "AT" probe, so nothing downstream of that has been exercised yet.
+  Two candidate root causes, neither confirmed, both need physical hands (not further SSH work):
+  (1) **logic-level mismatch** — the E5 is powered from 5V (Red wire) per Seeed's spec range
+  (3.3–5V), but this MCU's GPIOs including D0/D1 are 3.3V logic (5V-tolerant on input only, per
+  `UNO_Q_PINOUT_REFERENCE.md`); if the module's RX line expects a 5V-level HIGH to register a bit,
+  the MCU's 3.3V TX (D1→White→module RX) could be an unrecognized signal to the module while the
+  module's own TX (Yellow→D0, into a 5V-tolerant input) would still register fine on the MCU side —
+  which matches the observed one-way-silent symptom exactly. Worth trying: power the module from
+  3.3V instead of 5V and re-test, or add a level shifter. (2) **module not in AT-command mode** —
+  Seeed's own Wio-E5 docs describe an internal pin state (their PB13, on the E5's own STM32WLE5,
+  distinct from anything on this host board) that must be asserted for the module to boot into
+  interactive AT mode at all; if this specific module unit is out of the box in a different mode
+  (e.g. a preloaded demo/class-A runtime), plain "AT" probes would go unanswered exactly like this.
+  Also worth a cheap, low-effort check regardless of either theory above: verify the module's power
+  LED is actually lit, double check the Yellow/White wire identification against the module's own
+  TXD/RXD silkscreen (Grove cable color-to-pin convention is not universally standardized across all
+  4-pin Grove variants) rather than assumed color convention, and reseat all four jumpers.
+  Separately, confirmed this session that the shared-wire architecture risk flagged in `config.h`'s
+  updated comment is real, not hypothetical: `state_machine.cpp`'s unconditional `[trigger]`/`[notify]`
+  prints (fire on every real geophone trigger, no debug flag gate) go out over the exact same physical
+  wire as LoRa AT traffic now that `LORA_SERIAL` is `Serial`. Observed live: an incidental geophone
+  trigger fired mid-capture (t=21016 ms, ratio=4.05, probably just bench vibration, not a deliberate
+  stomp) and printed cleanly — confirming the double `Serial.begin()` (console at 115200 in `setup()`,
+  then `lora_init()` reopening the same object at 9600) does not corrupt what this particular console
+  tap reads back, which resolves that specific worry. But it does not change the fact that whatever
+  goes out over `Serial` also physically reaches the E5's RX pin: a footfall trigger firing while a
+  join attempt is mid-flight would send the E5 raw text it will parse as line noise or a garbled AT
+  command. This trigger happened safely after the 6 retries had already exhausted, so it isn't what
+  caused today's zero-response result, but it will recur in the field on every real trigger and needs
+  its own fix (e.g. gate those prints, or move them to `Bridge.notify()` the way
+  `SEISMIC_DEBUG_STREAM_RAW` already does) before the 20 Aug deployment.
+  Status: `Serial`-vs-`Serial1` closed for good; `mac.cpp`'s AT-sequence fix still unproven on hardware
+  (blocked on the module actually responding); the console/LoRa wire-sharing conflict is a newly
+  identified, separate open item. Wiring-status table in `UNO_Q_PINOUT_REFERENCE.md` left at **P**
+  (physically wired, not confirmed working end-to-end) — not flipped to **W**, since it demonstrably
+  does not work yet.
 - **The manual serial fire-test harness (`device/mcu/src/fire_test.*`,
   `docs/specs/mcu-fire-test-harness.md`) now exists as the intended mechanism to close two open
   items above rather than closing them itself.** It gives a human a one-keystroke way to call
