@@ -1,4 +1,4 @@
-# EleTect X — Handover (last updated 15 Aug 2026, night — multi-trial stomp validation closed on real hardware; fire-test harness software path verified on real hardware, physical actuators not yet wired)
+# EleTect X — Handover (last updated 17 Aug 2026 — camera path closed out on real hardware: `CAMERA_DEVICE` fixed to a udev by-id path and proven stable across a full reboot and a physical unplug/replug, `python3-opencv` installed, `capture_check.py` passing end-to-end, `Camera.open()` now retries with backoff; 15 Aug entries below — multi-trial stomp validation closed on real hardware; fire-test harness software path verified on real hardware, physical actuators not yet wired — still current)
 
 This file exists so work can continue with zero lost context if the planning session moves to a
 different Claude account/session. Read this file, then `CONTEXT.md`, before doing anything else.
@@ -318,9 +318,50 @@ kept up to date live through tonight's session. Highest-priority items as of the
    objects active simultaneously, see which one the E5 actually answers on.
 5. **USB-C host-mode-under-VIN-power is unverified.** If the camera doesn't enumerate under VIN power
    (not USB-C power), the whole vision pipeline architecture needs rework. Check this early, once past
-   the geophone work.
+   the geophone work. **Related (not a substitute) check done 17 Aug on USB-C/PD power, not VIN:**
+   IMX462 → Portronics hub → UNO Q's USB-C port, board powered via the hub's PD passthrough from a 45W
+   charger. Camera enumerated fine (`lsusb`, six `/dev/video*` nodes) — confirms the single USB-C port
+   can be a PD sink and USB host simultaneously, which was itself unconfirmed, but says nothing about
+   the VIN case, which still needs its own test.
+   **Both real findings from that pass are now closed, same day (17 Aug), with the camera path proven
+   robust, not just patched:**
+   (a) `services/config.py`'s `CAMERA_DEVICE` no longer points at `/dev/video0` (the SoC's own
+   `qcom-venus` hardware encoder, not the camera) or at any bare index at all — it now points at the
+   udev `/dev/v4l/by-id/usb-Arducam_Technology_Co.__Ltd._USB_2.0_Camera_SN0001-video-index0` symlink,
+   keyed on the camera's own USB serial rather than bus topology or enumeration order. This mattered
+   more than expected: a full board reboot was tested and the raw `/dev/videoN` indices genuinely
+   reshuffled underneath the camera (video1/2/4/5 before → video0/1/2/3 after, as the SoC codec and the
+   UVC driver raced differently on the two boots) — a bare-index fix of any kind, including `/dev/video1`,
+   would have broken again on the very next reboot. The by-id path survived both that reboot and a
+   physical camera unplug/replug (board left powered) with zero code changes both times.
+   (b) `python3-opencv` is now installed on the board (`4.10.0+dfsg-5`, confirmed via
+   `python3 -c "import cv2"`).
+   With both fixed, `bench/camera_check/capture_check.py --backend v4l2 --probe` — the real exit
+   criterion, not the `v4l2-ctl` workaround — now runs end-to-end and was confirmed three times (fresh,
+   post-reboot, post-replug): negotiates 1920x1080 MJPG @30fps as configured, saves real single+burst
+   JPEG frames to `output/`. `dmesg` across both reboot and replug showed no USB errors beyond one
+   benign recurring UVC audio-endpoint quirk (`cannot get freq at ep 0x84`) present on every
+   enumeration including the very first cold boot; the replug's disconnect→reconnect gap was ~8.6s.
+   Full verification detail: `docs/KNOWN_GAPS.md`'s "Camera device-path robustness" entry.
+   **New from the same pass:** `perception/camera.py`'s `Camera.open()` had zero retry logic — fixed,
+   now retries up to `CAMERA_OPEN_RETRIES` (3, 2.0s backoff, `services/config.py`) before raising, so a
+   device that isn't there yet at startup can recover without code changes. `capture_frame()` /
+   `capture_burst()` remain deliberately non-retrying (unchanged, already-documented honest-failure
+   design). Still genuinely open, logged in `docs/KNOWN_GAPS.md` with a recommendation rather than
+   decided here: there is no supervisory recovery yet for a camera that dies *mid-run* (no consuming
+   loop exists — `main.py`/`reflex_loop.py` have no detector/camera integration at all yet), so that
+   policy is deferred to whoever builds the vision detector/reflex-loop integration.
 6. **SenseCAP gateway is still labeled EU868**, must be set to IN865 region profile in ChirpStack and
    join-tested before any real transmission — transmitting on 868MHz is illegal in India.
+   **Research pass done (16 Aug, no hardware touched yet):** step-by-step console-access,
+   channel-plan, and ChirpStack-registration procedure written up from Seeed's official wiki/PDF
+   and two independent real IN865-in-India deployment write-ups — see
+   `docs/research/sensecap_gateway_in865_chirpstack_setup.md`. One real open risk flagged there:
+   Seeed only sells this gateway as separate EU868/US915/AU915/AS923 SKUs (no IN865 SKU listed),
+   and neither real-world write-up explicitly confirms IN865 appears as a selectable entry in the
+   `LoRa > Channel Plan` dropdown — both just proceeded from EU868-labeled hardware without
+   reporting a wall. Strongly suggestive, not confirmed. First action on unboxing should be
+   opening that dropdown and looking, before any ChirpStack wiring.
 7. **`loop()` has no task/priority separation** — an actuator fire (horn especially, ~3.15s worst case)
    currently blocks geophone/LoRa servicing for that whole window. Logged, not scheduled before Aug 20,
    flagged so the trial's data gets read with that caveat.

@@ -76,10 +76,16 @@ def test_camera_device_is_a_v4l2_path():
     """CAMERA_DEVICE must look like a V4L2 device node, not a Windows/OS-default path.
 
     perception/camera.py's own backend choice (cv2.CAP_V4L2, forced
-    explicitly) only makes sense against a /dev/videoN path - this catches
-    a future edit accidentally pointing it somewhere else.
+    explicitly) only makes sense against a /dev/video* path - this catches
+    a future edit accidentally pointing it somewhere else. Deliberately not
+    "/dev/video" - a bare /dev/videoN index is exactly the failure mode
+    docs/KNOWN_GAPS.md ruled out (it reshuffles across reboots/hub
+    reconnects, and on this board even landed on the wrong device class
+    once); CAMERA_DEVICE is a /dev/v4l/by-id/ symlink instead.
     """
-    assert config.CAMERA_DEVICE.startswith("/dev/video")
+    assert config.CAMERA_DEVICE.startswith("/dev/video") or config.CAMERA_DEVICE.startswith(
+        "/dev/v4l/by-id/"
+    )
 
 
 def test_camera_pixel_format_is_a_valid_fourcc_length():

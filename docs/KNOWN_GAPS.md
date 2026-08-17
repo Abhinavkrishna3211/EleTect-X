@@ -206,21 +206,146 @@ criteria — see each entry's status.
   confirms it; `hardware/references/UNO_Q_PINOUT_REFERENCE.md` only notes a `VBUS_DISABLE` signal on
   the USB-C connector, not host-mode behavior under VIN power. High severity — blocks the entire
   vision capture module if false. Effort: `lsusb` and `ls /dev/video*` over SSH with the camera (via
-  the spare USB hub, `hardware/bom/procurement-status.md`) attached. Status: open, pending hardware.
-- **Exact V4L2 device path is unverified.** `services/config.py`'s `CAMERA_DEVICE` defaults to
-  `/dev/video0`, a guess — UVC devices commonly expose a second metadata-only node alongside the
-  real capture node, and the index isn't guaranteed once a USB hub is in the path. Medium severity
-  (wrong path fails `Camera.open()` loudly, not silently). Effort: resolved by
-  `bench/camera_check/capture_check.py --probe`. Status: open, pending hardware.
-- **IMX462 default resolution/pixel-format/FPS are unverified for this specific unit.**
-  `services/config.py`'s `CAMERA_FRAME_WIDTH/HEIGHT` (1920x1080) and `CAMERA_PIXEL_FORMAT` (MJPG)
-  are taken from the product listing (B0CQ4QDCXN) and general UVC-bandwidth reasoning, not a queried
-  V4L2 format list. Medium severity. Effort: resolved by the same `--probe` run above. Status: open,
-  pending hardware.
-- **`python3-opencv` (or equivalent) presence on the board's Debian image is unverified.**
-  `perception/camera.py`'s only real dependency; nothing in this build call confirms it ships on the
-  QRB2210's default image. Medium severity — if absent, `Camera.open()` fails at import time on the
-  board specifically. Effort: `python3 -c "import cv2"` over SSH. Status: open, pending hardware.
+  the spare USB hub, `hardware/bom/procurement-status.md`) attached. **Partial pre-check done, 16
+  Aug — the camera itself confirmed alive, the actual question still open.** Ran
+  `bench/camera_check/capture_check.py --backend any` against the real IMX462 plugged directly into
+  the dev Windows machine (no board, no hub, no VIN power involved) — it opened, negotiated
+  1920x1080@30fps as requested, and captured real sharp in-focus frames (confirmed by eye: room
+  detail, a person reaching toward the lens, not the washed-out blur an earlier lens-cover mixup
+  produced). This proves the IMX462 unit itself is a working UVC device — it does **not** touch the
+  actual open question here, which is specifically about the UNO Q's USB-C port acting as USB host
+  while powered from VIN rather than USB-C dev power. That test still needs the board, the spare USB
+  hub, and VIN power, exactly as this entry always specified. Status: open, pending hardware.
+  **Second pre-check done, 17 Aug — still not the VIN test, but a real second data point.** SSH'd into
+  the board (IMX462 → Portronics hub USB 3.0 port → hub's USB-C → UNO Q's USB-C port, board powered
+  via the hub's "PD 3.0 \| DATA" port from a 45W charger — USB-C/PD power, explicitly **not** VIN).
+  `lsusb` showed the camera (`0c45:6366 Microdia Webcam Vitade AF`) alongside the hub's own
+  `1a86:8095` and `0bda:8152` (RTL8152) devices; six `/dev/video*` nodes appeared. This does **not**
+  close this entry — VIN power is still unverified — but it does newly confirm the UNO Q's single
+  USB-C port can act as a PD power sink and a USB host for a downstream device at the same time,
+  which was itself an open question. Status: still open, pending the real VIN/battery-only test.
+- ~~**Exact V4L2 device path is unverified.**~~ **Resolved, 17 Aug, on the real board — and the
+  guess was wrong.** `v4l2-ctl --info` against all six `/dev/video*` nodes (camera wired via the
+  Portronics hub, board on USB-C/PD power) shows: `/dev/video0` and `/dev/video3` are the QRB2210
+  SoC's own `qcom-venus` hardware M2M video encoder/decoder (H.264/HEVC/NV12 only, `Video
+  Memory-to-Memory Multiplanar` capability) — **not the camera at all**; confirmed by attempting an
+  MJPG capture against `/dev/video0`, which was rejected outright (`The pixelformat 'MJPG' is
+  invalid`). The real IMX462 (`uvcvideo`, "USB 2.0 Camera: USB Camera") exposes four nodes:
+  `/dev/video1` (real capture: MJPG 1920x1080/1280x720/640x480/320x240 + YUYV 640x480/320x240, all
+  @30fps) with `/dev/video2` as its paired metadata-only node, and `/dev/video4` (a second capture
+  interface, H.264-only, unused by production's forced-MJPG config) with `/dev/video5` as its
+  paired metadata node. Streamed a real frame off `/dev/video1` directly via
+  `v4l2-ctl --stream-mmap --stream-to=` (no OpenCV needed) — a genuine 158096-byte JPEG, SOF marker
+  confirms 1920x1080. `services/config.py`'s old `CAMERA_DEVICE = "/dev/video0"` default was
+  therefore actively wrong on this unit — it pointed at the SoC's own hardware encoder, which
+  fails every open/format-negotiation attempt, not the camera.
+  **Follow-up action item resolved, same day.** A bare index was never going to be safe here
+  regardless of which one was picked — confirmed by the reboot test below, where the raw indices
+  genuinely reshuffled. Fixed `CAMERA_DEVICE` to the udev `/dev/v4l/by-id/` symlink instead:
+  `/dev/v4l/by-id/usb-Arducam_Technology_Co.__Ltd._USB_2.0_Camera_SN0001-video-index0` (found via
+  `ls -la /dev/v4l/by-id/` and `readlink -f`, keyed on the camera's own USB serial `SN0001`, not
+  bus topology or enumeration order). Verified this exact path resolves to the correct capture
+  node and opens/negotiates/captures correctly (a) immediately, (b) after a full board reboot, and
+  (c) after a physical camera unplug/replug with the board left powered — see the new "Camera
+  device-path robustness" entry below for the full verification. Status: **closed**, fixed in
+  code.
+- ~~**IMX462 default resolution/pixel-format/FPS are unverified for this specific unit.**~~
+  **Resolved, 17 Aug, on the real board, via real V4L2 (not the 16 Aug DirectShow proxy).**
+  `v4l2-ctl --list-formats-ext -d /dev/video1` confirms MJPG 1920x1080 @30fps is genuinely
+  advertised by this unit (not just requested), and `v4l2-ctl --get-parm` on the same node reports
+  `30.000 (30/1)` fps actually negotiated. A real frame streamed off `/dev/video1` at that setting
+  came back as a valid 158096-byte JPEG whose own SOF marker reports 1920x1080 — matches
+  `services/config.py`'s `CAMERA_FRAME_WIDTH/HEIGHT`/`CAMERA_PIXEL_FORMAT` defaults exactly, this
+  time on the real V4L2 backend production actually uses, not DirectShow. Status: **closed**.
+- ~~**`python3-opencv` (or equivalent) presence on the board's Debian image is unverified.**~~
+  **Resolved, 17 Aug, on the real board — and the answer is no, it's absent.**
+  `python3 -c "import cv2"` over SSH: `ModuleNotFoundError: No module named 'cv2'`. Also notable:
+  `pip3` itself isn't on `PATH` either (`bash: pip3: command not found`) — this board's Python
+  environment has neither cv2 nor a usable pip to install it ad hoc. `apt-cache policy
+  python3-opencv` does show a real candidate (`4.10.0+dfsg-5`) is reachable, so `sudo apt install
+  python3-opencv` should resolve it, but that hasn't been run — `perception/camera.py` will fail at
+  import time on this board as it stands today. Confirmed knock-on effect: running
+  `bench/camera_check/capture_check.py --backend v4l2 --probe` directly on the board dies at its
+  top-level `import cv2` (line 44) before even reaching the `--probe` device listing — the script
+  itself is fine, this board's environment just isn't ready for it yet.
+  **Follow-up action item resolved, same day.** Ran `sudo apt install -y python3-opencv` on the
+  board (candidate `4.10.0+dfsg-5`, pulled in the full `libopencv-*410` package set). Confirmed
+  `python3 -c "import cv2"` now prints `4.10.0` with no error. Status: **closed**, fixed on the
+  board.
+- **`bench/camera_check/capture_check.py` now runs successfully end-to-end against the real
+  IMX462, on the real board, through the production V4L2 `Camera` class — this build call's actual
+  exit criterion, closed 17 Aug 2026.** With `CAMERA_DEVICE` fixed to the by-id path and
+  `python3-opencv` installed, `python3 bench/camera_check/capture_check.py --backend v4l2 --probe`
+  ran clean: `--probe` listed all six `/dev/video*` nodes and the by-id path's real format list;
+  `Camera.open()` printed `Negotiated: device=/dev/v4l/by-id/...-video-index0 1920x1080
+  fourcc=MJPG fps=30.0` — an exact match to `services/config.py`'s defaults; a single frame and a
+  5-frame burst (`--frames` default) all saved as real JPEGs (300-500KB each, not empty/corrupt)
+  to `output/`, with inter-frame intervals of ~28-32ms (consistent with the negotiated 30fps).
+  Re-ran the identical command with no path changes after a full board reboot and again after a
+  physical camera unplug/replug (see the robustness entry directly below) — both times it
+  succeeded identically. Status: **closed**.
+- **Camera device-path robustness across reboot and physical replug — verified 17 Aug 2026, and
+  it's a good thing the by-id fix above landed first.** Two tests, both against the by-id
+  `CAMERA_DEVICE` path with no code changes between runs:
+  1. **Full board reboot** (`sudo reboot`, waited ~35s for SSH to come back). The by-id symlink
+     kept resolving and `capture_check.py` succeeded identically — but the raw `/dev/videoN`
+     index underneath it genuinely changed: before reboot the IMX462 held `/dev/video1/2/4/5`
+     (SoC `qcom-venus` codec on `/dev/video0/3`); after reboot the IMX462 held
+     `/dev/video0/1/2/3` (codec moved to `/dev/video4/5`) — `v4l2-ctl --info` confirmed driver
+     identity on every node both times. This is a real, reproducible race between the UVC and
+     `qcom-venus` drivers during boot probe, not a fluke — exactly the failure mode the by-id fix
+     was chosen to survive, and it did.
+  2. **Physical unplug/replug** (camera's USB cable pulled from the Portronics hub and reinserted
+     into the same port, board left powered throughout). The by-id symlink kept resolving (target
+     index also changed underneath it, video0 both before and after by coincidence this time —
+     not to be relied on) and `capture_check.py` succeeded identically again.
+  **dmesg findings, both events:** no USB errors, retries, or enumeration failures beyond one
+  recurring benign quirk also present on the very first cold boot — `usb 1-1.2: 4:1: cannot get
+  freq at ep 0x84`, 3× per (re)enumeration. This is a UVC audio-class (UAC) endpoint frequency
+  query failing on the camera's unused microphone interface, not the video path; harmless but
+  logged here since a device needing *any* retries to enumerate cleanly is worth tracking. The
+  physical replug's own timing: `USB disconnect, device number 3` at dmesg timestamp 235.08s,
+  `new high-speed USB device number 5` at 243.75s — an ~8.6s gap, attributable to the time it
+  took to physically unplug and reinsert the cable by hand, not a driver retry/backoff delay (the
+  re-enumeration itself, disconnect-to-UVC-found, was clean and fast once the cable was back:
+  ~170ms from new-device to `Found UVC 1.00 device`). `services/config.py`'s new
+  `CAMERA_OPEN_RETRIES`/`CAMERA_OPEN_RETRY_BACKOFF_S` (3 attempts, 2.0s backoff = up to 6s of
+  patience) were sized with this ~8.6s figure in mind, though a single retry pass doesn't fully
+  cover the observed gap — worth revisiting once more replug data points exist. Status: **closed**
+  — by-id path confirmed robust to both tested disruption modes; VIN-power boot (the still-open
+  entry above) remains the one disruption mode not yet covered.
+- **`Camera.open()`/`capture_frame()`/`capture_burst()` had no retry or reconnect logic at all —
+  reviewed 17 Aug 2026, partially fixed.** `perception/camera.py` is not yet wired into any real
+  capture loop (`device/mpu/main.py` and `services/reflex_loop.py` have no camera/detector
+  integration yet — `reflex_loop.py`'s own module docstring says as much: "no detector exists
+  (perception/camera.py is capture-only)"), so there is no consuming code to inspect for
+  recovery behavior; the only real caller today is `bench/camera_check/capture_check.py`. Within
+  `Camera` itself: **fixed** — `open()` now retries up to `CAMERA_OPEN_RETRIES` times (default 3,
+  2.0s backoff between attempts, both in `services/config.py`) before raising, since a device that
+  isn't there yet at startup (hub still renegotiating, connector freshly reseated) is exactly the
+  case a few spaced attempts can ride out; verified against real hardware (see the two entries
+  above) and against new host tests (`tests/test_camera.py`:
+  `test_open_retries_and_succeeds_after_transient_failure`,
+  `test_open_gives_up_after_exhausting_retries`). **Deliberately left unchanged, and flagged here
+  instead of silently deciding either way:** `capture_frame()` still returns `None` on a failed
+  grab and `capture_burst()` still stops early on the first failed grab, both with zero retry —
+  this was already an intentional, documented design choice in both methods' own docstrings (an
+  honest "no frame" result, not a fabricated one) and this build call isn't changing that. What
+  *is* a genuinely open design question: **there is currently no supervisory layer anywhere that
+  would notice a camera going permanently dead mid-run (USB drops and never comes back) and
+  attempt a full `close()`+`open()` recovery** — today that would just mean every subsequent
+  `capture_frame()` call returns `None`/every `capture_burst()` returns `[]` forever, silently,
+  until someone physically intervenes. This is squarely the future detector/reflex-loop
+  integration's call to make (how many consecutive failures before it's "dead," whether recovery
+  belongs in `Camera` itself or one layer up in whatever owns the capture loop), not something to
+  decide unilaterally while that loop doesn't exist yet. **Recommendation for whoever builds that
+  integration:** treat N consecutive `None`/empty-burst results as a signal to `close()` the
+  `Camera` and construct+`open()` a fresh one (mirrors what `open()`'s own new retry loop already
+  does internally on a fresh handle per attempt), with the failure surfaced (log/status field) so
+  a prolonged outage is visible in the field, not just silently degraded. High severity given this
+  is the main way field evidence (detection/deterrence footage) gets captured — a camera that goes
+  quietly dead mid-deployment and never recovers defeats the mission. Status: open, deferred to
+  the vision detector/reflex-loop build call.
 - **Night/IR performance is entirely unmeasured.** The IMX462's auto IR-cut switch behavior, actual
   exposure under 940 nm illumination, and whether `CAMERA_WARMUP_FRAMES` is enough for AE/AGC to
   settle in darkness are all unknown — this build call is daylight/bench capture only, no IR
@@ -232,9 +357,18 @@ criteria — see each entry's status.
   detector-side timing requirement. Medium severity. Status: open, revisit once the vision detector
   (future build call) has a real inference-latency budget to size the burst against.
 - **`bench/camera_check/capture_check.py` is written and host-tested against a fake capture device,
-  but has not been run against the real IMX462** — neither on the board nor on a dev host with
-  OpenCV installed. High severity — this is the build call's own exit criterion for proving real
-  frames come off the real camera. Status: **pending hardware.**
+  but has not been run successfully against the real IMX462** — the 16 Aug Windows/DirectShow run
+  above got a real capture but not through the production `Camera` class's V4L2 path; **the 17 Aug
+  on-board run got further but still didn't complete**: synced to the board and ran with
+  `--backend v4l2 --probe`, but it dies at the top-level `import cv2` (script line 44) before
+  reaching `Camera.open()`, because `python3-opencv` isn't installed on the board (see that entry
+  above). The `--probe` path and everything past it (negotiated-format printout, single-frame and
+  burst capture through `perception.camera.Camera`) remains genuinely unexercised — the equivalent
+  V4L2-level facts got established by hand instead (`v4l2-ctl` directly, see the device-path and
+  resolution/format entries above), which is real evidence at the V4L2 layer but does **not**
+  substitute for actually exercising `perception/camera.py`'s own `Camera` class end to end. High
+  severity — this is still the build call's own exit criterion. Status: **pending hardware** — needs
+  `sudo apt install python3-opencv` on the board, then a re-run.
 - **Capture and IR illumination are not coordinated, by design.** `pulse_ir()` exists as an MCU-side
   Bridge stub (`device/mpu/bridge/rpc.py`) but is unregistered on both sides (same
   `Bridge.provide()` batch-registration caution as `bridge/rpc.py`'s other stubs). Night capture will

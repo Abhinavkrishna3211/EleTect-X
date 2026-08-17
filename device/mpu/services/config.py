@@ -88,11 +88,23 @@ MODELS_DIR = _MODULE_DIR / "models"
 # MCU-side Bridge call not registered on either side yet
 # (device/mpu/bridge/rpc.py), and capture has no business calling it.
 
-# UNVERIFIED on this board - the UNO Q has one USB-C port and no carrier
-# (ADR 0001), so the exact /dev/videoN index the IMX462 lands on once a hub
-# is in the path is unconfirmed. bench/camera_check's --probe flag resolves
-# this; see docs/KNOWN_GAPS.md.
-CAMERA_DEVICE = "/dev/video0"
+# Verified on real hardware 17 Aug 2026 (docs/KNOWN_GAPS.md): a bare index
+# is not safe here. /dev/video0 - the previous default - turned out to be
+# the QRB2210 SoC's own qcom-venus hardware encoder, not the camera at all;
+# the IMX462 actually landed on /dev/video1 that run, but /dev/videoN
+# indices reshuffle across reboots and hub reconnects/port changes, so even
+# that number isn't trustworthy long-term. Using the udev-assigned by-id
+# symlink instead - keyed on the camera's own USB serial (SN0001), not bus
+# topology or enumeration order. Confirmed 17 Aug 2026: a full board reboot
+# genuinely reshuffled the raw /dev/videoN indices under this camera (it
+# held video1/2/4/5 before, video0/1/2/3 after - the SoC's own qcom-venus
+# codec and the camera raced differently on the two boots), and a physical
+# USB unplug/replug reassigned the bus device number too - the by-id path
+# resolved correctly both times with zero code changes. See
+# docs/KNOWN_GAPS.md for the full verification.
+CAMERA_DEVICE = (
+    "/dev/v4l/by-id/usb-Arducam_Technology_Co.__Ltd._USB_2.0_Camera_SN0001-video-index0"
+)
 
 # IMX462 is a 2MP sensor; 1920x1080 taken from the product listing
 # (B0CQ4QDCXN), not from a queried V4L2 format list on this specific unit.
@@ -112,6 +124,19 @@ CAMERA_PIXEL_FORMAT = "MJPG"
 # dark, over-bright, or otherwise unsettled. INVENTED - no AE-settle bench
 # data backs this number yet; see docs/KNOWN_GAPS.md.
 CAMERA_WARMUP_FRAMES = 3
+
+# Camera.open() retry policy. A transient USB dropout at exactly the moment
+# of open() (hub renegotiation, a jostled connector) shouldn't be a hard
+# failure if the device comes back within a couple seconds - confirmed
+# empirically 17 Aug 2026 that a real unplug/replug of this camera took
+# ~8.6s to re-enumerate (dmesg: USB disconnect to new-device back-to-back),
+# see docs/KNOWN_GAPS.md. Open (not capture_frame()/capture_burst(), which
+# stay non-retrying by design - see their own docstrings) because a device
+# that isn't there yet at startup is exactly the case a few spaced attempts
+# can ride out. INVENTED counts - no real-world open-failure-rate data
+# backs these numbers yet.
+CAMERA_OPEN_RETRIES = 3
+CAMERA_OPEN_RETRY_BACKOFF_S = 2.0
 
 # Default burst size and inter-frame spacing for capture_burst(). 0.0
 # interval means "as fast as the device delivers," not a real-time target.
