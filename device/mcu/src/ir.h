@@ -26,7 +26,9 @@ struct ir_ack {
 void ir_init();
 
 // Pulses the illuminator for the resolved duration at the resolved gain,
-// subject to IR_MIN_INTERVAL_MS between pulses.
+// subject to IR_MIN_INTERVAL_MS between pulses. Blocks for the resolved
+// duration_ms (analogWrite then delay then off) - the reflex loop calling
+// this must expect that, same caveat as horn.h's drive_horn.
 ir_ack pulse_ir(ir_request req, uint32_t now_ms);
 
 #endif  // ACTUATORS_IR_H

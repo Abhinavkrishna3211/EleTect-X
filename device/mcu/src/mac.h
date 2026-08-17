@@ -16,7 +16,7 @@ enum class lora_join_state {
   kReadingDevEui,
   kSettingMode,
   kSettingRegion,
-  kSettingChannelMask,
+  kSettingAppEui,
   kLoadingKey,
   kJoining,
   kJoined,

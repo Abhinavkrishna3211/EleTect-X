@@ -1,13 +1,18 @@
-// AT command sequence source: Seeed Studio, "Grove - LoRa-E5 / LoRa-E5 AT
-// Command Specification" (Seeed wiki page for the Grove LoRa-E5 module,
-// PDF linked from https://wiki.seeedstudio.com/Grove_LoRa_E5_New_Version/).
-// This file has NOT been checked line-by-line against that manual - it was
-// written from memory of typical AT-command LoRaWAN modules and the general
-// shape of the E5's command set. Every command below is marked either
-// verified (checked against the manual) or UNVERIFIED against AT manual.
-// Do not flash this without opening the manual and correcting exact
-// spelling, argument format, and expected response strings first
-// (docs/KNOWN_GAPS.md).
+// AT command sequence source: Seeed Studio, "LoRa-E5 AT Command
+// Specification V1.0" PDF
+// (https://files.seeedstudio.com/products/317990687/res/LoRa-E5+AT+Command+Specification_V1.0+.pdf).
+// Checked line-by-line against that manual's text layer (pdftotext -layout):
+// section 4.23 (MODE), 4.13 (DR), 3.9 (Band Specific Limitation), 4.20
+// (KEY), 4.3 (ID), and 4.24 (JOIN). Exact command/response strings below are
+// quoted from the manual; see each state's comment for the section cited.
+//
+// One deviation from the original ticket for this file: the JOIN success
+// string is "+JOIN: Done" (per 4.24's worked example - "+JOIN: Starting" /
+// "+JOIN: NORMAL" / "+JOIN: NetID ... DevAddr ..." / "+JOIN: Done"), not
+// "Network joined". The string "Network joined" does not appear anywhere in
+// this manual's text; "+JOIN: Join failed" does appear verbatim and is
+// unchanged. Flagging since this contradicts secondary-source tutorials -
+// worth a second look if a real join sequence prints something else.
 //
 // IN865 only (ADR 0002) - 868 MHz is illegal in India (CONTEXT.md 8).
 // Never logs LORA_APP_KEY.
@@ -94,17 +99,15 @@ void lora_init() {
 void lora_service(uint32_t now_ms) {
   switch (g_state) {
     case lora_join_state::kIdle:
-      // "AT" - bare probe command, every AT-command modem accepts this.
-      // UNVERIFIED against AT manual: exact expected response ("+AT: OK" vs
-      // plain "OK").
+      // "AT" - bare probe command. Response confirmed in manual sec 5
+      // (Error Code) worked examples as "+AT: OK", which contains "OK".
       send_command("AT", now_ms);
       g_state = lora_join_state::kProbing;
       break;
 
     case lora_join_state::kProbing:
       if (poll_line() && rx_contains("OK")) {
-        // UNVERIFIED against AT manual: "AT+ID=DevEui" is a guess at the
-        // token; some E5 firmware revisions use "AT+ID=DEVEUI" instead.
+        // "AT+ID=DevEui" confirmed, manual sec 4.3 (ID).
         send_command("AT+ID=DevEui", now_ms);
         g_state = lora_join_state::kReadingDevEui;
       } else if (step_timed_out(now_ms)) {
@@ -117,7 +120,8 @@ void lora_service(uint32_t now_ms) {
         // DevEUI is not secret - fine to have reached the RX buffer, but it
         // is read and discarded here rather than logged, since this step
         // exists only to confirm the module is alive and addressable.
-        // UNVERIFIED against AT manual: "AT+MODE=LWOTAA" token/casing.
+        // Response is "+ID: DevEui, xx:xx:..." (manual sec 4.3) - any
+        // complete line confirms the module replied, no need to match it.
         send_command("AT+MODE=LWOTAA", now_ms);
         g_state = lora_join_state::kSettingMode;
       } else if (step_timed_out(now_ms)) {
@@ -126,11 +130,11 @@ void lora_service(uint32_t now_ms) {
       break;
 
     case lora_join_state::kSettingMode:
-      if (poll_line() && rx_contains("OK")) {
-        // UNVERIFIED against AT manual: "AT+DR=IN865" is a guess - the
-        // region-select command may instead be "AT+DR=<index>" preceded by
-        // a separate region-select command entirely. Must be confirmed
-        // before this joins a real IN865 gateway.
+      // Response confirmed, manual sec 4.23 (MODE): "+MODE: LWOTAA" -
+      // does NOT contain "OK", so this must not gate on rx_contains("OK").
+      if (poll_line() && rx_contains("+MODE: LWOTAA")) {
+        // "AT+DR=IN865" confirmed, manual sec 4.13.2 (Data Rate Scheme) -
+        // "band" may be a band name such as IN865.
         send_command("AT+DR=IN865", now_ms);
         g_state = lora_join_state::kSettingRegion;
       } else if (step_timed_out(now_ms)) {
@@ -139,34 +143,46 @@ void lora_service(uint32_t now_ms) {
       break;
 
     case lora_join_state::kSettingRegion:
-      if (poll_line() && rx_contains("OK")) {
-        // UNVERIFIED against AT manual: "AT+CH=NUM,0-2" channel-mask
-        // syntax and whether IN865's default channel plan even needs an
-        // explicit mask set.
-        send_command("AT+CH=NUM,0-2", now_ms);
-        g_state = lora_join_state::kSettingChannelMask;
+      // Response confirmed, manual sec 4.13.2: "+DR: IN865 DR0 ..." -
+      // does NOT contain "OK", so gate on the command's own "+DR:" prefix.
+      if (poll_line() && rx_contains("+DR:")) {
+        // No channel-mask step here: manual sec 3.9.1 (US915/AU915/CN470
+        // Channel Limitation) restricts AT+CH/AT+RXWIN1 use to those three
+        // regions only - IN865 is not listed and needs no explicit channel
+        // command, so this goes straight to setting AppEui.
+        // "AT+ID=AppEui,<eui>" confirmed, manual sec 4.3 (ID) - quoted,
+        // per the set-example "AT+ID=AppEui, "0123456789ABCDEF"".
+        char cmd[64];
+        std::snprintf(cmd, sizeof(cmd), "AT+ID=AppEui,\"%s\"", LORA_APP_EUI);
+        send_command(cmd, now_ms);
+        g_state = lora_join_state::kSettingAppEui;
       } else if (step_timed_out(now_ms)) {
         enter_failed_or_retry(lora_join_state::kSettingRegion, now_ms);
       }
       break;
 
-    case lora_join_state::kSettingChannelMask:
-      if (poll_line() && rx_contains("OK")) {
+    case lora_join_state::kSettingAppEui:
+      // Response confirmed, manual sec 4.3 (ID) set-example return:
+      // "+ID: AppEui, xx:xx:xx:xx:xx:xx:xx:xx".
+      if (poll_line() && rx_contains("+ID: AppEui")) {
         // AppKey is loaded from the gitignored secrets.h, never logged.
-        // UNVERIFIED against AT manual: "AT+KEY=APPKEY,<key>" token.
+        // "AT+KEY=APPKEY,<key>" confirmed, manual sec 4.20 (KEY) - the
+        // key value must be quoted per the worked example
+        // "AT+KEY=APPKEY, "2B7E151628AED2A6ABF7158809CF4F3C"".
         char cmd[96];
-        std::snprintf(cmd, sizeof(cmd), "AT+KEY=APPKEY,%s", LORA_APP_KEY);
+        std::snprintf(cmd, sizeof(cmd), "AT+KEY=APPKEY,\"%s\"", LORA_APP_KEY);
         send_command(cmd, now_ms);
         g_state = lora_join_state::kLoadingKey;
       } else if (step_timed_out(now_ms)) {
-        enter_failed_or_retry(lora_join_state::kSettingChannelMask, now_ms);
+        enter_failed_or_retry(lora_join_state::kSettingAppEui, now_ms);
       }
       break;
 
     case lora_join_state::kLoadingKey:
-      if (poll_line() && rx_contains("OK")) {
-        // UNVERIFIED against AT manual: "AT+JOIN" with no arguments for a
-        // default-parameters OTAA join.
+      // Response confirmed, manual sec 4.20 (KEY): "+KEY: APPKEY <key>" -
+      // does NOT contain "OK", so gate on the command's own "+KEY:" prefix.
+      if (poll_line() && rx_contains("+KEY:")) {
+        // "AT+JOIN" with no arguments confirmed, manual sec 4.24 (JOIN).
         send_command("AT+JOIN", now_ms);
         g_state = lora_join_state::kJoining;
       } else if (step_timed_out(now_ms)) {
@@ -175,13 +191,15 @@ void lora_service(uint32_t now_ms) {
       break;
 
     case lora_join_state::kJoining:
-      // UNVERIFIED against AT manual: "+JOIN: Network joined" success
-      // string and "+JOIN: Join failed" failure string - both guesses at
-      // the E5's actual join-result reporting format.
-      if (poll_line() && rx_contains("Network joined")) {
+      // Confirmed, manual sec 4.24 (JOIN) worked example: success prints
+      // "+JOIN: Starting" / "+JOIN: NORMAL" / "+JOIN: NetID ... DevAddr
+      // ..." / "+JOIN: Done"; failure prints "+JOIN: Join failed". The
+      // string "Network joined" does not appear anywhere in the manual -
+      // do not gate on it, or this state can never observe success.
+      if (poll_line() && rx_contains("+JOIN: Done")) {
         g_state = lora_join_state::kJoined;
         g_retry_count = 0;
-      } else if (poll_line() && rx_contains("Join failed")) {
+      } else if (poll_line() && rx_contains("+JOIN: Join failed")) {
         enter_failed_or_retry(lora_join_state::kSettingMode, now_ms);
       } else if ((now_ms - g_step_start_ms) > LORA_JOIN_TIMEOUT_MS) {
         enter_failed_or_retry(lora_join_state::kSettingMode, now_ms);
