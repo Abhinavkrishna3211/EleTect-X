@@ -66,8 +66,10 @@ from dataclasses import dataclass
 
 # Mirrors device/mcu/src/config.h's STA_LTA_TRIGGER_RATIO - keep in sync if
 # that constant ever changes. A standalone host script cannot #include a C
-# header, so this is restated rather than shared.
-STA_LTA_TRIGGER_RATIO = 4.0
+# header, so this is restated rather than shared. Currently the SEISMIC_DEMO_MODE
+# value (2.0), not the field value (4.0) - update this alongside config.h
+# when demo mode is reverted.
+STA_LTA_TRIGGER_RATIO = 2.0
 
 # Mirrors device/mcu/src/config.h's ADS1115_CFG_PGA_2048MV full-scale range.
 # Raw volts readings cannot physically arrive outside +/-ADS1115_PGA_VOLTS -
@@ -166,22 +168,54 @@ def _iter_serial_lines(port: str, baud: int) -> Iterator[str]:
             "pyserial is required for --port. Install it with: pip install pyserial"
         ) from exc
 
-    with serial.Serial(port, baud, timeout=1) as connection:
+    # timeout=0.05, not 1: a single blocking read with nothing waiting
+    # returns after the timeout instead of stalling the animation callback
+    # (and the whole Tkinter mainloop) for up to a full second per quiet
+    # call, the same GUI-freeze class _iter_file_tail_lines's own 0.05 s
+    # poll was fixed to avoid.
+    #
+    # Deliberately not connection.readline(): pyserial's readline() applies
+    # this same timeout to *finding the next newline*, not just to "is
+    # anything waiting" - if a multi-part Serial.print() (state_machine.cpp's
+    # [seismic] line is 8 separate print() calls) straddles a 50 ms gap for
+    # any reason (this script's own matplotlib animation loop competing for
+    # the same thread, a USB-CDC chunk boundary, ...), readline() returns the
+    # partial line with no trailing "\n" and the rest is lost - confirmed
+    # on-hardware as a steady stream of "did not match expected format"
+    # warnings once this ran inside the live plot's animation loop, not
+    # reproducible in a standalone tight-loop reader. Buffering raw bytes
+    # ourselves and only yielding on an actual "\n" makes a slow line block
+    # across as many quiet reads as it needs instead of ever being truncated.
+    with serial.Serial(port, baud, timeout=0.05) as connection:
+        buffer = bytearray()
         while True:
-            raw_line = connection.readline()
-            if not raw_line:
+            chunk = connection.read(max(1, connection.in_waiting))
+            if not chunk:
+                yield ""
                 continue
-            yield raw_line.decode("utf-8", errors="replace")
+            buffer.extend(chunk)
+            while b"\n" in buffer:
+                line, _, rest = buffer.partition(b"\n")
+                buffer = bytearray(rest)
+                yield (bytes(line) + b"\n").decode("utf-8", errors="replace")
 
 
 def _iter_file_tail_lines(path: str) -> Iterator[str]:
-    """Yield lines appended to a growing file, polling for new content."""
+    """Yield lines appended to a growing file, polling for new content.
+
+    Yields "" rather than looping internally when nothing new is ready, so a
+    single next() call is bounded to one ~0.05 s poll instead of blocking for
+    the full length of a quiet stretch in the source (e.g. the ~35 s
+    kEvent/kCooldown gap noted in the module docstring) - that unbounded
+    block, not the drain loop below, is what actually froze the GUI thread.
+    """
     with open(path, encoding="utf-8", errors="replace") as handle:
         handle.seek(0, 2)  # start at end-of-file - only new lines matter live
         while True:
             line = handle.readline()
             if not line:
                 time.sleep(0.05)
+                yield ""
                 continue
             yield line
 
@@ -254,7 +288,20 @@ def _run_live_plot(
     def _update(_frame: int):
         now_s = time.monotonic() - start_s
 
-        for _ in range(500):  # bounded drain - never let one frame stall on backlog
+        # Bounded by wall-clock time, not line count: a count cap (the original
+        # design) assumes lines arrive fast enough that draining N of them is
+        # cheap. At a real sample rate well under the line source's per-call
+        # blocking latency (confirmed on-hardware: SEISMIC_SAMPLE_RATE_HZ 250
+        # in config.h vs an observed ~8 lines/sec relayed through Bridge.notify()),
+        # a 500-line cap can block this callback - and therefore the whole
+        # Tkinter mainloop - for the better part of a minute, which Windows
+        # reports as "(Not Responding)". A time cap instead guarantees this
+        # callback returns control to the animation loop well within one frame
+        # interval regardless of arrival rate.
+        drain_deadline = time.monotonic() + 0.03
+        for _ in range(2000):  # hard safety cap against a pathological fast burst
+            if time.monotonic() >= drain_deadline:
+                break
             try:
                 line = next(line_source)
             except StopIteration:
