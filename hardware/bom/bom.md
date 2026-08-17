@@ -68,12 +68,16 @@
 ---
 
 ## 6. Power system 🛒 (see protection passives §7)
+
+**Pinned by a real daily-energy-budget calculation (12 Aug, revised same day to the smallest safe sizing) —
+see `hardware/bom/eletect-x-power-budget.xlsx` for the live, editable model and sources.**
+
 | Item | Spec | Qty | ₹ | Source |
 |---|---|---|---|---|
-| Battery | **4S LiFePO4 12.8 V**, 6–10 Ah (pack) *or* 4× 32700 cells + holder | 1 | 1,800–3,500 | Amazon.in / local |
-| BMS | **4S LiFePO4 BMS** (if building from cells) | 1 | 300–600 | Amazon.in |
-| Solar charge controller | **12 V MPPT, LiFePO4-compatible, low-Iq** (set 14.6 V) | 1 | 700–1,800 | Amazon.in *(verify true MPPT + LiFePO4)* |
-| Solar panel | **12 V, 20 W** mono | 1 | 700–1,200 | Amazon.in |
+| Battery | **4S LiFePO4 12.8 V, ~6 Ah**, integrated BMS (3-day autonomy, 85% DoD) | 1 | 1,799 | [Robu.in](https://robu.in/product/pro-range-ifr-32650-12-8v-6000mah-3c-4s1p-lifepo4-battery-pack/) — verify BMS/protection before ordering |
+| BMS | not needed separately — covered by the battery's integrated BMS | — | — | — |
+| Solar charge controller | **PWM/MPPT, explicit LiFePO4 profile**, ≥10 A | 1 | 1,949 | [amiciSmart 10A, Amazon.in](https://www.amazon.in/amiciSmart-Charger-Controller-Intelligent-Regulator/dp/B07T8LBN9J) — In Stock, selectable "b05: LiFePO4" mode confirmed. (Sparkel SPSCC-MPP1220Li was the better spec match but out of stock; Robu's ₹334 unit is lead-acid only — do not use.) |
+| Solar panel | **12 V, 20 W** poly | 1 | 899 | [WAAREE, Amazon.in](https://www.amazon.in/WAAREE-polycrystalline-Performance-Warranty-Everyday/dp/B0DJJNS73C) — In Stock (Robu/Loom 20W options confirmed out of stock 13 Aug) |
 | Reverse-polarity | Schottky diode **SB5100 (5 A)** *or* P-MOSFET ideal-diode | 1 | 20–60 | Robu |
 | Fuse + holder | 5 A blade fuse + inline holder | 1 | 40 | Amazon.in |
 | Load-switch MOSFETs | N-MOSFET modules (AO3400/IRLZ44N) for camera/IR/amp/LED rails | 3–4 | 80 ea | Robu |

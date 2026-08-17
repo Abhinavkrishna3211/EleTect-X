@@ -29,7 +29,7 @@ local store only (not worth an online search, per prior sourcing attempts this s
 |---|---|
 | 940nm IR illuminator board | **O — 5 Aug** |
 | IR-gate MOSFET | **H** (IRLZ44N, consolidated — see §7) |
-| Optical window (acrylic/PC 2-3mm) | **T** |
+| Optical window (acrylic/PC 2-3mm) | **T** — local |
 
 ## 3. Geophone burial chain
 | Item | Status |
@@ -60,17 +60,76 @@ local store only (not worth an online search, per prior sourcing attempts this s
 | Thermal adhesive tape | **O — 2 Aug** |
 | Steko lens+holder | dropped — not needed |
 
-## 6. Power system — **the one block still fully unordered**
-| Item | Status |
-|---|---|
-| 4S LiFePO4 battery | **T** — buy a pack with **integrated BMS** (resolves the BMS line below in one purchase) |
-| Separate BMS | not needed if battery has integrated BMS |
-| MPPT solar controller (LiFePO4-aware) | **T** |
-| 20W solar panel | **T** |
-| Fuse + holder | **T** |
-| Load-switch MOSFETs | **H** (IRLZ44N, see §7) |
-| Supercap (optional) | skip for now — revisit only if bench testing shows a brownout on deterrence burst |
-| VIN wiring (silicone wire + XT30) | **H** — XT30UD pair ×2 already in hand from the Robu order |
+## 6. Power system — **revised 13 Aug against the Aug 20 deployment deadline**
+
+Sized 12 Aug against a real daily energy budget (baseline-dominated by ADR 0008's measured 0.42-0.45W
+MPU-suspend draw, ~13Wh/day, plus event-triggered deterrence load) and real Kerala monsoon-season solar
+irradiance, not the annual average. Revised same day to the smallest sizing that's still safe (3-day no-sun
+autonomy, 85% DoD). Full calculation, formulas, sensitivity table, and sources:
+`hardware/bom/eletect-x-power-budget.xlsx`.
+
+**13 Aug: dropped the "smart" solar charge controller category entirely.** Every purpose-built LiFePO4-aware
+unit checked failed real verification: the amiciSmart 10A (₹1,949) has a self-contradicting listing (its own
+"Product description" says lead-acid only, contradicting its "About this item" b05 claim), mixed real customer
+reviews on 4S packs specifically ("unavailable to charge lifepo4 battery pack of 4S" — verified purchase), and
+a separately reported firmware bug (won't auto-resume charging after a low-voltage shutdown — disqualifying
+for unattended field hardware on its own). Sparkel's SPSCC-1012LiMPPT (₹2,450, genuinely well-engineered,
+IP67, real redundant protection) ships factory-default to **Gel lead-acid**, not Lithium — the "S-Unit" remote
+needed to reconfigure it isn't sold anywhere on Sparkel's own site. Victron's Bluetooth-programmable units are
+the one category that passed every check but cost ₹6,300+, well outside budget.
+
+**Replacement: XL4015 CC/CV buck module, already in hand (bought 28 Jul).** Set manually to 14.2V output
+(conservative vs the 14.6V absorption max, for margin against trimmer-pot drift and less full-charge calendar
+stress) with current limit set to ~1-2A, verified with a multimeter before connecting to the pack — fully
+inspectable, no firmware to trust. Trade-off, accepted deliberately: no staged bulk/absorption/float charging
+and no independent hardware overvoltage backstop from the charge side — the **battery's own BMS becomes the
+load-bearing safety component**, see battery row below. This also drops ~₹1,900-2,450 from the original plan.
+
+| Item | Status | Spec pinned by the calc | Real product / decision (13 Aug) |
+|---|---|---|---|
+| 4S LiFePO4 battery | **O — 14 Aug, ⚠️ delivery risk accepted** | **~6Ah** (design daily need ~19.5Wh incl. 25% margin, x3 days no-sun autonomy, 85% DoD → 5.4Ah, round up). | **[Robu.in Pro-Range IFR 32650 12.8V 6000mAh 3C 4S1P LiFePO4](https://robu.in/product/pro-range-ifr-32650-12-8v-6000mah-3c-4s1p-lifepo4-battery-pack/)**, ₹1,799 (₹1,699 with Robu Points). Ordered 14 Aug accepting the delivery risk (Robu's own checkout quotes **5-7 working days**, realistically Aug 21-24 from this date, worse with their 15-17 Aug "Freedom Sale" — genuinely may miss Aug 20). Picked over ELBOTICS (₹2,399, Prime-confirmed 16 Aug) deliberately: Robu's 75×70mm form factor fits directly inside the main enclosure as originally designed (ELBOTICS's 150×65×100mm brick would've forced a separate base-mounted battery box with its own gland/cable run — one more sealed interface and connector pair, undesirable given the horn already went external per ADR 0011). Also has real engineering advantages once landed: 3C discharge rating gives 5.1x margin over our 3.52A peak load vs. ELBOTICS's 1.7x, and it's the pack the permanent build was already sized around. **Action: call Robu support (1800 266 6123) — confirm the real BMS cutoff-voltage spec (their sheet only says "BMS: Y") and ask if expedited shipping is possible given the date.** If it doesn't land by Aug 19, fall back to deploying whatever's in hand or accept a late start within the 10-day window. |
+| Solar charge regulation | **H** — already own one (28 Jul) | Set to CV 14.2V, current-limited ~1-2A, verified by multimeter before connecting battery | XL4015 CC/CV buck (see reasoning above). Buy 1-2 more as spares — [Robu.in LM2596S](https://robu.in/product/lm2596s-dc-dc-buck-converter-power-supply/)-class module or the [Robocraze XL4015 5A, Amazon.in](https://www.amazon.in/Robocraze-Lithium-Battery-Charging-Converter/dp/B07RKH7YVY), ₹259, Prime, 2-day delivery — cheap insurance, arrives well before the 20th. |
+| **Solar panel** | **T — source locally this week** | 15W clears the monsoon-derated need theoretically; **20W is the realistic smallest buy** (~2.48x margin), 10W workable at tighter ~1.24x margin if that's what's available | No online 12V panel reliably lands by Aug 20 (10+ alternatives checked, earliest Fri-Sun 22-23 Aug). **Plan: buy a 12V/15-20W panel in person at an electronics/solar shop in Malappuram or Kochi this week** — sidesteps shipping lead time entirely, ~₹700-1,500. The [WAAREE 20W panel already ordered](https://www.amazon.in/WAAREE-polycrystalline-Performance-Warranty-Everyday/dp/B0DJJNS73C) (₹899, lands Mon 24 Aug) is too late for the trial — keep it, don't cancel, it becomes the Phase 2/permanent-build panel. |
+| Fuse + holder | **T** — buy locally, not online | **Revised to 6A** (14 Aug) — 5A's margin over the worst-case peak (45.1W) shrinks to just 1.11x at low battery voltage (~10V, 4.51A), below the design's own 1.25x safety convention. 6A restores real margin across the full discharge range at no extra cost. | Every Amazon/Robu inline blade fuse holder checked quotes delivery Aug 21-23. Ubiquitous, cheap part (any electronics/automotive-spares shop) — **source locally**, ~₹100-150. |
+| Power switch | **T** — buy locally, reverted 14 Aug (bad online listing spec) | SPST, simple 2-position ON/OFF (not ON-OFF-ON), rated ≥10A/12V DC, panel-mounted | The [Electronic Spices 5PCS rocker switch, Amazon.in](https://www.amazon.in/s?k=12V+DC+toggle+switch+SPST&rh=p_n_delivery_date%3A1) pick was checked against its real spec sheet and rejected: it's actually a **3-position ON-OFF-ON switch** (wrong type — wastes/misuses positions for a simple power cutoff), and its "10 Amps" rating is paired only with "250 Volts," reading as an AC rating with no stated 12V DC figure. **Source locally instead** — ask for a simple SPST toggle/rocker switch, 2-position ON/OFF, rated ≥10A at 12V DC (any electronics or automotive-spares shop stocks this, ~₹30-100). Lets you physically confirm position count and DC rating before buying, which online listing text has twice failed to state clearly. Panel-mount via a cut hole in the enclosure wall (rocker style) or drilled hole + nut (toggle style); seal with a thin bead of silicone around the mounting point either way. Wire: battery+ → fuse → switch → WAGO splice point → branches. |
+| USB-C→USB-A adapter (camera) | **O — 15 Aug** | Passive adapter only — board sources camera power itself via VBUS back-drive, see Buck audit below | **[Amkette USB 3.0 Type-C Male to USB-A Female OTG Adapter, Amazon.in](https://www.amazon.in/s?k=USB+C+male+to+USB+A+female+OTG+adapter)** — ₹99, 4.4★ (773 reviews), 400+ bought in past month, delivers tomorrow (15 Aug). Picked over the AGARO/Portronics/Ambrane alternatives specifically because its title states the orientation unambiguously ("Type-C **Male** to USB-A **Female**") — most competing listings phrase this ambiguously ("Type C Female to USB Male"), which is backwards-sounding for our use case and risks ordering the wrong orientation. **For resilience: don't let it hang loose on the port** — zip-tie or hot-glue-dab the adapter body to a fixed point near the port so there's no cantilever stress on the connector under vibration. |
+| VIN connection (board-side) | **T** — reverted 14 Aug on cost, jumper + hot glue instead of screw shield | VIN is a through-hole pin on the standard shield-style power header — don't solder wire directly to the board | **Female-to-female jumper wires (already have spare stock/cheap to add) + hot glue for strain relief**, not the ₹282 screw shield. Push the jumper socket fully onto the VIN and GND pins, verify a solid connection with a multimeter, then dab hot glue over the joint to lock it in place mechanically — prevents the connector working loose from vibration without paying for a dedicated part. Real trade-off, accepted for this trial: hot glue secures the wire's *position*, not the *contact quality* at the pin itself, the way a screw terminal's physical clamp does — genuinely fine for a 10-day run, worth upgrading to the screw shield for Phase 2's permanent build where the connection needs to survive years, not days. |
+| Separate BMS | not needed — battery's BMS confirmed via label + listing | — | — |
+| Load-switch MOSFETs | **H** (IRLZ44N, see §7) | — | — |
+| Supercap (optional) | skip for now — revisit only if bench testing shows a brownout on deterrence burst | — | — |
+| VIN wiring (silicone wire + XT30) | **H** — XT30UD pair ×2 already in hand from the Robu order | — | — |
+| Buck converters (TPA3116D2/IR illuminator insurance) | **O — 14 Aug** — bundled into Robu order #3636219 with the battery | Only needed if either board's real input-voltage tolerance falls below the LiFePO4 pack's 14.6V absorption peak (open verification item, see below) | [Robocraze XL4015, Amazon.in](https://www.amazon.in/Robocraze-Lithium-Battery-Charging-Converter/dp/B07RKH7YVY), ₹259 each, Prime — same part as the solar-charging module, buy extras in one order. |
+| Bench charger (optional, no longer required) | dropped — the XL4015 solar-charging path covers initial charge-up too | — | Robu's "Battery Charger 4S LiFePO4 -14.5V 1A" (₹700) is no longer needed unless a bench-only backup charge path is wanted. |
+
+**Aug 20 deadline — decided 14 Aug.** This is a 10-day contest trial (deploy, retrieve, review footage), not
+yet the permanent install, which changes the risk calculus on both remaining items:
+1. **Battery: ordered from Robu 14 Aug, accepting the delivery-timing risk** (see row above) — chosen for the
+   compact form factor and discharge margin over the delivery-certain but bulkier/tighter-margin ELBOTICS
+   alternative. A 6Ah pack alone, no solar, covers ~3.3 days at the design 85% DoD (65.3Wh usable ÷ 19.47Wh/day
+   design load) — not the full 10 days by itself, which is exactly why the panel below still matters.
+2. **Solar panel: source locally in Malappuram/Kochi this week** — the actual fix for continuous 10-day
+   coverage, since no online 12V panel option lands in time. This is now the primary plan, not a fallback.
+
+**If either slips past Aug 19:** deploy on whatever's in hand and accept partial coverage (battery-only ≈3-4
+days of the 10, or delayed start) rather than blocking the whole trial — no additional cost either way.
+
+**Revised total, power block only:** ≈₹2,600-3,450 (battery ₹1,799 + local panel ₹700-1,500 + fuse/holder
+~₹100-150 local), not counting the already-sunk WAAREE panel (₹899, held for Phase 2) or the optional spare
+XL4015 bucks (₹259-518, only if the TPA3116D2/IR illuminator verification below calls for them) — the cheapest
+version of this plan yet, versus the original ₹5,994.
+
+**Buck/regulation audit (13 Aug), all subsystems:**
+| Subsystem | Needs a buck? | Why |
+|---|---|---|
+| LEDs (cool-white/royal-blue) | No — already covered | XL4015 buck driver ×2 already sourced (§3, ordered 30 Jul) |
+| UNO Q | No | Confirmed via official Arduino power spec — VIN accepts 7-24V DC, onboard LMR51440 bucks to 5V internally |
+| Camera (Arducam IMX462) | No | Powered off USB-C, board-regulated |
+| DFPlayer PRO, INA333, ADS1115, LoRa-E5, INMP441, BME280/MPU-6050 (if used) | No, presumed | All draw from the tray's own regulated rails off the UNO Q/perfboard, not directly off the raw battery bus — not yet re-verified against each individual datasheet's absolute max input, worth a quick pass once the tray is populated but not expected to be an issue |
+| **TPA3116D2 amp (XH-M543 120W board)** | **Resolved 14 Aug — no buck needed** | Listing spec: Operating Voltage Range 12-24V DC, usage note tolerates DC12V-26V on the input terminal. 14.6V absorption peak sits comfortably inside this range (1.64x margin to the 24V rated max). Wire straight to the battery bus. |
+| **940nm IR illuminator board (VISTORA 48-LED, ASIN B0H2DQ9DVK, already purchased 28 Jul)** | **Resolved 14 Aug — buck IS needed** | Listing states a single fixed **Input Voltage: DC12V** (not a range), 300mA draw. The 14.6V absorption peak exceeds this by ~22% — real overvoltage risk to a board with no stated input tolerance margin. **Use one spare XL4015 buck inline, set to ~12V**, ahead of this board specifically. |
+
+Both open items now resolved with real listing data — one spare buck is genuinely needed (IR illuminator),
+the amp is fine wired directly to the battery bus. Only need to buy 1 spare XL4015 (₹259), not 2.
 
 ## 7. Passives & protection
 | Item | Status |
@@ -80,9 +139,9 @@ local store only (not worth an online search, per prior sourcing attempts this s
 | 0.68µF film cap ×2 | **O — 30 Jul** |
 | 1N4148 ×4 | **H** |
 | P6KE18/24CA TVS ×2 | **O — 2 Aug** |
-| P6KE6.8CA TVS ×3 | **L** — local store |
-| SB5100 Schottky ×1 | **L** — local store |
-| IRLZ44N MOSFET | **H** ×5-7 — need ~6-7 total (IR-gate ×1, LED-gate ×2, load-switch ×3-4); **tight, not slack** — see §Flags |
+| P6KE6.8CA TVS ×3 | **O — 15 Aug** — Robu, exact part match found, no longer local-only |
+| SB5100 Schottky ×1 | **O — 15 Aug** — Robu, exact part match found, no longer local-only |
+| IRLZ44N MOSFET | **H** ×5-7 + **O — 14 Aug** top-up bundled into Robu order #3636219 — margin restored, no longer tight |
 | LR7843 MOSFET control module | **H** ×1 | Pre-built module, screw terminals — fits the "no PCB fab" constraint better than a bare IRLZ44N for at least one load-switch position. See §Flags. |
 | Status LEDs 3mm + 1kΩ | **H** ×2 |
 
@@ -97,12 +156,15 @@ local store only (not worth an online search, per prior sourcing attempts this s
 | Item | Status |
 |---|---|
 | PETG filament 1kg | **H** |
-| Silicone O-ring cord | **T** |
+| Silicone O-ring cord | **O — 15 Aug** — SOMA, onlyscrews |
 | e-PTFE vent | **O — 4 Aug** |
-| SS-304 bracket/U-bolt | **T** |
+| SS-304 bracket/U-bolt (main enclosure pole mount) | **O — 15 Aug** — Bectro pole clamp |
+| SS-304 bracket/U-bolt (horn pole mount) | **O — 15 Aug** — second Bectro clamp, same part, reused per ADR 0011 horn split |
 | PG7/PG9 glands | **H** ×5 each |
-| Brass heat-set inserts (onlyscrews) | **T** |
-| SS-304 screws (onlyscrews) | **T** |
+| Brass heat-set inserts (onlyscrews) | **O — 15 Aug** | M3-only, "3D Printing" slant-knurled line. Qty 10 each: [M3x4mm](https://onlyscrews.in/products/m3-x-4mm-3d-printing-brass-threaded-inserts-dia-3mm-length-4mm) ₹4.40, [M3x5mm](https://onlyscrews.in/products/m3-x-5mm-3d-printing-brass-threaded-inserts-dia-3mm-length-5mm) ₹4.60, [M3x6mm](https://onlyscrews.in/products/m3-x-6mm-3d-printing-brass-threaded-inserts-dia-3mm-length-6mm) ₹4.80 — ~₹138 for 30 pieces. |
+| SS-304 screws (onlyscrews) | **O — 15 Aug** | 1x [M3 Allen Button Head SS304 Assorted Box](https://onlyscrews.in/products/m3-allen-button-head-ss304-assorted-box) (₹240) + individual top-up **M3×8/10/12mm ×15 each** (~₹96) — total ~₹336. |
+| VHB double-sided mounting tape (onlyscrews) | **O — 15 Aug** | 3M VHB, transparent 4910 variant for clean bond line — mounts components without screws where a boss isn't practical. |
+| M3 standoff spacers (Robu) | **O — 15 Aug** | M3×15mm nylon + M3×5mm brass hex — perfboard solder-joint clearance, camera/IR window offset, UNO Q underside clearance. |
 | Desiccant packs | **O — 30 Jul** |
 
 ## Already in hand, off the original checklist (Robu wire/connector order)
