@@ -386,6 +386,79 @@ real layout risk, so block that out first.
 - **Head module, LED pods, mic port cover, horn mesh retainer, solar standoff arm**: A1, small parts,
   easy iteration if a fit needs adjusting.
 
+## Form language, take four - the wing-pod reconciliation and real optical/acoustic angles
+
+Revisited 17 Aug 2026 against an early concept infographic the project still likes the look of (predates
+ADR 0011's horn split and several real hardware confirmations, so its dimensions/specs are stale, but its
+side-LED silhouette is worth reconciling against "take two" and "take three" above). That infographic's
+side LED treatment is neither take-two's flat bolted panel nor take-three's flush embedded strip - it is a
+slim, swept, capsule/teardrop-shaped pod that's gently contoured to follow the main body's curve while
+still reading as a distinct, purposeful add-on part. That is the real target: visually distinct enough to
+photograph well (a flat embedded strip reads as a surface graphic, not a feature), but swept/contoured
+enough that it doesn't read as an assembled-from-parts box the way take-two's flat panels did.
+
+**Side LED pods, mechanically:** each pod is its own small sealed module - own compression-gasket flange
+at the pod-to-body seam, own short cable run back to the LED driver on the tray through a small internal
+grommet, same real cost take-two already flagged (one more sealed interface per side, budget real
+assembly/test time). Mount on captive SS-304 screws into brass heat-set inserts set deep enough for
+repeated field service, echoing the old infographic's own "Modular Replacement: LED Module (Left/Right)"
+idea, which is worth keeping outright - a ranger should be able to swap one failed pod without opening the
+main hatch.
+
+**Camera + IR window, real numbers.** The Arducam B0496 module's own datasheet gives a real lens spec:
+98(D) x 85(H) x 69(V) FOV, M12 mount, 3.9mm effective focal length, F1.0, **fixed focus 3m-infinity**. The
+fixed-focus range is a real optical constraint worth designing around deliberately, not discovering in
+footage afterward: anything closer than ~3m from the lens will be soft, which includes the most dramatic
+moment this project wants on camera - an elephant close enough to react to the horn/LED/IR burst. Nothing
+in the enclosure design fixes that (it needs a different lens if it matters enough to fix), but it's worth
+flagging plainly here since it directly bears on where footage quality will and won't hold up. Separately
+and more urgently: whether this specific camera can see the 940nm illuminator at all is now an open,
+unverified risk - see the new entry in docs/KNOWN_GAPS.md (17 Aug) - and that needs a bench answer before
+the IR window/baffle details below are worth finishing.
+
+**Camera tilt angle - method, not a fixed number.** Real corridor distance to the mounted node is not yet
+known (the outdoor detection-range characterization test is still open per the sprint tracker), so bake in
+adjustability, not a printed-in angle: a slotted mounting boss + a single locking screw, not a rigid press
+fit, so a field install can tune tilt to the pole's actual relationship to the corridor. Worked starting
+point, to set expectations before install, not to commit to: tilt-below-horizontal (degrees) =
+atan((mount_height - target_center_height) / target_distance). At a 2.75m mount height (mid-point of the
+2.5-3m range already set for trunk-reach clearance), aiming to center an elephant's body mass
+(~1.5m) at an assumed ~15m engagement distance gives atan(1.25/15) ~= 4.8 degrees down from level - a
+small, plausible number, not a large fixed downward cant. Re-tune once real distance data exists.
+
+**IR illuminator co-alignment.** The real board in hand is a 68mm x 50mm bare, non-waterproof PC board
+(48 x 940nm LEDs, DC12V/300mA/3W, 600mm pigtail) - it must live fully inside the sealed window cavity,
+never at the surface, which the existing baffled/standoffed shared-window plan (see "Cross-component
+interference review" above) already accounts for. Its real beam angle isn't documented on the purchased
+listing; comparable 48-LED 940nm boards on the market commonly run 90-120 degrees, which would be wider
+than the camera's own 85(H)/69(V) FOV - a good outcome if true, since a wider illumination cone than the
+capture FOV means no dark corners in-frame and mounting doesn't need precision alignment, just
+co-location and a roughly parallel boresight. Worth a five-minute bench check once the IR-sensitivity
+question above is resolved: power the board in a dark room, mark the illuminated circle's edge on a wall
+at a measured distance, compute the half-angle - cheap, and turns an assumption into a real number.
+
+**LED deterrence spread.** Keep the old infographic's 20-30 degree outward angle for each side pod - a
+physically reasonable peripheral-coverage figure, consistent with the pod's own mounting geometry once
+it's swept slightly forward per the wing-pod shape above. Combined with the front constellation's roughly
+forward-facing spread, this plausibly clears the ~120+ degree total horizontal coverage the same
+infographic claims, but that arithmetic is a geometric estimate, not a bench-verified fact - confirm with
+a lux meter and a protractor once pods are mounted, same discipline as every other unmeasured constant in
+this project.
+
+**Elephant-contact durability - a real requirement this device has that a generic outdoor enclosure
+doesn't.** This node's whole purpose puts it near elephants at close range, sometimes investigative or
+agitated ones, not just rain and sun. That changes what "mechanically right" means here: no protruding
+part an elephant's trunk could hook onto and pull - the side LED pods stay low-profile and closely
+contoured rather than free-standing wings, and no cable run is ever external/looped (everything routes
+internally or through the pole's own conduit, not along its outside). Fasteners stay captive and deep-set
+into brass inserts on every serviceable joint, including the LED pods, not just the main hatch. The
+2.5-3m mount height above trunk-reach (already set for install-ergonomics reasons) is the primary defense
+against direct contact and should not get compromised downward for camera-angle convenience. No real
+lateral-push/pull load figure exists for "an elephant leans on the pole" the way there's a real number for
+wind load or dead weight - worth a deliberate safety-margin decision on the pole-bracket bosses (a
+multiplier over the wind/dead-weight case, engineering judgement until/unless a real event ever tests it)
+rather than leaving that case silently unconsidered.
+
 ## On the photorealistic render
 
 No Gemini or other image-generation tool is connected in this session — I checked the connector registry
