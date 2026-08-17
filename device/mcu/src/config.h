@@ -428,9 +428,29 @@
 // The Grove LoRa-E5 ships at 9600 baud 8N1.
 #define LORA_UART_BAUD 9600UL
 
-// Which HardwareSerial instance maps to USART1 on this core is unconfirmed;
-// Serial1 is the assumption (KNOWN_GAPS).
-#define LORA_SERIAL Serial1
+// CONFIRMED on hardware 2026-08-18: `Serial` is the correct instance for
+// USART1/D0-D1. Read directly from the board's own installed
+// arduino:zephyr core devicetree overlay
+// (~/.arduino15/packages/arduino/hardware/zephyr/0.90.0/variants/
+// arduino_uno_q_stm32u585xx/arduino_uno_q_stm32u585xx.overlay), not
+// inferred: `&usart1` (PB6/PB7, D0/D1) is assigned `zephyr,console`, while
+// `arduino,router-serial = <&lpuart1>` - a separate, header-inaccessible
+// internal peripheral - is what Bridge uses, with the overlay's own comment
+// noting "'Serial' is provided by the Monitor". Cross-checked against a
+// live board: `journalctl -u arduino-router` shows arduino-router opening
+// `/dev/ttyHS1` for its serial connection, the Linux-side node for that same
+// lpuart1 link - independent confirmation that Serial1/lpuart1 is Bridge's
+// internal MCU<->MPU channel, not the E5's physical UART. This settles the
+// open question in docs/eletect-x-applab-notes.md and docs/KNOWN_GAPS.md:
+// the community forum reports were right, and config.h's previous
+// `Serial1` default had never actually reached the physical Grove LoRa-E5.
+//
+// Real consequence, not just a naming fix: `Serial` is also the firmware's
+// debug console (every `[tag]`-prefixed print throughout this codebase), and
+// it is the *same physical wire* as the E5 - so any console output emitted
+// while lora_service() is mid-sequence lands on the E5's RX pin as noise.
+// See KNOWN_GAPS.md for the current mitigation status.
+#define LORA_SERIAL Serial
 
 // Most AT commands answer in well under a second; 2 s covers a slow one
 // without stalling the reflex loop, which never blocks on the radio anyway.
