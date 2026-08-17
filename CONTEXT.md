@@ -18,7 +18,7 @@ Targets: **Asian elephant (primary)**; boar, gaur, deer, monkey, leopard, tiger 
 - **IR:** external **940 nm** illuminator, MOSFET-pulsed only during capture.
 - **Seismic (primary):** SparkFun **SM-24** 10 Hz geophone → **INA333** + Sallen-Key band-pass 2–50 Hz → **STM32 internal ADC** (LPBAM). Buried, potted capsule + SS spike, ~400 mm, vertical.
 - **Acoustic:** INMP441 (>60 Hz corroboration + anti-poaching gunshot/chainsaw). Not infrasound.
-- **Audio deterrence:** STM32 → **DFPlayer-PRO** → **TPA3116D2 (PBTL)** → **8 Ω horn** (Ahuja SUH-15, external-mounted).
+- **Audio deterrence:** STM32 → **DFPlayer-PRO** → **TPA3116D2 (BTL, single channel, gain-limited)** → **8 Ω horn** (Ahuja SUH-15, **own small IP66 housing wired via speaker cable/gland to the main enclosure** — ADR 0011 supersedes ADR 0003/0005's flush-mount call).
 - **Visual deterrence:** front pods, **cool-white + royal-blue (~450 nm)** LEDs, irregular strobe, optically isolated from lens.
 - **Comms:** Grove **LoRa-E5**, LoRaWAN **IN865**.
 - **Power:** 4S **LiFePO4** 12.8 V + low-Iq MPPT + 15–20 W solar + supercap + surge/reverse-polarity protection.
@@ -55,8 +55,8 @@ Measurable > vibes · explainable AI · low power · robustness · maintainabili
 - IP rating comes from gaskets/potting/paint, not FDM prints.
 - Repo contains **no AI/assistant references** anywhere.
 
-## 9. Current status
-Architecture frozen. Hardware being sourced (BOM in `docs/hardware/`). Available now: UNO Q, Grove LoRa-E5, TPA3116, INMP441, INA333, ADS1115. Arriving: camera, geophone, speaker, LEDs, IR. Software/dashboard/AI can start immediately (see `docs/PROJECT_BLUEPRINT.md`).
+## 9. Current status (updated 15 Aug)
+Architecture frozen; 11 ADRs landed (see `docs/decisions/`, read 0003+0005+0009+0011 together for the current horn/acoustic state — later ADRs supersede earlier ones on the same topic). Procurement essentially done — `hardware/bom/procurement-status.md` is the live source of truth, `bom.md` is stale spec-reference only. `web/backend`, `web/ingest`, `web/frontend` are built and real. `device/mcu` is in active bench-validation (seismic debug streaming landed 12-13 Aug); `device/mpu` has fusion math + perception stubs but **no real sense→fuse→decide→actuate entry point yet** — this is the actual remaining build-out work. `ml/` is still empty scaffolding. Full current-state snapshot and open gaps: `HANDOVER.md`, `docs/KNOWN_GAPS.md`.
 
 ## 10. Deadlines
-Robu submission **23 Aug** · Hackster submission **30 Aug** · Field test **early–mid Aug** · Frontend design-prototype window **closes 12 Jul**.
+Robu submission **23 Aug** · Hackster submission **30 Aug** · **Field deployment with DFO Kothamangalam: Aug 20, 10-day trial** (see `hardware/bom/procurement-status.md` §6) · Frontend design-prototype window **closed 12 Jul**.
