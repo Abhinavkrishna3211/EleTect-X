@@ -26,7 +26,10 @@ void led_init();
 
 // Drives the requested channel for the resolved duration at the resolved
 // gain, subject to that channel's own independent cooldown counter (white
-// and blue deter separately - one firing must not gate the other).
+// and blue deter separately - one firing must not gate the other). Blocks
+// for the resolved duration_ms (analogWrite then delay then off) - the
+// reflex loop calling this must expect that, same caveat as horn.h's
+// drive_horn.
 led_ack drive_led(led_request req, uint32_t now_ms);
 
 #endif  // ACTUATORS_LED_H
