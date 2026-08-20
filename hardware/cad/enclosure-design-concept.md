@@ -35,18 +35,35 @@ cavity with everything else anymore.
 **Two sealed volumes now:**
 
 1. **Main enclosure** — camera/IR, mic, LED constellation, the electronics tray (UNO Q, TPA3116D2 amp,
-   DFPlayer PRO, Grove LoRa-E5), the battery + BMS, and the MPPT solar controller. Front-loaded shell with
-   a rear hatch for service access, same structural pattern as before, just built around much smaller
-   internal parts now that the horn isn't one of them.
+   DFPlayer PRO, Grove LoRa-E5), the battery + BMS, and the XL4015 solar-charging buck module. Front-loaded
+   shell with a rear hatch for service access, same structural pattern as before, just built around much
+   smaller internal parts now that the horn isn't one of them.
 2. **Horn housing** — the SUH-15 alone, its own small sealed enclosure on a short standoff or direct pole
    mount near the main box, connected by a gasketed speaker-wire gland with a drip loop (see "Horn housing"
    section below).
 
-**Rough envelope, main enclosure:** front face ≈180×150mm, total depth ≈110–130mm — driven now by the
-MPPT controller's 138×79×38mm footprint (the new largest flat part) and the battery/tray stack behind the
-camera window, not by a 284mm horn body. This is an estimate to true up once the battery's real thickness
-is confirmed and a Fusion 360 layout is actually drawn (see "Depth stack" below) — treat it the same way
-the original 330mm depth was treated: a working number to design toward, not a measured fact yet.
+**Rough envelope, main enclosure:** front face ≈180×150mm, total depth ≈110–130mm — driven by the
+battery/tray stack behind the camera window, not by a 284mm horn body. This is an estimate to true up once
+the battery's real thickness is confirmed and a Fusion 360 layout is actually drawn (see "Depth stack"
+below) — treat it the same way the original 330mm depth was treated: a working number to design toward,
+not a measured fact yet.
+
+**Correction, 20 Aug 2026 (docs-currency, not a design change):** earlier drafts of this doc (and the
+first-pass CAD generated from them, see below) sized this envelope's width around the amiciSmart 10A MPPT
+controller's 138×79×38mm footprint. ADR 0012 dropped that part in favor of a manually-set XL4015 CC/CV
+buck module, already in hand — real footprint ≈54×23×18mm (per the module family's published spec; not
+yet calipered against the physical unit, same caveat as every other EST-labeled dimension in this doc). The
+buck module is no longer the size driver for this layer; the battery's 75×70mm footprint is. The
+front-face/depth numbers above are left unchanged since they're already what the first-pass CAD (see below)
+was generated to — this correction only fixes which part the reasoning cites, it doesn't reopen the
+envelope.
+
+**CAD is not yet re-synced to this correction.** `hardware/cad/main_enclosure.py` (and the STEP files it
+generates, plus `hardware/cad/FINDINGS.md`) still hard-code `MPPT_DIMS = (138.0, 79.0, 38.0)` against the
+amiciSmart part this ADR dropped — that script hasn't been re-run since ADR 0012. This isn't a fit problem
+(the real XL4015 module is far smaller than the amiciSmart footprint the shell was modeled around, so the
+manufactured envelope has slack rather than a shortfall in that layer), but the CAD script and FINDINGS.md
+are stale and worth updating in a follow-up pass, not assumed correct as-is.
 
 ## Form language, take three — one continuous tower, not assembled parts
 
@@ -160,29 +177,29 @@ and power hardware, front to back:
   Grove LoRa-E5, and the passives perfboard, all on one removable tray sliding out through the rear hatch.
   This tray's footprint (roughly 150×100mm laid flat) is what actually sets the shell's interior width,
   not the horn anymore.
-- **Battery + MPPT layer**, rear ≈35–40mm of depth: this is the pair that needs a real fit-check now that
-  they're the largest remaining parts.
-  - **MPPT controller (amiciSmart 10A, 138×79×38mm)** — no IP rating anywhere in its listing, and it's a
-    bare board with an exposed LCD and pushbuttons, which is a strong tell that it isn't sealed. **Treat it
-    as not waterproof and mount it inside the sealed main shell**, not outside on the pole or under the
-    solar canopy alone. Its 138mm long edge is the dimension that actually sizes the shell's interior
-    width (wider than the 75mm battery, wider than the 68.85mm UNO Q) — the ≈180mm front-face working
-    width above already carries margin for this.
+- **Battery + XL4015 buck layer**, rear ≈35–40mm of depth: the battery is the part that needs a real
+  fit-check here now — the buck module is small enough to have real slack in this layer.
+  - **XL4015 CC/CV buck module (ADR 0012)** — real footprint ≈54×23×18mm (module-family published spec;
+    not yet calipered against the physical unit in hand). No IP rating on this class of bare board either
+    — **treat it as not waterproof and mount it inside the sealed main shell**, same as the amiciSmart unit
+    it replaced. It's small enough now that the battery's 75×70mm footprint, not the buck module, is the
+    part sizing the shell's interior width — the ≈180mm front-face working width above carries comfortable
+    margin for both.
   - **Battery pack (Robu 4S1P LiFePO4, 75×70mm footprint, thickness unconfirmed)** — sits alongside the
-    MPPT with a few mm air gap between them (both generate heat under charge, matches the original
+    buck module with a few mm air gap between them (both generate heat under charge, matches the original
     reasoning). Thickness wasn't listed on the product page; a 4S1P pack of 32650 cells (32mm diameter)
     built as a 2×2 block typically runs ≈35–40mm thick including casing — worth confirming by photo or
     direct seller question before finalizing the tray height, but not a number likely to blow the ≈40mm
     depth allowance budgeted here.
-  - Together, MPPT + battery placed side by side (not stacked) need roughly 138mm + 75mm + gap ≈ 220mm of
-    width if laid flat side by side — too wide for the ≈180mm front face. **Stack them front-to-back
-    instead** (battery closer to the tray, MPPT behind it, or vice versa) within the ≈35–40mm depth layer;
-    side-by-side only works if the shell width grows to accommodate it. This is the actual layout
-    constraint driving the "confirm in Fusion 360" caveat on the rough envelope above.
+  - Together, battery + buck module need roughly 75mm + 54mm + gap ≈ 135mm of width if laid flat side by
+    side — fits inside the ≈180mm front face with real margin, unlike the amiciSmart-era math this section
+    used to run. The first-pass CAD (see below) already stacks them front-to-back per the earlier
+    (now-superseded) side-by-side-doesn't-fit constraint; that placement isn't being redone here purely as
+    a docs-currency fix, since side-by-side vs. front-to-back makes no functional difference at this size.
   - Keep both low and to the rear of this layer, same thermal logic as before: heat rises, the camera/
     IR/LED loads up front generate more heat than these two parts do at rest, so natural convection still
     carries warm air away from them rather than over them.
-- Use screw-terminal or locking connectors for the battery/MPPT/tray interconnects, not friction-fit
+- Use screw-terminal or locking connectors for the battery/buck-module/tray interconnects, not friction-fit
   headers — this is unattended field hardware, not a bench prototype.
 - **Rear hatch**: a rabbet/step joint at the seam, not a flush butt joint — the O-ring sits in a groove
   that's recessed a step back from the outer face, so wind-driven monsoon rain hitting the seam at an
@@ -321,14 +338,15 @@ close enough to read as "daylight" — worth checking on the bench once real par
 mistimed IR-cut switch mid-capture would lose exactly the footage (animal reacting to the deterrent) you
 most want for the contest submission.
 
-**Electrical noise zoning.** The TPA3116D2 amp, the MPPT solar controller, and the IR/LED MOSFET gate
-drivers are all switching-noise sources (class-D switching, buck conversion, gate switching respectively) —
-all three now live in the main box regardless of the horn split, so this zoning still matters. The
+**Electrical noise zoning.** The TPA3116D2 amp, the XL4015 solar-charging buck module, and the IR/LED
+MOSFET gate drivers are all switching-noise sources (class-D switching, buck conversion, gate switching
+respectively) — all three now live in the main box regardless of the horn split, so this zoning still
+matters. The
 geophone's INA333 front-end is a µV-level analog signal and the most vulnerable thing in the box to that
 noise; the LoRa radio is the second most vulnerable to it. The horn-magnet-proximity risk to the antenna
 is gone now that the driver itself lives in a separate housing (ADR 0011) — one less thing to zone around
 — but the battery pack is still a nearby metal mass worth keeping some distance from a compact antenna.
-Zone the electronics tray into a **noisy half** (amp, MPPT, MOSFET drivers) and a **quiet half**
+Zone the electronics tray into a **noisy half** (amp, XL4015 buck, MOSFET drivers) and a **quiet half**
 (INA333/geophone ADC input, mic connector, LoRa-E5 + antenna, kept a few cm from the battery), physically
 separated across the tray rather than interleaved, with short, direct wiring runs on the noisy side so
 switching noise has less trace length to radiate from. A thin grounded partition (copper tape on a printed
@@ -344,15 +362,17 @@ Two separate models now (ADR 0011) — main enclosure and horn housing — but t
 real layout risk, so block that out first.
 
 **Main enclosure:**
-1. Block out the MPPT controller (138×79×38mm) and battery pack (75×70mm, thickness to be confirmed) as
-   reference solids first — these are now the largest parts and set the interior envelope, the same role
-   the horn used to play.
+1. Block out the XL4015 buck module (≈54×23×18mm, ADR 0012) and battery pack (75×70mm, thickness to be
+   confirmed) as reference solids first — the battery is now the larger of the two and sets the interior
+   envelope, the same role the horn used to play. (The existing first-pass CAD still blocks out the old
+   amiciSmart MPPT's 138×79×38mm footprint here instead — see the correction note under "Rough envelope"
+   above — and needs re-running against the real buck-module dimensions.)
 2. Sketch the front face profile with margins for the camera/IR window, LED windows, mic port, and the
    eyebrow visor.
 3. Extrude the front shell, then shell (hollow) it to a 3–4mm wall thickness.
 4. Cut the window/port openings.
-5. Add interior mounting bosses/standoffs for the tray rails, battery clamp, MPPT mount, and PCB
-   standoffs — including the air gap called out between battery and MPPT.
+5. Add interior mounting bosses/standoffs for the tray rails, battery clamp, buck-module mount, and PCB
+   standoffs — including the air gap called out between battery and the buck module.
 6. Model the pole-bracket bosses into the fixed rear wall first, gusseted, sized for the M3 12–16mm
    screws — this is the one interface on the whole enclosure that's never reopened, get it structurally
    right before cutting the hatch opening next to it (see "Rear face" section above for why these stay
@@ -367,8 +387,9 @@ real layout risk, so block that out first.
    PG7/PG9 thread size, ~12.5–16mm) at the bottom-rear, with a drip-loop channel modeled into the cable
    run — one gland now needs to carry the new speaker-cable run out to the horn housing, alongside the
    geophone and solar leads.
-10. Before committing filament to the full shell, print just the MPPT/battery corner as a small test patch
-    to confirm the tighter fit now driving the design.
+10. Before committing filament to the full shell, print just the battery corner as a small test patch to
+    confirm the tighter fit now driving the design (the buck module's own footprint is small enough that
+    it isn't the tight-fit driver here).
 
 **Horn housing:**
 1. Block out the SUH-15 as a reference solid (real measured dimensions, not datasheet numbers).
