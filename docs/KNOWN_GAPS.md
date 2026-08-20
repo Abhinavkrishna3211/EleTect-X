@@ -767,9 +767,28 @@ criteria — see each entry's status.
   caused today's zero-response result, but it will recur in the field on every real trigger and needs
   its own fix (e.g. gate those prints, or move them to `Bridge.notify()` the way
   `SEISMIC_DEBUG_STREAM_RAW` already does) before the 20 Aug deployment.
+  **Console/LoRa wire-sharing conflict closed, 20 Aug.** Fix: `config.h` gained
+  `SEISMIC_TRIGGER_CONSOLE_LOG` (default `0`, same discipline as `SEISMIC_DEBUG_STREAM_RAW`/
+  `FIRE_TEST_HARNESS` — must stay `0` before any field sync). `state_machine.cpp`'s `log_trigger()`
+  (the `[trigger]` line) and the `[notify]` echo inside `notify_footfall_event()` are now both
+  compiled out entirely unless that flag is set to `1`; the real `Bridge.notify("report_footfall_event",
+  ...)` call in `notify_footfall_event()` is untouched either way — this only gates the redundant local
+  console text, not the MPU-bound schema report. Went with a flag rather than rerouting through
+  `Bridge.notify()` the way `SEISMIC_DEBUG_STREAM_RAW` does: that would mean adding a new
+  `Bridge.provide()` handler on the MPU side, which the fire-test-harness entry below already flags as
+  something to add one at a time on a real hardware session, not as a host-only batch change on
+  deployment day. New `pio test -e native` coverage added (`tests/test_state_machine/`): drives a real
+  quiet-then-transient waveform through the full geophone → STA/LTA → state_machine chain via a new
+  `Wire.host_feed_raw()` hostshim hook (the old stub always read back 0, which can never cross
+  `STA_LTA_TRIGGER_RATIO`) and asserts, via a new `Serial.host_bytes_written()` hostshim counter, that a
+  genuine trigger crossing still writes zero bytes to `Serial` with the flag at its default. Full suite
+  (`pio test -e native`, 8 suites / 45 cases including the 2 new ones) passes. Bench visibility note
+  added to `device/mcu/README.md`'s stomp-test section — the flag has to be flipped to `1` locally to
+  see `[trigger]` lines again, matching the existing `SEISMIC_DEBUG_VERBOSE`/`SEISMIC_DEBUG_STREAM_RAW`
+  flag-flip instructions there.
   Status: `Serial`-vs-`Serial1` closed for good; `mac.cpp`'s AT-sequence fix still unproven on hardware
-  (blocked on the module actually responding); the console/LoRa wire-sharing conflict is a newly
-  identified, separate open item. Wiring-status table in `UNO_Q_PINOUT_REFERENCE.md` left at **P**
+  (blocked on the module actually responding, unchanged by the above); console/LoRa wire-sharing
+  conflict closed. Wiring-status table in `UNO_Q_PINOUT_REFERENCE.md` left at **P**
   (physically wired, not confirmed working end-to-end) — not flipped to **W**, since it demonstrably
   does not work yet.
 - **The manual serial fire-test harness (`device/mcu/src/fire_test.*`,
