@@ -29,6 +29,11 @@ problems created specifically by sharing one cavity with the horn: SPL/vibration
 bursts), and the horn's magnet sitting close enough to the LoRa antenna to risk detuning it. Both are
 mitigations for a problem that doesn't exist if the horn isn't sharing the box.
 
+**Correction, 20 Aug 2026 (docs-currency, not a design change):** this ADR originally cited the amiciSmart
+10A MPPT controller (138×79×38mm) among the parts staying in the main enclosure. ADR 0012 dropped that part
+in favor of a manually-set XL4015 CC/CV buck module (real footprint ≈54×23×18mm) — the reference below is
+updated to match; it doesn't change anything else this ADR decided.
+
 ## Decision
 
 Move the **passive horn driver only** (the SUH-15 cone/body itself) into its own small IP66 housing,
