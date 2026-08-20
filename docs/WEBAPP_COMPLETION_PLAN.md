@@ -383,15 +383,17 @@ pass, delete again.
   the approval flow), and `user_metadata` carries only `email_verified`, with no `full_name` or
   `phone`. That rules out the Phase 3 signup-test artifact, which the script creates as
   `qa-resident-*@example.com` *with* a name and phone. It is the `QA_STAFF_EMAIL` the phase4c QA
-  scripts sign in as, it is named in `docs/qa/phase4a/NOTES.md`, and it is listed on the login page
-  itself (`pages/auth/Login.tsx`'s `demoAccounts`). Deleting it would break the existing QA scripts.
-- **The login page advertises a valid officer-role username to every visitor.** `Login.tsx`'s
-  `demoAccounts` lists `admin@eletect.in`, `officer@eletect.in`, and `resident@eletect.in` as
-  role hints. Only `officer@eletect.in` actually exists — and it is a real, `officer`-role account in
-  the *production* project, so the public login page hands an attacker a confirmed-valid staff
-  username for free (half the credential pair, no guessing needed). Harmless while the app is a demo;
-  it should not survive into the DFO deployment. Either drop the demo-account hints before launch or
-  point them at accounts that do not exist in production.
+  scripts sign in as, and it is named in `docs/qa/phase4a/NOTES.md`. It is no longer listed on the
+  login page itself — see the closed item immediately below.
+- ~~The login page advertises a valid officer-role username to every visitor.~~ **Closed.** `Login.tsx`
+  dropped the entire `demoAccounts` block (`admin@eletect.in`/`officer@eletect.in`/`resident@eletect.in`
+  role hints) — the page now renders a plain email/password form with no account list at all, and
+  carries a comment ("Do not reintroduce this section") pointing future editors at
+  `scripts/seed-judge-accounts.mjs` for judge/demo logins instead. A source-scan regression test
+  (`pages/auth/Login.test.ts`) now asserts the page's source contains no `@eletect.in` address at all,
+  so this can't silently regress. This entry sat open in this document after the code fix already
+  landed — plan-vs-code drift of the same kind this file's own "Migration drift" item above calls out;
+  noting it here rather than only in the fix's own commit so the doc stops disagreeing with the repo.
 - ~~`scripts/qa-phase3-screenshots.mjs` hardcodes a password.~~ **Fixed 12 Jul** — it now reads
   `QA_SEED_PASSWORD` from the gitignored `.env.local`, same pattern as the Day 5 scripts. No
   hardcoded credential remains in any tracked script.
