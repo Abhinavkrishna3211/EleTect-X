@@ -55,6 +55,7 @@ models/          on-device vision model export, gitignored (*.tflite)
 tests/           host-only contract + config tests, never synced to the board
 bench/ping/          disposable hello-world Bridge round trip, see below
 bench/camera_check/  disposable camera capture-and-save check, see below
+bench/demo_replay.py host-only real-bench-data replay of the reflex loop, see below
 ```
 
 `bridge/rpc.py` ships as **signatures and docstrings only**, deliberately not wired up with
@@ -196,3 +197,34 @@ VIN?), not a bug in `capture_check.py` or `camera.py` — see `docs/KNOWN_GAPS.m
 
 **Status: pending hardware.** Written and host-tested against a fake capture device; not yet run
 against the real IMX462 on the board or the dev host.
+
+## Demo replay — reflex loop against real bench data, no hardware
+
+`bench/demo_replay.py` feeds `services/reflex_loop.py`'s real `handle_footfall_event()` — the
+actual sense → fuse → decide pipeline, not a mock of it — the real STA/LTA ratios and fused
+probabilities `docs/KNOWN_GAPS.md`'s "Multi-trial stomp validation protocol" entry captured on real
+hardware on 2026-08-15 (12 stomps, 11 detected, one genuine sub-threshold near-miss), and narrates
+each step to the terminal. No board, camera, or Bridge involved — the actuator/camera callables
+passed in raise if ever called, since this always runs `safe_mode=True`. Built for the Robu bench
+demo, where the actuators aren't wired to the board yet.
+
+### Running the demo replay
+
+```powershell
+cd device\mpu
+python bench\demo_replay.py
+```
+
+`--interval <seconds>` controls the pause between events (default 1.5s, for demo pacing — pass 0 to
+run flat out). `--no-color` disables ANSI styling for a plain terminal or a log capture.
+
+### What it proves
+
+Every printed `fused P(elephant)` is computed live by the real `fuse()`/`decide()` call and printed
+next to the real fused probability the board actually logged that day — they match to the displayed
+precision, which is the script's own check that its replicated on-MCU probability formula
+(`footfall_features.cpp`'s saturating fit) is right, not an assertion to take on faith. The closing
+summary reproduces the real run's 11/12 detection rate and 11/11 alert rate.
+
+**Status: closed.** Runs clean against the real `cognition`/`services` modules (`pytest -q`: 123
+passed), no hardware required.
