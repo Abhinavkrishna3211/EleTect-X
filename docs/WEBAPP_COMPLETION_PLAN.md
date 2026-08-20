@@ -719,10 +719,12 @@ a live row. Run through `supabase db query --linked` (Management API; no DB pass
 - **DLT registration status: still unfilled.** Nobody has recorded the actual application/approval
   state with the SMS provider. Until then SMS stays gated behind `CHANNEL_SMS=off` and email carries
   delivery. Record the real answer here rather than leaving it an assumption.
-- **No CSP on the deployed site.** Deliberate: a correct policy must name the project's own Supabase
-  origin *and* the CARTO tile CDN, and a wrong one fails silently (blank map tiles, dead auth). Add it
-  against the live origin now that one exists, and verify by loading the dashboard, not by reading the
-  header.
+- ~~No CSP on the deployed site.~~ **Drafted.** `vercel.json` now ships a policy scoped to the app's
+  actual origins: the production Supabase host (REST + realtime websocket), the CARTO tile CDN
+  (`LiveMap.tsx`'s subdomains), Google Fonts, and the marketing page's Unsplash images. `style-src`
+  keeps `unsafe-inline` because Leaflet's `divIcon` markers are raw HTML strings with inline `style`
+  attributes. No wildcards. Still needs a human to load the live dashboard and confirm nothing silently
+  breaks (blank map tiles, dead auth) before calling this closed.
 - **Residents can only opt in by holding an account.** The consequence of the Day 5 Stay Safe
   decision, and the right default (signup + email confirmation *is* the consent record). If field use
   shows residents will not create accounts, that is the moment to design an anonymous opt-in with real
@@ -732,9 +734,11 @@ a live row. Run through `supabase db query --linked` (Management API; no DB pass
   covering the `getUserById`-failure-skips-one-admin case and the notified-count-reflects-actual-
   delivery case. `deno check` against real `supabase-js` types confirmed the extraction is
   behavior-preserving.
-- **`scripts/qa-phase3-screenshots.mjs` hardcodes a password** (`qa-test-pass-123`). Low severity —
-  the accounts it creates only ever get the `public` role and none currently exist — but it should
-  move to the `QA_SEED_PASSWORD`-from-`.env.local` pattern the Day 5 scripts use.
+- ~~`scripts/qa-phase3-screenshots.mjs` hardcodes a password.~~ **Fixed.** It reads `QA_SEED_PASSWORD`
+  from the gitignored `.env.local` (falling back to the environment), the same pattern the Day 5
+  scripts use, and refuses to run below 16 characters. No hardcoded credential remains in the file.
+  (This entry was left open here after the code fix already landed elsewhere in this document — see
+  the near-duplicate note above and the 12 Jul closeout below.)
 *(The stale `S7-08` alert state and the `14 Hz` demo log line were both listed here and are now
 resolved against the live database — see "Applied directly to the production database" above.)*
 
