@@ -201,8 +201,13 @@ live vulnerability:
    testability (`index.ts` stays the thin HTTP entrypoint), with two passing Deno tests covering the
    lookup-failure-skips-one-recipient case and the undeliverable-row case. `deno check` against real
    `supabase-js` types confirmed the refactor was behavior-preserving before it was committed and
-   redeployed. `notify-officer-request`'s equivalent guard is fixed but not yet unit-tested (its
-   logic isn't extracted) — flagged as an optional follow-up, good candidate for Day 6.
+   redeployed. `notify-officer-request`'s equivalent guard was fixed but not unit-tested at the
+   time (its logic wasn't extracted) — flagged as an optional follow-up. **Closed later:**
+   `notify-officer-request` gained its own `fanout.ts`/`fanout.test.ts`, same shape as
+   `send-alert`'s (a single-channel `fanOut()` rather than `send-alert`'s channel list, since
+   this function only ever emails), with two passing Deno tests and a clean `deno check` against
+   real `supabase-js` types confirming the extraction was behavior-preserving. See the "Still
+   open" and "Known gaps" entries below, both now resolved.
 
 Commits: `2e9f520` (chore, `.temp` ignore), `06bfd56` (fix, send-alert undeliverable + guard),
 `26fde56` (fix, notify-officer-request guard), `64a572e` (test, fanout.ts extraction + Deno tests).
@@ -461,9 +466,10 @@ every PR writing to the production database. It stays a local pre-deploy gate, a
 `scripts/qa-day5-responsive.mjs` *is* that gate — it already logs in as each role and asserts every
 dashboard route renders, so a second, thinner smoke script would only duplicate it.
 
-**Still open (was flagged optional):** `notify-officer-request`'s `getUserById` guard remains
-untested, because unlike `send-alert` its fan-out logic is not extracted into a testable module. The
-same `fanout.ts` extraction plus two Deno tests would close it.
+~~Still open (was flagged optional): `notify-officer-request`'s `getUserById` guard remains
+untested, because unlike `send-alert` its fan-out logic is not extracted into a testable module.~~
+**Closed.** `notify-officer-request`'s fan-out logic is now extracted into its own `fanout.ts`,
+covered by two Deno tests in `fanout.test.ts` mirroring `send-alert`'s test shape.
 
 ## Day 7 (Fri) — Deploy + final review
 
@@ -721,9 +727,11 @@ a live row. Run through `supabase db query --linked` (Management API; no DB pass
   decision, and the right default (signup + email confirmation *is* the consent record). If field use
   shows residents will not create accounts, that is the moment to design an anonymous opt-in with real
   verification — not before.
-- **`notify-officer-request` has no unit tests.** Its `getUserById` guard is fixed but unverified,
-  because unlike `send-alert` its fan-out logic was never extracted into a testable module. The same
-  `fanout.ts` extraction plus two Deno tests closes it.
+- ~~`notify-officer-request` has no unit tests.~~ **Closed.** Its fan-out logic is now extracted
+  into `fanout.ts` (same extraction `send-alert` already went through), with two Deno tests
+  covering the `getUserById`-failure-skips-one-admin case and the notified-count-reflects-actual-
+  delivery case. `deno check` against real `supabase-js` types confirmed the extraction is
+  behavior-preserving.
 - **`scripts/qa-phase3-screenshots.mjs` hardcodes a password** (`qa-test-pass-123`). Low severity —
   the accounts it creates only ever get the `public` role and none currently exist — but it should
   move to the `QA_SEED_PASSWORD`-from-`.env.local` pattern the Day 5 scripts use.
