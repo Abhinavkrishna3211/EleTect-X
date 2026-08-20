@@ -1,4 +1,4 @@
-# EleTect X — Handover (last updated 17 Aug 2026 — camera path closed out on real hardware: `CAMERA_DEVICE` fixed to a udev by-id path and proven stable across a full reboot and a physical unplug/replug, `python3-opencv` installed, `capture_check.py` passing end-to-end, `Camera.open()` now retries with backoff; 15 Aug entries below — multi-trial stomp validation closed on real hardware; fire-test harness software path verified on real hardware, physical actuators not yet wired — still current)
+# EleTect X — Handover (last updated 20 Aug 2026 — software-only session, no hardware connected: MPPT solar controller dropped for a manually-set XL4015 buck (ADR 0012, `docs(decisions)` 04d1398 + `docs(hardware)` c0ae7db), `state_machine.cpp` console prints gated off the shared LoRa wire (`fix(mcu)` b4087d1), login-page demo-account doc-drift closed with a regression test (`test(web)` 42ced90), `notify-officer-request`'s fan-out extracted and unit-tested to match `send-alert` (`test(backend)` a15ea23); 18 Aug entries below — LED/IR fire + deterrent-event footage capture wired into the MPU reflex loop; 17 Aug entries — camera path closed out on real hardware: `CAMERA_DEVICE` fixed to a udev by-id path and proven stable across a full reboot and a physical unplug/replug, `python3-opencv` installed, `capture_check.py` passing end-to-end, `Camera.open()` now retries with backoff; 15 Aug entries — multi-trial stomp validation closed on real hardware; fire-test harness software path verified on real hardware, physical actuators not yet wired — still current)
 
 This file exists so work can continue with zero lost context if the planning session moves to a
 different Claude account/session. Read this file, then `CONTEXT.md`, before doing anything else.
@@ -25,7 +25,7 @@ footage and real deployment story are the strongest material for both write-ups.
 unblocks Aug 20 first; the contest submissions are largely a documentation/write-up pass on top of
 what the field test produces (see `edge-impulse-hackster-writeup` skill when that pass starts).
 
-## Where the project actually stands (15 Aug 2026)
+## Where the project actually stands (20 Aug 2026)
 
 **Completeness ranking:** `web/frontend` > `web/backend` / `web/ingest` (all essentially done) >>
 `device/mcu` (real, in bench-validation) > `device/mpu` (fusion math built, integration loop missing)
@@ -36,6 +36,22 @@ what the field test produces (see `edge-impulse-hackster-writeup` skill when tha
   auth + ranger dashboard) exists with tests. Per `CLAUDE.md`'s deployment bar, production auth still
   needs a real transactional email provider before residents sign up with real contact info — check
   whether that's landed before treating auth as field-ready.
+  - **20 Aug, doc-drift correction, not a real fix:** `docs/WEBAPP_COMPLETION_PLAN.md` still tracked
+    the public login page (`src/pages/auth/Login.tsx`) as advertising a real `officer@eletect.in`
+    account to anonymous visitors. That was already fixed on `develop` by an unrelated earlier commit
+    (`71dacaa`, 12 Jul) whose message never mentioned the security angle, so the plan doc never got
+    updated to match — the code was already safe going into this session. Closed the stale plan entry
+    and added `src/pages/auth/Login.test.ts`, a source-scan regression test asserting the page never
+    renders a real `@eletect.in` address, so this can't silently regress again (`test(web)` 42ced90).
+  - **20 Aug:** `notify-officer-request`'s per-admin email fan-out was extracted into its own
+    `fanout.ts` (`fanOut()`) with two Deno unit tests, mirroring `send-alert`'s existing
+    `fanout.ts`/`fanout.test.ts` split — same reasoning: testable with a stub Supabase client, no live
+    project or network needed. `index.ts` is now a thin HTTP entrypoint calling `fanOut()`; behavior
+    (inputs/outputs) unchanged, confirmed via `deno check` against real `supabase-js` types
+    (`test(backend)` a15ea23). Run tests from `web/backend/functions/notify-officer-request`:
+    `deno test --no-check --allow-env fanout.test.ts` (`deno.exe` at `C:\Users\abhin\.deno\bin\deno.exe`
+    if it's not on PATH). No `deno.json` and no Deno CI job exist in this repo — `.github/workflows/ci.yml`
+    only runs `lint-python` and `web-frontend` (npm lint/build/test).
 - **`device/mcu`** — real, flat `src/` layout (ADR 0010). Geophone STA/LTA, rule gate, state machine,
   horn/LED/IR drivers, LoRa AT (`mac.cpp`) all have code. **This evening's session (14 Aug, after this
   doc's last version) added a lot — read `docs/KNOWN_GAPS.md` in full, it's the accurate record, this
@@ -213,11 +229,43 @@ what the field test produces (see `edge-impulse-hackster-writeup` skill when tha
   `ALERT_PROBABILITY_THRESHOLD = 0.5` (uninformative midpoint, not tuned) and a horn-only "request
   protocol max, let the MCU clamp" deterrence policy standing in for the not-yet-built contextual
   bandit. The `Bridge.provide()` calls for `_on_footfall_event`/`_on_acoustic_event` are written but
-  commented out, same one-at-a-time discipline as the MCU side. 114/114 pytest passing, `ruff check`
-  clean — verified directly, not just from the report.
+  commented out, same one-at-a-time discipline as the MCU side. **123/123 pytest passing, `ruff check`
+  clean** (re-verified 20 Aug — this file previously said 114/114, stale as of the 18 Aug commit below).
+  - **18 Aug, `feat(mpu)` b612b39: `handle_footfall_event()` now fires LED/IR and captures
+    deterrent-event footage, not just the horn.** `drive_led`/`pulse_ir` are injected the same
+    Protocol-callable way `drive_horn` already was, same `safe_mode` dry-run gate. On a real alert:
+    `camera.open()` → `capture_burst()` → horn → LED → IR → a short post-fire tail → `close()` →
+    `save_frames()` — the camera opens before any actuator fires and stays open through the whole
+    sequence so a saved clip has a chance of catching the retreat, not just the approach. Camera/storage
+    faults are logged and never allowed to block or delay horn/LED/IR — deterrence is safety-critical,
+    footage is secondary; covered by dedicated failure-path tests in `tests/test_reflex_loop.py`. New
+    invented placeholders (`ALERT_LED_PATTERN_ID`, `ALERT_LED_DURATION_MS`, `ALERT_IR_DURATION_MS`,
+    `CAPTURE_POST_FIRE_TAIL_S`, `CAPTURE_LOW_DISK_HEADROOM_BYTES`) follow the horn's existing
+    "request the max, let the MCU clamp" policy — none tuned against real field data yet. Deliberately
+    **no rolling pre-event buffer** (real complexity the Aug 20 deadline has no room to absorb
+    untested) — `trigger_to_first_frame_s` latency is instrumented and logged instead, as the number
+    that would justify one later. **Still open, not yet live-hardware-confirmed**: this is MPU-side
+    only — the MCU-side `Bridge.provide("drive_led", ...)` / `Bridge.provide("pulse_ir", ...)`
+    registrations in `main.cpp` remain commented out (same one-at-a-time discipline, see item 2 below),
+    so nothing here has fired an actual LED/IR/camera together on real hardware yet. Full detail in
+    `docs/KNOWN_GAPS.md`'s "Deterrent-event camera capture wired into `reflex_loop.py`..." entry (18 Aug).
 - **`ml/`** — still untouched. No training data, no models, nothing. Not blocking the Aug 20 trial
   (vision uses a fixed pretrained detector per CONTEXT.md §4), but relevant to the "scientifically
   rigorous" goal and the Hackster write-up's DSP/model section.
+- **`hardware/` power system — MPPT dropped, 20 Aug (ADR 0012).** Every "smart" LiFePO4 MPPT
+  controller checked (amiciSmart 10A, Sparkel SPSCC-1012LiMPPT) turned out disqualified on real
+  verification (wrong chemistry default, unreachable config path, a reported no-auto-resume firmware
+  bug) or over budget (Victron, ₹6,300+) — see the ADR for the full per-part rundown. Power system now
+  uses a manually-set XL4015 buck (already the part `procurement-status.md` had listed) for charge
+  regulation instead of true MPP tracking; documented as an accepted efficiency tradeoff, not a gap.
+  Follow-on: `hardware/cad/enclosure-design-concept.md` and ADR 0011 still cited the old MPPT's
+  138×79×38mm footprint — corrected to the XL4015's ~54×23×18mm (`docs(hardware)` c0ae7db). **The
+  CadQuery script `hardware/cad/main_enclosure.py` (and its generated STEP files / `FINDINGS.md`) has
+  not been re-run against this correction and should be treated as superseded, not current** — the
+  enclosure is now a hand-built Fusion 360 model already in manufacturing
+  (`hardware/cad/eletect_x_final.f3z` / `.step`, untracked working files as of this session, not yet
+  committed). Don't use `main_enclosure.py`'s output for anything real; if CAD dimensions are needed,
+  check the Fusion 360 files or `enclosure-design-concept.md`, not the CadQuery pass.
 
 **Explicit reprioritization, decided 14 Aug evening, now fully satisfied:** finishing and hardening the
 geophone subsystem was to come before flashing/firing the fire-test harness and before any live Bridge
@@ -234,7 +282,7 @@ anyone needs to explain the whole project from scratch, not required reading for
 
 ## ADR trail — read these together, not in isolation
 
-11 ADRs in `docs/decisions/` (0000 is the template, ignore). **Numbering has one real duplicate**:
+12 ADRs in `docs/decisions/` (0000 is the template, ignore). **Numbering has one real duplicate**:
 both `0001-usb-camera-imx462.md` and `0001-physical-ai-sensing-and-fusion-architecture.md` are "0001"
 — don't rely on the number alone when searching.
 
@@ -254,6 +302,7 @@ picture — read **0003 → 0005 → 0009 → 0011** in that order:
 | 0008 | proposed, 2 bench measurements pending | MPU stays in deep suspend (not poweroff) between events, ~0.42-0.45W continuous |
 | 0009 | proposed, gated on one bench test | Continuous on-MCU LPBAM classifier supersedes 0006's gate design |
 | 0011 | proposed (13 Aug) | Horn driver moves to its own small IP66 housing, wired via speaker cable/gland — amends 0003/0005's flush-mount call |
+| 0012 | accepted (20 Aug) | Drop the smart MPPT solar controller for a manually-set XL4015 buck — every checked MPPT unit failed real verification or was over budget |
 
 `hardware/cad/enclosure-design-concept.md` (380 lines, last touched 14 Aug — after ADR 0011) should
 already reflect the split-housing design; confirm this before assuming it's still pre-0011.
@@ -306,7 +355,11 @@ kept up to date live through tonight's session. Highest-priority items as of the
    `services/reflex_loop.py`), dry-run by default via `SAFE_MODE`. `report_footfall_event`'s
    registration is now live and proven on hardware (item 1 above); `report_acoustic_event`'s
    registration is still written and commented out, same one-at-a-time discipline, deliberately out of
-   scope for this pass.
+   scope for this pass. **18 Aug:** the reflex loop's alert path also now drives LED/IR and captures
+   deterrent-event footage, not just the horn (see `device/mpu` section above) — but this is MPU-side
+   wiring only; `main.cpp`'s `Bridge.provide("drive_led", ...)`/`Bridge.provide("pulse_ir", ...)` are
+   still commented out (same one-at-a-time discipline as item 3 below), so no LED, IR, or camera has
+   actually fired together from a real trigger on hardware yet.
 3. **The fire-test harness's software path is now verified on real hardware (15 Aug)** — correct
    `[firetest]` acks and cooldown refusal for all four commands. **Physical activation is not yet
    confirmed: horn, LED, and IR are not wired to the board.** Re-run once wiring exists.
@@ -320,11 +373,20 @@ kept up to date live through tonight's session. Highest-priority items as of the
    the first "AT". Two untested candidate causes needing physical hands, not more SSH: a 5V-power/3.3V-MCU-TX
    logic-level mismatch on the module's RX line, or the module not being in AT-command mode out of the
    box. Full capture, wiring photo description, and a third possible cause in
-   `docs/KNOWN_GAPS.md`'s 18 Aug entry. Also newly found: the console debug prints and LoRa AT traffic
-   permanently share this one physical wire now (`Serial` is both), which is fine today (defaults are
-   quiet) but will corrupt an in-flight join if a real footfall trigger fires mid-sequence — needs a fix
-   before the field trial, tracked separately. Wiring-status table in `UNO_Q_PINOUT_REFERENCE.md` stays
+   `docs/KNOWN_GAPS.md`'s 18 Aug entry. Wiring-status table in `UNO_Q_PINOUT_REFERENCE.md` stays
    at **P** (wired, not confirmed working) — not flipped to **W**.
+   **The console/LoRa shared-wire risk flagged here is now also closed, 20 Aug (`fix(mcu)` b4087d1).**
+   `state_machine.cpp`'s unconditional `[trigger]`/`[notify]` console prints — which physically reach
+   the E5's RX pin over the same `Serial` wire and could have corrupted an in-flight join — are now
+   gated behind a new `config.h` flag, `SEISMIC_TRIGGER_CONSOLE_LOG` (default `0`, same discipline as
+   `SEISMIC_DEBUG_STREAM_RAW`/`FIRE_TEST_HARNESS` — must stay `0` before any field sync); the real
+   `Bridge.notify("report_footfall_event", ...)` MPU report is untouched either way, only the redundant
+   local console text is gated. New host coverage in `tests/test_state_machine/` asserts a genuine
+   trigger still writes zero bytes to `Serial` at the default flag value; full `pio test -e native`
+   suite green (8 suites / 45 cases). Flip the flag to `1` locally for bench visibility of `[trigger]`
+   lines again (`device/mcu/README.md`'s stomp-test section documents this). This closes the
+   wire-sharing risk, not the module-not-responding problem above — those are two separate LoRa issues,
+   and only the first is done.
 5. **USB-C host-mode-under-VIN-power is unverified.** If the camera doesn't enumerate under VIN power
    (not USB-C power), the whole vision pipeline architecture needs rework. Check this early, once past
    the geophone work. **Related (not a substitute) check done 17 Aug on USB-C/PD power, not VIN:**
@@ -375,21 +437,31 @@ kept up to date live through tonight's session. Highest-priority items as of the
    currently blocks geophone/LoRa servicing for that whole window. Logged, not scheduled before Aug 20,
    flagged so the trial's data gets read with that caveat.
 
-## Git state (as of 15 Aug)
+## Git state (as of 20 Aug)
 
-Branch `feat/mcu-seismic-debug`. `git status` shows most of the tree as "modified" — spot-checked
-`CONTEXT.md`'s diff before my edits today and it was a 1:1 line-ending/whitespace normalization, not
-real content changes, but this was not verified file-by-file. **Run `git diff --stat` and spot-check
-before committing or discarding anything** — don't assume it's all noise.
+**Stale-as-of-this-refresh correction:** this section previously said branch `feat/mcu-seismic-debug`
+with most of the tree "modified" and a list of untracked work product. That's no longer the state of
+the repo — `feat/mcu-seismic-debug` was merged into `develop` by `merge` 283c748 ("bring in
+device/mcu+mpu field-deployment work ahead of Aug 20 trial") before this session started, and every
+file the old list named as untracked (`docs/decisions/0011-...`, `docs/eletect-x-applab-notes.md`,
+`hardware/bom/eletect-x-power-budget.xlsx`, `hardware/references/uno-q-official/`) is committed now.
+Don't trust that list going forward — it's corrected below, not carried forward.
 
-Untracked files that are real work product, not yet committed:
-- `docs/decisions/0011-horn-driver-split-to-separate-housing.md`
-- `docs/eletect-x-applab-notes.md`
-- `hardware/bom/eletect-x-power-budget.xlsx` (referenced repeatedly by `procurement-status.md`)
-- `hardware/references/uno-q-official/` (official Arduino datasheet/schematic/STEP files)
-- `.agents/`
-- `hardware/bom/.~lock.eletect-x-power-budget.xlsx#` — a LibreOffice/Excel lock file, likely just
-  needs cleanup, not a real artifact
+Branch is now **`develop`**, 84 commits ahead of `origin/develop` (not yet pushed — that's a real,
+growing gap between local and remote, worth pushing or at least being aware of before assuming
+`origin/develop` reflects current state). Working tree is clean except for the user's own in-progress
+CAD work, left untouched by every task this session (same practice as prior sessions — don't stage or
+commit these without being asked):
+- `hardware/cad/FINDINGS.md` — modified, not yet committed
+- `hardware/cad/eletect_x_final.f3z`, `hardware/cad/eletect_x_final.step` — untracked; this is the
+  real, current enclosure model (see the `hardware/cad` bullet above) — don't confuse with the
+  superseded `main_enclosure.py` CadQuery pass, which *is* tracked/committed but stale
+- `hardware/cad/imported_components/` — untracked
+
+This session's five commits, in order, all on `develop`: `04d1398` (ADR 0012), `c0ae7db` (CAD-doc
+MPPT→XL4015 citation fix), `b4087d1` (state_machine console-print gating), `42ced90` (login-page
+demo-account doc-drift closure + regression test), `a15ea23` (notify-officer-request fan-out
+extraction). None pushed to `origin/develop` yet, same as the rest of the 84-commit gap above.
 
 ## Other doc-currency notes
 
