@@ -140,7 +140,12 @@ real per-device OTAA DevEUI/AppEUI/AppKey — never commit this file, it's gitig
 
 ## Bench stomp test (Rung 1 exit criterion)
 
-Run this after wiring the table above and syncing/flashing:
+Run this after wiring the table above and syncing/flashing. **Set `SEISMIC_TRIGGER_CONSOLE_LOG` to
+`1` in `src/config.h` first** — it defaults to `0` (`Serial` is shared with the E5 LoRa module now
+that `LORA_SERIAL` is `Serial`; see `docs/KNOWN_GAPS.md`'s 18 Aug entry), so the `[trigger]` line
+below stays silent unless this flag is on. Same discipline as `SEISMIC_DEBUG_VERBOSE`/
+`SEISMIC_DEBUG_STREAM_RAW` above — flip it back to `0` and re-sync once the bench pass is done, it
+must never read `1` on a node headed for the field.
 
 1. Power the board and open App Lab's own Serial Monitor in a browser — `arduino-app-cli monitor`
    over SSH does not deliver serial data on this board (ADR 0010's 2026-07-30 addendum).

@@ -127,6 +127,7 @@ void HardwareSerial::end() {}
 
 size_t HardwareSerial::write(uint8_t value) {
   std::fputc(static_cast<int>(value), stdout);
+  ++bytes_written_;
   return 1;
 }
 
@@ -175,9 +176,20 @@ uint8_t TwoWire::endTransmission(bool) { return 0; }
 
 uint8_t TwoWire::requestFrom(uint8_t, uint8_t quantity) { return quantity; }
 
-int TwoWire::available() { return 0; }
+int TwoWire::available() { return static_cast<int>(queue_head_ - queue_tail_); }
 
-int TwoWire::read() { return 0; }
+int TwoWire::read() {
+  if (queue_tail_ >= queue_head_) {
+    return 0;  // preserves the original always-0 default when nothing fed.
+  }
+  return queue_[queue_tail_++ % kQueueCapacity];
+}
+
+void TwoWire::host_feed_raw(int16_t raw_value) {
+  const uint16_t bits = static_cast<uint16_t>(raw_value);
+  queue_[queue_head_++ % kQueueCapacity] = static_cast<uint8_t>(bits >> 8);
+  queue_[queue_head_++ % kQueueCapacity] = static_cast<uint8_t>(bits & 0xFF);
+}
 
 TwoWire Wire;
 TwoWire Wire1;

@@ -449,8 +449,28 @@
 // debug console (every `[tag]`-prefixed print throughout this codebase), and
 // it is the *same physical wire* as the E5 - so any console output emitted
 // while lora_service() is mid-sequence lands on the E5's RX pin as noise.
-// See KNOWN_GAPS.md for the current mitigation status.
+// Mitigated below by SEISMIC_TRIGGER_CONSOLE_LOG for the one unconditional
+// offender (state_machine.cpp's [trigger]/[notify] prints) - see
+// docs/KNOWN_GAPS.md's 18 Aug entry for the confirmed-real risk this closes.
 #define LORA_SERIAL Serial
+
+// When 1: state_machine.cpp's log_trigger() prints [trigger] on every real
+// STA/LTA crossing, and notify_footfall_event() prints [notify] alongside
+// its Bridge.notify() call - both unconditional, no debug flag, before this
+// flag existed (docs/KNOWN_GAPS.md, 18 Aug). Confirmed on hardware that a
+// footfall trigger firing mid-join or mid-uplink sends raw console text down
+// the exact same physical wire LORA_SERIAL above uses, which the E5 parses
+// as line noise or a garbled AT command. MUST be 0 before any field sync,
+// same discipline as the bench-only flags earlier in this file - left at 0,
+// state_machine.cpp emits nothing over Serial and the wire stays clean for
+// LoRa AT traffic. The real report_footfall_event Bridge.notify() call is
+// untouched either way - this flag gates only the local console echo, not
+// the MPU-bound schema report. Bench visibility (device/mcu/README.md's
+// stomp-test procedure) needs this set to 1 - App Lab's own Serial Monitor
+// still works for that as long as the E5 isn't mid-transaction at the same
+// moment, same caveat as every other console print now that Serial is
+// shared with the radio.
+#define SEISMIC_TRIGGER_CONSOLE_LOG 0
 
 // Most AT commands answer in well under a second; 2 s covers a slow one
 // without stalling the reflex loop, which never blocks on the radio anyway.

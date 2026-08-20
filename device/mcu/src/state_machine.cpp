@@ -22,9 +22,13 @@ void enter(reflex_state next, uint32_t now_ms) {
 // rollover-safe, same pattern as rule_gate_apply().
 uint32_t elapsed_since_entry(uint32_t now_ms) { return now_ms - g_state_entered_ms; }
 
+#if SEISMIC_TRIGGER_CONSOLE_LOG
 void log_trigger(const sta_lta_result &result, uint32_t now_ms) {
   // Format fixed by device/mcu/README.md's bench stomp-test procedure - keep
-  // this line and that doc in sync if either changes.
+  // this line and that doc in sync if either changes. Gated behind
+  // SEISMIC_TRIGGER_CONSOLE_LOG (config.h) - see that flag's comment and
+  // docs/KNOWN_GAPS.md's 18 Aug entry: this print shares a physical wire
+  // with LoRa AT traffic (LORA_SERIAL) and must stay silent in the field.
   Serial.print("[trigger] t=");
   Serial.print(now_ms);
   Serial.print(" sta=");
@@ -36,6 +40,7 @@ void log_trigger(const sta_lta_result &result, uint32_t now_ms) {
   Serial.print(" idx=");
   Serial.println(static_cast<unsigned long>(result.trigger_index));
 }
+#endif  // SEISMIC_TRIGGER_CONSOLE_LOG
 
 // The real MCU->MPU notify for every trigger (device/mpu/bridge/schema.md:
 // report_footfall_event) - the fix for docs/KNOWN_GAPS.md's high-severity
@@ -54,12 +59,18 @@ void notify_footfall_event(const float *window, const sta_lta_result &result, ui
   Bridge.notify("report_footfall_event", static_cast<uint8_t>(BRIDGE_SCHEMA_VERSION), probability,
                 result.peak_ratio, feature_vector);
 
+#if SEISMIC_TRIGGER_CONSOLE_LOG
+  // Gated same as log_trigger() above and for the same reason - the real
+  // Bridge.notify() call above is untouched, this is only its console echo.
   Serial.print("[notify] t=");
   Serial.print(now_ms);
   Serial.print(" report_footfall_event probability=");
   Serial.print(probability, 4);
   Serial.print(" sta_lta_ratio=");
   Serial.println(result.peak_ratio);
+#else
+  (void)now_ms;  // now_ms's only consumer is the console echo gated above.
+#endif
 }
 
 #if SEISMIC_DEBUG_VERBOSE
@@ -171,7 +182,9 @@ void state_machine_tick(uint32_t now_ms) {
       // zero-filled window (geophone timeout/staleness, see geophone.h)
       // never triggers - sta_lta_detect's own zero-guard handles that.
       if (result.triggered) {
+#if SEISMIC_TRIGGER_CONSOLE_LOG
         log_trigger(result, now_ms);
+#endif
 #if SEISMIC_DEBUG_VERBOSE && !SEISMIC_DEMO_MODE
         // Skipped in demo mode: printing all SEISMIC_WINDOW_SAMPLES (512)
         // floats over Serial blocks loop() for several hundred ms on every
