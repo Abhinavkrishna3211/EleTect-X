@@ -41,6 +41,10 @@ from or hasn't yet confirmed that generic guidance.
   parse failure, not a separate GUI bug - diagnose via
   `arduino-app-cli app list --show-broken-apps` before chasing the GUI.
 - `arduino-app-cli app restart <path>` needs the app's absolute path, not its app ID.
+- `arduino-app-cli app restart <path>` is confirmed broken while the app is already running (22 Aug):
+  fails `[ERROR] App "Eletect-X" Is Running`, exits 1, and leaves the app **stopped** — worse than a
+  no-op. Use `arduino-app-cli app stop <path>` followed by `arduino-app-cli app start <path>` instead;
+  confirmed working as the two-step replacement.
 
 ## Confirmed working / dead-end transports for reading board output
 
@@ -60,6 +64,18 @@ from or hasn't yet confirmed that generic guidance.
 - `arduino-app-cli app logs <app_path> --all` - documented as a first-class
   alternative to `docker logs`. Not yet tried on this board - worth trying
   first next time before reaching for the docker/WSL route.
+- **App Lab GUI unavailable fallback, confirmed working end-to-end, 22 Aug:** when App Lab isn't
+  running on the PC (and `eletect-x.local` doesn't resolve, per the WSL mDNS note above), the board is
+  still fully reachable: `ssh` to its LAN IP (`192.168.1.10`, hostname `EleTect-X`), drive builds via
+  `arduino-app-cli` directly, and use the board's own pre-existing `socat` daemon
+  (`/dev/ttyGS0` <-> `tcp:127.0.0.1:7500`, first documented 14 Aug as a read-only path) for console
+  access. **New finding: this bridge is bidirectional, not read-only.** It accepts injected keystrokes
+  as well as streaming console output — the 14 Aug write-up only ever exercised it with `nc`/nc-style
+  read tools and documented App Lab's browser Serial Monitor as the sole confirmed path for anything
+  requiring input (e.g. the fire-test harness's `1`/`2`/`3`/`4`/`?` commands). That's now superseded:
+  the socat bridge alone is sufficient to both flash-verify a build and fully drive the fire-test
+  harness without App Lab running at all. The previously-documented COM14 dead end (opens via pyserial,
+  zero bytes) was independently reproduced again this session - still not worth chasing.
 
 ## Bridge (Arduino_RouterBridge v0.4.3, confirmed installed on this board 2026-07-31)
 
@@ -85,9 +101,32 @@ from or hasn't yet confirmed that generic guidance.
   every previously-working `provide()`'d function on the same sketch. Register
   and test Bridge functions one at a time on real hardware, never as a batch.
 
-### LORA_SERIAL / Serial1 - open risk, priority re-check before any LoRa bench session
+### LORA_SERIAL / Serial1 - resolved, 18 Aug
 
-**Do not treat this as settled.** Earlier reasoning in this project (and in chat)
+**Settled on real hardware, `HANDOVER.md`'s 18 Aug entry.** `Serial` (not `Serial1`) is the correct
+binding, confirmed directly from the board's own generated devicetree overlay plus a live
+`journalctl -u arduino-router` cross-check, both over plain SSH, no sudo. `config.h` was updated and
+committed (`47785ec`). The investigative trail below is kept for the reasoning, not because the
+question is still open. What remains open on the LoRa side is the module itself not responding past
+the first `AT` probe (separate issue, `HANDOVER.md` item 4) - not this binding question.
+
+**Related, new finding, 22 Aug - `Serial` is shared between two consumers, and that's a real race,
+currently benign only because the E5 doesn't answer.** With `LORA_SERIAL Serial` and
+`FIRE_TEST_HARNESS 1`, both `fire_test_service()` (device/mcu/src/fire_test.cpp) and `mac.cpp`'s
+response-read loop (`LORA_SERIAL.available()`/`.read()`, `device/mcu/src/mac.cpp`) drain the same
+`Serial` stream every `loop()` iteration, first-come-first-served, with no arbitration between them.
+During the 22 Aug fire-test session all 13 injected fire-test keystrokes landed correctly (10/10 in
+the individual-command pass, 3/3 in the IR-burst pass) - but that's because `mac.cpp`'s join state
+machine is stuck retrying a dead `AT` probe and never actually produces bytes worth stealing. If the
+E5 ever starts responding while `FIRE_TEST_HARNESS` is left on, a byte from one consumer's expected
+input could be silently read by the other's loop iteration instead. `FIRE_TEST_HARNESS` already
+defaults to `0` and must stay `0` outside a bench session, which keeps this from being a field risk -
+noted here so a future LoRa-join bench session run with the harness still enabled doesn't lose time to
+an intermittent, hard-to-explain dropped byte.
+
+**Original investigative trail, kept for reasoning, not because the question is still open below:**
+
+Earlier reasoning in this project (and in chat)
 argued `config.h`'s `#define LORA_SERIAL Serial1` was probably safe because
 `Bridge.begin()`/`Bridge.update()` and `LORA_SERIAL.begin(9600)` both ran in the
 same 2026-07-31 build with clean `Bridge.notify()` traffic throughout. A deeper

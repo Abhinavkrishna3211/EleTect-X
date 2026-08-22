@@ -1,4 +1,4 @@
-# EleTect X — Handover (last updated 20 Aug 2026 — software-only session, no hardware connected: MPPT solar controller dropped for a manually-set XL4015 buck (ADR 0012, `docs(decisions)` 04d1398 + `docs(hardware)` c0ae7db), `state_machine.cpp` console prints gated off the shared LoRa wire (`fix(mcu)` b4087d1), login-page demo-account doc-drift closed with a regression test (`test(web)` 42ced90), `notify-officer-request`'s fan-out extracted and unit-tested to match `send-alert` (`test(backend)` a15ea23); 18 Aug entries below — LED/IR fire + deterrent-event footage capture wired into the MPU reflex loop; 17 Aug entries — camera path closed out on real hardware: `CAMERA_DEVICE` fixed to a udev by-id path and proven stable across a full reboot and a physical unplug/replug, `python3-opencv` installed, `capture_check.py` passing end-to-end, `Camera.open()` now retries with backoff; 15 Aug entries — multi-trial stomp validation closed on real hardware; fire-test harness software path verified on real hardware, physical actuators not yet wired — still current)
+# EleTect X — Handover (last updated 22 Aug 2026 — live hardware session, bare board only, no actuators wired: clean field-build flash confirmed (silent console is correct/expected — flagged as a real gap below), fire-test harness fully re-verified live (all four commands + cooldown refusals), `FIRE_TEST_HARNESS` confirmed back to `0` and inert; App Lab GUI was unavailable this session — board driven entirely over SSH + `arduino-app-cli` + the board's own socat bridge, now confirmed bidirectional (`docs/eletect-x-applab-notes.md`); 20 Aug entries below — MPPT solar controller dropped for a manually-set XL4015 buck (ADR 0012, `docs(decisions)` 04d1398 + `docs(hardware)` c0ae7db), `state_machine.cpp` console prints gated off the shared LoRa wire (`fix(mcu)` b4087d1), login-page demo-account doc-drift closed with a regression test (`test(web)` 42ced90), `notify-officer-request`'s fan-out extracted and unit-tested to match `send-alert` (`test(backend)` a15ea23); 18 Aug entries below — LED/IR fire + deterrent-event footage capture wired into the MPU reflex loop; 17 Aug entries — camera path closed out on real hardware: `CAMERA_DEVICE` fixed to a udev by-id path and proven stable across a full reboot and a physical unplug/replug, `python3-opencv` installed, `capture_check.py` passing end-to-end, `Camera.open()` now retries with backoff; 15 Aug entries — multi-trial stomp validation closed on real hardware; fire-test harness software path verified on real hardware, physical actuators not yet wired — still current)
 
 This file exists so work can continue with zero lost context if the planning session moves to a
 different Claude account/session. Read this file, then `CONTEXT.md`, before doing anything else.
@@ -360,9 +360,33 @@ kept up to date live through tonight's session. Highest-priority items as of the
    wiring only; `main.cpp`'s `Bridge.provide("drive_led", ...)`/`Bridge.provide("pulse_ir", ...)` are
    still commented out (same one-at-a-time discipline as item 3 below), so no LED, IR, or camera has
    actually fired together from a real trigger on hardware yet.
-3. **The fire-test harness's software path is now verified on real hardware (15 Aug)** — correct
-   `[firetest]` acks and cooldown refusal for all four commands. **Physical activation is not yet
-   confirmed: horn, LED, and IR are not wired to the board.** Re-run once wiring exists.
+3. **The fire-test harness's software path is verified on real hardware, re-confirmed 22 Aug.** Correct
+   `[firetest]` acks and cooldown refusal for all four commands, this time driven entirely over SSH +
+   `arduino-app-cli` + the board's socat bridge (App Lab GUI wasn't running) — see
+   `docs/eletect-x-applab-notes.md`. LED cooldown confirmed genuinely per-channel on real hardware
+   (white then blue back-to-back both fired). IR's cooldown gate needed a re-run with both presses in
+   one burst — the first attempt's ~2-4s manual keystroke gap exceeded `IR_MIN_INTERVAL_MS` (5000ms)
+   and the gate correctly allowed it; that was the gate working, not a miss. `FIRE_TEST_HARNESS`
+   confirmed back to `0` and the reflashed field build proven inert (`1234?` sent, zero `[firetest]`
+   output). **Physical activation is still not confirmed: horn, LED, and IR are not wired to the
+   board.** Re-run once wiring exists.
+   - **Same session, clean field-build flash also confirmed, with an honest gap surfaced.** `setup()`
+     prints nothing in the current field build — no `_init()` function emits console output when
+     `SEISMIC_DEBUG_VERBOSE`/`SEISMIC_TRIGGER_CONSOLE_LOG`/`SEISMIC_DEMO_MODE` are all `0`, so there is
+     no boot banner to check against. Liveness was instead confirmed via `mac.cpp`'s LoRa join state
+     machine printing `AT` on a steady ~7.5s cadence (`LORA_AT_TIMEOUT_MS`=2000 +
+     `LORA_JOIN_BACKOFF_BASE_MS`=5000) — proves `loop()` is executing and timers are advancing, but
+     only because the join probe happens to be console-visible. **Gap: a silent console makes a hung
+     MCU and a healthy one look identical over serial in a field build.** Worth a one-line boot banner
+     print at the top of `setup()` at some point — not done this session, logged here rather than
+     `docs/KNOWN_GAPS.md` since it's a minor diagnosability nice-to-have, not a correctness risk.
+   - **New finding, real race, currently benign — see `docs/eletect-x-applab-notes.md`'s LORA_SERIAL
+     section for full detail.** `fire_test_service()` and `mac.cpp`'s response-read loop both drain the
+     same `Serial` stream (`LORA_SERIAL Serial`) with no arbitration. Didn't bite this session (10/10
+     then 13/13 injected fire-test bytes landed correctly) only because the E5 never actually responds
+     with anything to steal. Stays benign only as long as `FIRE_TEST_HARNESS` is off outside bench
+     sessions (already the default) — flagged so a future LoRa-join bench session doesn't lose time to
+     an unexplained dropped byte if both are active at once.
 4. **LoRa `Serial` vs `Serial1` conflict — closed, 18 Aug; module itself is now the open item.** Grove
    LoRa-E5 physically wired for the first time (D0/D1 = USART1). Confirmed `Serial` (not `Serial1`) is
    correct by reading the board's own devicetree overlay directly plus a live `journalctl -u
