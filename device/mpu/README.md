@@ -46,8 +46,10 @@ perception/
   (vision INT8 detector itself: future build call)
 cognition/
   fusion.py      weighted log-odds fusion (CONTEXT.md 4) — pure function, no Bridge/hardware
-  config.py      fusion weights, per-modality baselines, prior — one rationale each
-  (contextual bandit + SQLite experience store: future build call)
+  decision.py    alert gate on the fused probability — pure function
+  bandit.py      epsilon-greedy tier selection + habituation floor — pure, RNG injected
+  experience.py  SQLite experience store (triggers/attempts/action values), the only I/O here
+  config.py      fusion weights + bandit hyperparameters and tier ladder — one rationale each
 services/
   config.py      MPU-side tuning constants, one rationale each (mirrors device/mcu/include/config.h)
 comms/           LoRa uplink (future build call)
@@ -224,7 +226,10 @@ Every printed `fused P(elephant)` is computed live by the real `fuse()`/`decide(
 next to the real fused probability the board actually logged that day — they match to the displayed
 precision, which is the script's own check that its replicated on-MCU probability formula
 (`footfall_features.cpp`'s saturating fit) is right, not an assertion to take on faith. The closing
-summary reproduces the real run's 11/12 detection rate and 11/11 alert rate.
+summary reproduces the real run's 11/12 detection rate and 11/11 alert rate. Each alert also prints
+the tier the real bandit selected and the repeat count that drove it, so the escalation ladder is
+visible on replayed data — the replay injects an in-memory experience store, so it never writes
+learning state and never touches `data/experience.sqlite3`.
 
-**Status: closed.** Runs clean against the real `cognition`/`services` modules (`pytest -q`: 123
+**Status: closed.** Runs clean against the real `cognition`/`services` modules (`pytest -q`: 208
 passed), no hardware required.
