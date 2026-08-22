@@ -1,15 +1,29 @@
-"""Host-only synthetic seismic-trigger replay for the Robu bench demo.
+"""Host-only replay of both reflex-loop entry points, for the Robu bench demo.
 
-No hardware attached, no Bridge, no camera: this feeds real captured
-bench-stomp data (docs/KNOWN_GAPS.md's "Multi-trial stomp validation
-protocol" entry, run 2026-08-15 on real hardware) through
-services/reflex_loop.py's real handle_footfall_event() -- the actual
-sense -> fuse -> decide pipeline, not a mock of it -- and narrates each
-step to the terminal. Every sta_lta_ratio and real_fused_p value in
-REPLAY_EVENTS below is a number the real board genuinely reported that
-day, not synthesized for this script; see docs/KNOWN_GAPS.md ("Build-call
-1" section, the "Multi-trial stomp validation protocol" entry) for the
-full capture this replays.
+No hardware attached, no Bridge, no camera. Two passes, and the difference
+between them is load-bearing -- do not read the second as if it carried the
+first's provenance:
+
+- **Pass 1 (seismic, real captured data).** Feeds real captured bench-stomp
+  data (docs/KNOWN_GAPS.md's "Multi-trial stomp validation protocol" entry,
+  run 2026-08-15 on real hardware) through services/reflex_loop.py's real
+  handle_footfall_event(). Every sta_lta_ratio and real_fused_p value in
+  REPLAY_EVENTS below is a number the real board genuinely reported that
+  day.
+- **Pass 2 (acoustic routing, illustrative).** Calls the real
+  handle_acoustic_event() once per AcousticClass value to make ADR 0007 5's
+  three-way routing split watchable rather than merely provable: gunshot
+  bypasses fuse() entirely, chainsaw/vehicle/animal_call fuse as one shared
+  ACOUSTIC modality, ambient fuses as unavailable. The routing, the fusion
+  and every printed number are real -- but the *inputs* are not captured
+  data. No acoustic classifier runs on the MCU yet (docs/KNOWN_GAPS.md), so
+  there is no bench capture to replay; pass 2 uses one fixed synthetic
+  confidence for all five classes. See ILLUSTRATIVE_ACOUSTIC_CONFIDENCE.
+
+Both passes call the actual sense -> fuse -> decide pipeline, not a mock of
+it, and narrate each step to the terminal. See docs/KNOWN_GAPS.md
+("Build-call 1" section, the "Multi-trial stomp validation protocol" entry)
+for the full capture pass 1 replays.
 
 Two things this script does openly fabricate:
 - The on-MCU `probability` field. footfall_features.cpp derives it from
@@ -50,8 +64,11 @@ would for an animal that keeps coming back.
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
+import textwrap
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -60,6 +77,7 @@ from pathlib import Path
 # same pattern as bench/camera_check/capture_check.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from bridge.rpc import AcousticClass  # noqa: E402
 from cognition.experience import IN_MEMORY_PATH, ExperienceStore  # noqa: E402
 from cognition.fusion import Modality  # noqa: E402
 from services import config as services_config  # noqa: E402
@@ -140,6 +158,20 @@ def mcu_probability(sta_lta_ratio: float) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Acoustic routing pass (pass 2) -- illustrative, not captured bench data.
+# Unlike REPLAY_EVENTS above, no bench capture exists for this: no acoustic
+# classifier runs on the MCU yet (docs/KNOWN_GAPS.md), so there is nothing
+# real to replay. One fixed confidence stands in for all five classes --
+# 0.87, matching the gunshot case already used in tests/test_reflex_loop.py's
+# test_acoustic_event_is_logged_and_returns_its_outcome. capture_ref mirrors
+# that same test's synthetic ring-buffer index.
+# ---------------------------------------------------------------------------
+
+ILLUSTRATIVE_ACOUSTIC_CONFIDENCE = 0.87
+ILLUSTRATIVE_CAPTURE_REF = 42
+
+
+# ---------------------------------------------------------------------------
 # Fakes -- SAFE_MODE should make every one of these unreachable
 # ---------------------------------------------------------------------------
 
@@ -192,12 +224,13 @@ class _Style:
 
 def _print_banner(style: _Style) -> None:
     rule = "=" * _WIDTH
-    title = "EleTect X -- seismic reflex loop replay (real bench data, no hardware)"
+    title = "EleTect X -- reflex loop replay (no hardware attached)"
     print(style.bold + rule + style.reset)
     print(style.bold + title + style.reset)
     print(rule)
-    print("source:   docs/KNOWN_GAPS.md, multi-trial stomp validation, 2026-08-15")
-    print("pipeline: services.reflex_loop.handle_footfall_event()")
+    print("source:   pass 1 -- docs/KNOWN_GAPS.md, multi-trial stomp validation, 2026-08-15")
+    print("pipeline: pass 1  services.reflex_loop.handle_footfall_event()   (seismic)")
+    print("          pass 2  services.reflex_loop.handle_acoustic_event()   (acoustic routing)")
     print("          real fuse()/decide()/bandit select, SAFE_MODE dry run")
     print("          experience store: in-memory (no learning state written)")
     print()
@@ -300,12 +333,167 @@ def _print_summary(style: _Style, alert_count: int, detected_count: int) -> None
 
 
 # ---------------------------------------------------------------------------
+# Acoustic routing pass (pass 2) -- narrative printing
+# ---------------------------------------------------------------------------
+
+
+class _LogCapture(logging.Handler):
+    """Collect fully-formatted messages from services.reflex_loop's own logger.
+
+    Used only by pass 2, to print the real [SAFE_MODE] gunshot alert line
+    handle_acoustic_event() actually logs, rather than re-typing it here and
+    risking drift from the real string.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.INFO)
+        self.lines: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.lines.append(record.getMessage())
+
+
+@contextmanager
+def _capturing_reflex_log():
+    """Yield a list that fills with services.reflex_loop's INFO log lines.
+
+    demo_replay.py configures no logging of its own, so reflex_loop.logger's
+    logger.info() calls are silently dropped by the root default (WARNING)
+    outside this context. Adds a handler and raises the level for the
+    duration only, and always restores level/propagate on exit -- a replay
+    should leave no global logging state behind it.
+    """
+    handler = _LogCapture()
+    previous_level = reflex_loop.logger.level
+    previous_propagate = reflex_loop.logger.propagate
+    reflex_loop.logger.addHandler(handler)
+    reflex_loop.logger.setLevel(logging.INFO)
+    reflex_loop.logger.propagate = False
+    try:
+        yield handler.lines
+    finally:
+        reflex_loop.logger.removeHandler(handler)
+        reflex_loop.logger.setLevel(previous_level)
+        reflex_loop.logger.propagate = previous_propagate
+
+
+def _print_acoustic_header(style: _Style) -> None:
+    rule = "=" * _WIDTH
+    print(style.bold + rule + style.reset)
+    print(style.bold + "PASS 2 -- acoustic routing (ADR 0007 5), illustrative" + style.reset)
+    print(rule)
+    print(
+        "unlike pass 1 above, this is NOT captured bench data: no acoustic classifier "
+        "runs on the MCU yet, so there is nothing real to replay."
+    )
+    print(
+        f"every class below uses one fixed synthetic confidence = "
+        f"{ILLUSTRATIVE_ACOUSTIC_CONFIDENCE:.2f} -- only the input is synthetic; the "
+        "routing and every printed number below come from the real handle_acoustic_event()"
+    )
+    print("pipeline: services.reflex_loop.handle_acoustic_event()")
+    print()
+
+
+def _print_acoustic(
+    class_label: AcousticClass,
+    outcome: reflex_loop.AcousticOutcome,
+    first_fused_p: float | None,
+    log_lines: list[str],
+    style: _Style,
+) -> None:
+    rule = "-" * _WIDTH
+    header = f"ACOUSTIC  class_label={class_label.value}"
+    print(style.bold + rule + style.reset)
+    print(style.bold + header + style.reset)
+    print(rule)
+    print(
+        f"  incoming acoustic classification   class = {class_label.value}   "
+        f"confidence = {ILLUSTRATIVE_ACOUSTIC_CONFIDENCE:.3f}  (illustrative, not captured)"
+    )
+
+    if outcome.fusion is None:
+        print(
+            f"  {style.yellow}route: direct anti-poaching alert -- never reaches fuse()"
+            f"{style.reset}"
+        )
+        print(
+            f"  {style.yellow}outcome.fusion is None -- never fused, not the same as a "
+            f"FusionResult with acoustic unavailable{style.reset}"
+        )
+        print("  the alert line this event actually logged:")
+        for line in log_lines:
+            print(
+                textwrap.fill(
+                    line, width=_WIDTH - 4, initial_indent="    ", subsequent_indent="    "
+                )
+            )
+        print()
+        return
+
+    fusion = outcome.fusion
+    if Modality.ACOUSTIC in fusion.used:
+        contribution = fusion.contributions[Modality.ACOUSTIC]
+        print(
+            f"  sense -> fuse             acoustic contribution = {contribution:+.3f}  "
+            "(seismic/vision unavailable, dropped)"
+        )
+        print(f"                            fused log-odds L    = {fusion.log_odds:+.3f}")
+        fused_p = f"{style.green}{fusion.probability:.3f}{style.reset}"
+        print(f"  fuse                      fused P(elephant)   = {fused_p}")
+        if first_fused_p is not None:
+            print(
+                f"  {style.dim}identical to the first fusing class's fused P "
+                f"({first_fused_p:.3f}) -- one shared ACOUSTIC modality "
+                f"(WEIGHT_ACOUSTIC/BASELINE_ACOUSTIC), not three (ADR 0007 5){style.reset}"
+            )
+        print(
+            f"  {style.dim}no decide() and no actuation on this path -- acoustic is "
+            f"corroboration only, and fuse() is stateless per event{style.reset}"
+        )
+    else:
+        print(
+            f"  {style.dim}route: fused as unavailable -- excluded from the sum, not "
+            f"scored as negative evidence (INVENTED mapping, ADR 0007 never routes "
+            f"ambient){style.reset}"
+        )
+        print(f"  dropped = {[m.value for m in fusion.dropped]}")
+        fused_p = f"{style.dim}{fusion.probability:.3f}{style.reset}"
+        print(f"  fuse                      fused P(elephant)   = {fused_p}  (prior alone)")
+        print(
+            f"  {style.dim}Modality.ACOUSTIC not in outcome.fusion.contributions -- "
+            f"excluded, not scored as a zero{style.reset}"
+        )
+    print()
+
+
+def _print_acoustic_summary(style: _Style) -> None:
+    rule = "=" * _WIDTH
+    print(style.bold + rule + style.reset)
+    print(
+        "5 classes, 3 routes (ADR 0007 5): gunshot bypasses fuse() entirely; "
+        "chainsaw/vehicle/animal_call fuse as one shared ACOUSTIC modality; "
+        "ambient fuses as unavailable."
+    )
+    print(
+        f"every input above used one fixed synthetic confidence "
+        f"({ILLUSTRATIVE_ACOUSTIC_CONFIDENCE:.2f}) -- illustrative, NOT captured bench data, "
+        "unlike the seismic replay above it (real 2026-08-15 hardware capture)."
+    )
+    print(
+        "the routing itself is real: handle_acoustic_event() was actually called for each "
+        "class above -- only the inputs are synthetic."
+    )
+    print(rule)
+
+
+# ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
 
 
 def main() -> int:
-    """Run the replay against every event in REPLAY_EVENTS. Returns a process exit code."""
+    """Run pass 1 (REPLAY_EVENTS) then pass 2 (every AcousticClass). Returns an exit code."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
         "--interval",
@@ -354,6 +542,32 @@ def main() -> int:
 
     _print_summary(style, alert_count, detected_count)
     experience.close()
+
+    _print_acoustic_header(style)
+    time.sleep(args.interval)
+
+    # First fusing class's fused P, so later fusing classes can show they
+    # land on the identical value -- see _print_acoustic()'s docstring note.
+    first_fused_p: float | None = None
+    for class_label in AcousticClass:
+        with _capturing_reflex_log() as log_lines:
+            outcome = reflex_loop.handle_acoustic_event(
+                services_config.SCHEMA_VERSION,
+                class_label,
+                ILLUSTRATIVE_ACOUSTIC_CONFIDENCE,
+                ILLUSTRATIVE_CAPTURE_REF,
+                safe_mode=True,
+            )
+        _print_acoustic(class_label, outcome, first_fused_p, log_lines, style)
+        if (
+            first_fused_p is None
+            and outcome.fusion is not None
+            and Modality.ACOUSTIC in outcome.fusion.used
+        ):
+            first_fused_p = outcome.fusion.probability
+        time.sleep(args.interval)
+
+    _print_acoustic_summary(style)
     return 0
 
 
