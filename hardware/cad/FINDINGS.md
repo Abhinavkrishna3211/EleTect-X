@@ -1,3 +1,11 @@
+> **Superseded, 20 Aug 2026.** This CadQuery pass was never the manufacturing source. The real
+> enclosure was hand-modeled in Fusion 360 and is now in manufacturing — see
+> `hardware/cad/eletect_x_final.f3z` (native Fusion archive) and `eletect_x_final.step` (neutral
+> interchange export, timestamped 2026-08-20T15:38 by Autodesk's own translation framework). The
+> files below (`main_enclosure.py`, `main_enclosure_*.step/.stl`, `reference_*.step`) are left as-is
+> for historical reference — they still carry the old amiciSmart MPPT dimensions and should not be
+> treated as current design geometry.
+
 # Main enclosure — first-pass CAD block-out and a real tray-footprint finding
 
 Generated 15/16 Aug (overnight, no hardware/user presence needed) from
