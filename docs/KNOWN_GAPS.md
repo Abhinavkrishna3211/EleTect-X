@@ -180,7 +180,15 @@ criteria — see each entry's status.
   that something did. Medium severity — a real mismatch between the schema's stated intent and its
   wire type, not just an open question. Effort: small, needs a schema decision (richer return type,
   or a follow-up `get_system_state` read to recover the actual values) before `cognition/` lands.
-  Status: open.
+  Status: **open but narrower than written** (22 Aug) — verified against
+  `device/mcu/src/rule_gate.cpp:15-33` and `bridge_handlers.cpp:38`: `ack` is
+  `rule_gate_apply()`'s `allowed`, which is false *only* on a cooldown refusal, so a
+  clamped-but-fired request still acks true. `ack` is therefore a clean did-it-fire bit, and
+  that is exactly what `cognition/experience.py` uses it for — an attempt is recorded only on a
+  true horn ack, so the bandit never credits an action the MCU refused. What is still lost is the
+  *clamped values*: the MPU cannot tell 100%/65535ms-requested-and-clamped from any other
+  above-cap request, which is why the tier ladder cannot use duration as an escalation axis (see
+  the 22 Aug bandit entry). The schema decision above is still the fix.
 - **`MPU_WAKE_HOLD_S = 30.0` (`services/config.py`) is invented — no measured suspend/resume or
   fusion-latency data backs it.** ADR 0008's own open bench items don't cover this either. Medium
   severity. Effort: bench measurement of real MPU wake/suspend timing once ADR 0008's hardware
@@ -452,8 +460,15 @@ criteria — see each entry's status.
   a second, unreviewed limit invented on the MPU side. LED and IR are not driven by this loop at all.
   Medium-high severity: until the bandit exists, every alert gets the same maximal horn burst
   regardless of context (time of day, distance, repeat-trigger history), which is a real deterrence-
-  policy gap, not just a config placeholder. Status: open, blocked on the same future bandit build
-  call `cognition/fusion.py` already names.
+  policy gap, not just a config placeholder. Status: **partially closed** (22 Aug) — the bandit
+  build call landed: `reflex_loop.py` no longer holds fixed `ALERT_HORN_*`/`ALERT_LED_*`/
+  `ALERT_IR_*` constants, and which actuators fire at what gain is now chosen per event from
+  `cognition/config.py`'s three-tier ladder (tier 1 fires no IR at all), escalating on repeat
+  triggers inside `HABITUATION_WINDOW_S`. What remains open is the *ceiling* reasoning above,
+  unchanged: tier 3 still requests the protocol maximum and still relies on `rule_gate.cpp`'s
+  clamp, and the MPU still encodes no MCU cap of its own. See the 22 Aug bandit entry for the
+  unvalidated proxy reward and the `gain_pct`-has-no-physical-effect caveat, both of which limit
+  how much of this gap the ladder actually closes today.
 - **Nothing yet converts a real sensor reading into the log-odds `fuse()` expects.** No code turns
   `report_footfall_event`'s `probability` field, `report_acoustic_event`'s `confidence` field, or a
   vision detector's output (not yet built) into a `ModalityReading`'s `log_odds`/`available` pair —
@@ -1440,3 +1455,21 @@ USB 2.0 (not USB 3.0), 32x32mm board / 28x28mm mounting hole pitch, 5V / 1.2W ma
 includes its own single onboard mic (not the project's INMP441 acoustic path - don't confuse the two).
 `hardware/cad/enclosure-design-concept.md`'s take-four section corrected to match. Status: closed -
 day/night IR sensing is real and intact as originally designed; no remediation needed.
+
+## Contextual bandit replaces the fixed-threshold deterrence policy in `reflex_loop.py` (22 Aug)
+
+`cognition/decision.py`'s docstring described itself as "the simplest possible policy standing in for the contextual bandit... no learning," and `reflex_loop.py` filled the rest of the gap by firing horn + LED + IR at the wire protocol's maximum on every alert. Both are now backed by a real, scoped implementation: `cognition/bandit.py` (pure selection/update math, no I/O), `cognition/experience.py` (the SQLite experience store at `services.config.EXPERIENCE_DB_PATH`, previously an unused constant), and a three-tier ladder in `cognition/config.py` chosen epsilon-greedily per event with a deterministic escalation floor keyed on how many triggers this node has seen inside `HABITUATION_WINDOW_S`. `decide()` is untouched and still owns the alert gate; the bandit only chooses *what fires* once the gate says alert. What follows is what that does **not** solve.
+
+**The proxy reward is unvalidated against real animal behavior.** There is no animal-outcome feedback anywhere in this system — nothing observes whether an elephant actually retreated. `bandit.proxy_reward()` scores an attempt by how long it stayed quiet afterwards (`min(gap_s, PROXY_REWARD_HORIZON_S) / PROXY_REWARD_HORIZON_S`), which measures *time until the next seismic trigger*, not retreat. That is a weak signal deliberately labelled as one, in the function's own docstring and in `cognition/experience.py`'s module docstring, and it carries at least three uncorrected confounds: a herd that leaves for reasons unrelated to the deterrent still credits the deterrent; a herd that stays but stops stomping hard enough to cross STA/LTA looks identical to one that left; and a second animal arriving on the same node is attributed to the previous animal's attempt, because the store has no per-individual identity and only one node's worth of triggers. Closing this needs real labelled field outcomes (camera review at minimum, ideally observer-confirmed retreat) that do not exist. Status: **open** — this is future work, not a solved problem, and contest/DFO material must describe the reward as a proxy, never as measured deterrence effectiveness.
+
+**Survivorship bias in settlement: the best possible outcome earns no credit.** An attempt is settled by the *next* trigger, so an attempt followed by permanent silence — which is exactly the outcome the system is trying to produce — is never scored at all and never updates its action value. Only attempts that were followed by a return get rewarded, and the horizon cap means a long-but-finite gap is the highest score reachable. The store's `settle_pending()` documents this explicitly. A time-based sweep (credit an unsettled attempt once the horizon elapses with no trigger) would fix it and needs a periodic task the MPU does not currently run. Status: **open**.
+
+**`gain_pct` has no physical effect yet** (the DFPlayer volume path is unwired, existing gap) — so today the tiers are physically distinguished only by actuator count and LED channel, not loudness. This is the most important honesty caveat in the change. Tier 1 is horn + white LED and no IR; tier 2 adds IR and switches to the blue LED channel; tier 3 is horn + white LED + IR at the protocol max, i.e. exactly the pre-bandit behavior. The gain column (0.25 / 0.45 / 1.0 of protocol scale) is real on the wire and reaches the MCU, and it changes nothing audible until the DFPlayer volume path is wired. Status: **open** — the ladder becomes a genuine intensity ladder only once that existing gap closes; until then the escalation is real but it is escalation in actuator count and LED channel.
+
+**Duration is not a usable MPU-side escalation axis, and the gain fractions are empirical against an approximate clamp.** All three tiers request `PROTOCOL_DURATION_MS_MAX`, because any fraction of the uint16 ceiling above a few percent clamps to the same physical burst on the MCU and the MPU is not allowed to encode the MCU's real cap — `services/config.py` documents that boundary ("the MPU only ever sees the clamped ack, never a raw limit to duplicate here"), and `HORN_BURST_MAX_MS`/`HORN_COOLDOWN_MS` are ADR 0003's animal-welfare and battery-draw safeguard, exactly the kind of safety limit that must not exist in two files that can silently drift. For the same reason the tier-1/tier-2 gain fractions were picked to land clearly *under* the currently-observed ~60% clamp rather than as naive even splits (33/66/100 would put tiers 2 and 3 both above it and collapse them to identical physical output). Those fractions are therefore empirical and must be re-checked if the clamp changes; `tests/test_cognition_config.py` enforces that by regexing `HORN_GAIN_MAX_PCT` out of `device/mcu/src/config.h` and asserting tiers 1–2 stay strictly below it, so the obligation lives in the test layer rather than as a duplicated constant in production code. The correct long-term fix is exposing the real caps over the Bridge (`get_system_state`) so the MPU can space its tiers against actual limits — that needs an MCU firmware change plus a live reflash. Status: **open**, named future work.
+
+**SAFE_MODE never learns, by design.** A dry run fires nothing, so nothing may be credited: in `safe_mode` the loop still records the trigger (habituation counting is about what the ground did, not about what we fired) and still selects and logs a tier, but writes no `attempts` row and updates no action value. The same rule applies when the MCU refuses on cooldown — `rule_gate_apply()` returns `allowed=false` only on a cooldown refusal, so a false horn ack means nothing fired and the loop records no attempt. Consequence worth stating plainly: every bench replay and every SAFE_MODE session contributes zero learning, so the first real field deployment starts from a cold table. Status: **closed as designed**, recorded because it is easy to mistake for a bug.
+
+**Every bandit hyperparameter is INVENTED.** `BANDIT_EPSILON = 0.15`, `BANDIT_STEP_SIZE = 0.2`, `HABITUATION_WINDOW_S = 600.0`, `HABITUATION_BUCKET_COUNT = 3`, `PROXY_REWARD_HORIZON_S = 1800.0` and the tier gain fractions have no field data behind them — they are reasoned choices (the window is 20x `HORN_COOLDOWN_MS` so consecutive permitted bursts land inside it; the horizon is 3x the window; the constant step size rather than a sample average because habituation means the true value drifts and a running average would keep weighting stale early experience) but they are not tuned against anything real. Same disposition as the fusion weights above. Status: **open**, pending real trigger-rate data from a live deployment.
+
+**ADR 0001's "already learns from deterrence outcomes and adapts action selection over time" is now true only in the scoped sense above.** When that ADR was written the claim described the frozen design, not the code; as of this build call there is real per-context action-value learning persisted across restarts, but it learns from an unvalidated proxy, never learns in SAFE_MODE, and cannot observe retreat. The ADR's framing — "action selection already adapts, perception does not" — remains the right one for contest and DFO material, provided the proxy caveat travels with it. Status: **open**, informational.
