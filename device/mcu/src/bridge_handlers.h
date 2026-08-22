@@ -1,7 +1,7 @@
 // Bridge RPC adapter functions - one per MPU->MCU function in
 // device/mpu/bridge/schema.md's second table (drive_horn, drive_led,
-// pulse_ir, get_system_state). Each adapter converts the flat scalar
-// Bridge call signature schema.md defines into this file's real
+// pulse_ir, get_system_state, send_lora_alert). Each adapter converts the
+// flat scalar Bridge call signature schema.md defines into this file's real
 // actuator/sensor calls (horn.h/led.h/ir.h/geophone.h) and back into the
 // flat return shape schema.md specifies. Named bridge_* rather than
 // reusing the schema names directly: horn.h/led.h/ir.h already define
@@ -11,11 +11,11 @@
 // differ from the wire names on purpose, not by accident.
 //
 // NOT REGISTERED. device/mcu/src/main.cpp intentionally leaves every
-// Bridge.provide() call for these four commented out - see main.cpp's
+// Bridge.provide() call for these five commented out - see main.cpp's
 // own comment and docs/DEVICE_DEVELOPMENT_WORKFLOW.md 3 for why:
 // registering an additional Bridge.provide() has broken every
 // previously-working one on the same sketch in this project's own
-// history, so each of the four below must be enabled and
+// history, so each of the five below must be enabled and
 // hardware-verified one at a time, in a live session with a human
 // present, never as a batch. Do not add a Bridge.provide() call for any
 // of these outside of that.
@@ -105,5 +105,17 @@ struct bridge_system_state {
 // acoustic subsystem exists on this MCU at all yet. See
 // bridge_handlers.cpp and docs/KNOWN_GAPS.md.
 bridge_system_state bridge_get_system_state(uint8_t schema_version);
+
+// MPU -> MCU: request a direct gunshot alert uplink (schema.md:
+// send_lora_alert, ADR 0007 5's anti-poaching path). Same schema_version
+// handling as bridge_drive_horn.
+//
+// STUB: no real LoRa transport exists yet - the Grove E5 module does not
+// join (mac.h exposes only lora_init()/lora_service()/lora_get_state()/
+// lora_joined(), no uplink-send primitive; see docs/KNOWN_GAPS.md's 18 Aug
+// entry). This handler only logs the request and always returns false -
+// ack therefore means "queued/logged", never "delivered", until a real
+// uplink exists. Never touches mac.cpp.
+bool bridge_send_lora_alert(uint8_t schema_version, float confidence, uint32_t capture_ref);
 
 #endif  // BRIDGE_HANDLERS_H

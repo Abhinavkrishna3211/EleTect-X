@@ -76,7 +76,7 @@ def _parse_schema_functions() -> dict[str, list[str]]:
     return functions
 
 
-# The seven real Bridge functions schema.md defines. Anchoring the parser to
+# The eight real Bridge functions schema.md defines. Anchoring the parser to
 # this explicit set (rather than "any backticked-name table row") keeps a
 # same-side contract table row (e.g. read_seismic_window) from ever being
 # mistaken for a Bridge function.
@@ -88,12 +88,13 @@ KNOWN_BRIDGE_FUNCTIONS = {
     "drive_led",
     "pulse_ir",
     "get_system_state",
+    "send_lora_alert",
 }
 
 SCHEMA_FUNCTIONS = _parse_schema_functions()
 
 
-def test_schema_parse_found_all_seven_functions():
+def test_schema_parse_found_all_eight_functions():
     """Sanity-check the parser itself before trusting it to check anything else."""
     assert set(SCHEMA_FUNCTIONS) == KNOWN_BRIDGE_FUNCTIONS, (
         f"Expected to parse exactly {sorted(KNOWN_BRIDGE_FUNCTIONS)} out of "
@@ -151,6 +152,7 @@ EXPECTED_RETURN_ANNOTATIONS = {
     "drive_led": bool,
     "pulse_ir": bool,
     "get_system_state": rpc.SystemState,
+    "send_lora_alert": bool,
 }
 
 

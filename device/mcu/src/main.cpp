@@ -13,8 +13,9 @@
 // see docs/KNOWN_GAPS.md for the full writeup.
 //
 // device/mpu/bridge/schema.md's MPU->MCU handlers (drive_horn, drive_led,
-// pulse_ir, get_system_state) have real adapters in bridge_handlers.cpp, but
-// their Bridge.provide() calls below stay deliberately commented out - see
+// pulse_ir, get_system_state, send_lora_alert) have real adapters in
+// bridge_handlers.cpp, but their Bridge.provide() calls below stay
+// deliberately commented out - see
 // docs/KNOWN_GAPS.md for why that is deferred to a hardware session, one
 // function at a time. Bridge.begin()/Bridge.update() running unconditionally
 // does not change that discipline: it makes the notify direction reachable,
@@ -56,6 +57,7 @@ void setup() {
   // Bridge.provide("drive_led", bridge_drive_led);
   // Bridge.provide("pulse_ir", bridge_pulse_ir);
   // Bridge.provide("get_system_state", bridge_get_system_state);
+  // Bridge.provide("send_lora_alert", bridge_send_lora_alert);
 
 #if FIRE_TEST_HARNESS
   fire_test_init();

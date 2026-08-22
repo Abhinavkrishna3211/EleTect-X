@@ -71,3 +71,16 @@ bridge_system_state bridge_get_system_state(uint8_t schema_version) {
   state.uptime_s = millis() / 1000UL;
   return state;
 }
+
+bool bridge_send_lora_alert(uint8_t schema_version, float confidence, uint32_t capture_ref) {
+  if (schema_version != BRIDGE_SCHEMA_VERSION) {
+    log_schema_mismatch("send_lora_alert", schema_version);
+  }
+  // No real LoRa transport exists yet - see bridge_handlers.h. Logged, not
+  // sent; always acks false.
+  Serial.print("[bridge] [SAFE_MODE] would send direct gunshot alert: confidence=");
+  Serial.print(confidence, 3);
+  Serial.print(" capture_ref=");
+  Serial.println(capture_ref);
+  return false;
+}

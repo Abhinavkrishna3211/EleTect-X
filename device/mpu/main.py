@@ -151,7 +151,15 @@ def _on_acoustic_event(
     branch on the routing, not for this adapter. Same reason
     _on_footfall_event above drops its FootfallOutcome.
     """
-    reflex_loop.handle_acoustic_event(schema_version, class_label, confidence, capture_ref)
+    reflex_loop.handle_acoustic_event(
+        schema_version,
+        class_label,
+        confidence,
+        capture_ref,
+        send_lora_alert=lambda sv, conf, cap_ref: Bridge.call(
+            "send_lora_alert", sv, conf, cap_ref
+        ),
+    )
 
 
 # NOT YET ENABLED - see module docstring's "Registration state" paragraph.

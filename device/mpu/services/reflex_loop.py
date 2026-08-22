@@ -62,8 +62,11 @@ oversight:
   to log-odds and fuse as the single ACOUSTIC modality; gunshot never
   touches fuse() at all (it is an anti-poaching alert, not evidence that
   an elephant is present); ambient fuses as unavailable. The gunshot
-  branch logs the alert it would send rather than sending one - comms/ is
-  empty and the LoRa module is not joining, so there is no transport. Two
+  branch calls the injected send_lora_alert when safe_mode is False, and
+  logs a dry-run line instead when it is True - the callable itself is a
+  scaffolded Bridge.call stub with no real transport behind it yet, since
+  comms/ is empty and the LoRa module is not joining, so its ack means
+  "queued/logged", never "delivered" (see docs/KNOWN_GAPS.md). Two
   caveats stand: no acoustic classifier runs on the MCU yet, so nothing
   calls this path in the field, and fuse() is stateless per event, so an
   acoustic reading cannot actually corroborate a seismic one - which is
@@ -199,6 +202,18 @@ class PulseIrFn(Protocol):
 
     def __call__(self, schema_version: int, duration_ms: int) -> bool:
         """Request an IR pulse; returns the ack pulse_ir's own contract defines."""
+        ...
+
+
+class SendLoraAlertFn(Protocol):
+    """Callable shape matching bridge.rpc.send_lora_alert's real signature."""
+
+    def __call__(self, schema_version: int, confidence: float, capture_ref: int) -> bool:
+        """Request a direct gunshot alert uplink.
+
+        ack means queued/logged on the MCU, not delivered - no real LoRa
+        transport exists yet (module not joining, see docs/KNOWN_GAPS.md).
+        """
         ...
 
 
@@ -339,11 +354,16 @@ class AcousticOutcome:
             anti-poaching alert path instead of the elephant-presence one.
             The alert is logged rather than sent - see
             handle_acoustic_event()'s docstring for why.
+        lora_ack: send_lora_alert's returned ack, or None if it was never
+            called (non-gunshot class, or safe_mode suppressed it). True
+            today would still only mean "queued/logged on the MCU", never
+            "delivered" - no real LoRa transport exists yet.
     """
 
     class_label: AcousticClass
     fusion: FusionResult | None
     direct_alert: bool
+    lora_ack: bool | None
 
 
 def _confidence_log_odds(probability: float) -> float:
@@ -734,6 +754,7 @@ def handle_acoustic_event(
     confidence: float,
     capture_ref: int,
     *,
+    send_lora_alert: SendLoraAlertFn,
     safe_mode: bool = SAFE_MODE,
 ) -> AcousticOutcome:
     """Route one report_acoustic_event notify per ADR 0007 5's fusion/alert split.
@@ -771,13 +792,14 @@ def handle_acoustic_event(
       The missing piece is cross-modality temporal state, tracked as its own
       entry in docs/KNOWN_GAPS.md rather than papered over here with a
       threshold tweak.
-    - **It sends no gunshot alert.** comms/ is empty and the LoRa module is
-      not answering AT probes (docs/KNOWN_GAPS.md, 18 Aug), so there is
-      nowhere for a real alert to go. The branch logs what it would send, in
-      the same [SAFE_MODE] shape handle_footfall_event() uses above for
-      actuators it cannot drive. That line is emitted unconditionally rather
-      than gated on safe_mode: the absence of a transport is not a run mode,
-      and ELETECT_SAFE_MODE=0 would not conjure one.
+    - **The gunshot alert it does send is not a real uplink.** send_lora_alert
+      is a scaffolded Bridge.call stub (bridge/rpc.py) with no MCU-side
+      transport behind it yet - comms/ is empty and the LoRa module is not
+      answering AT probes (docs/KNOWN_GAPS.md, 18 Aug). Outside safe_mode
+      this branch calls it for real and logs whatever ack comes back, same
+      [SAFE_MODE]-adjacent discipline handle_footfall_event() uses above for
+      actuators; under safe_mode it logs a dry-run line instead and never
+      calls send_lora_alert at all.
 
     Precondition: none - schema_version mismatches are logged, not raised,
     same reasoning as handle_footfall_event(). Never blocks: no Bridge call
@@ -791,9 +813,12 @@ def handle_acoustic_event(
             logit() on the fusing branch; unused on the other two beyond
             being logged.
         capture_ref: Index into the MCU's raw-window ring buffer.
-        safe_mode: Accepted for symmetry with handle_footfall_event(), and
-            for the day the gunshot branch has a real transport to suppress.
-            Changes nothing today - see above.
+        send_lora_alert: Injected callable matching SendLoraAlertFn, bound in
+            main.py to a real Bridge.call. Only ever invoked on the gunshot
+            branch, and only when safe_mode is False.
+        safe_mode: When True (the default), the gunshot branch logs a
+            dry-run line and never calls send_lora_alert. When False, it
+            calls send_lora_alert for real and logs whatever ack comes back.
 
     Returns:
         An AcousticOutcome carrying the class, the FusionResult (None on the
@@ -807,24 +832,32 @@ def handle_acoustic_event(
         )
 
     if class_label is AcousticClass.GUNSHOT:
-        # TODO: replace this log with a real uplink once the LoRa module
-        # joins (docs/KNOWN_GAPS.md, 18 Aug). Shape: a SendLoraAlertFn
-        # Protocol declared alongside DriveHornFn above, injected as a
-        # keyword-only argument here, and bound in main.py to the real
-        # Bridge.call - the same dependency-injection discipline every other
-        # side effect in this module already follows, so tests keep asserting
-        # against a recording fake. Gate the real send on safe_mode then;
-        # today there is nothing to gate.
+        if safe_mode:
+            logger.info(
+                "[SAFE_MODE] would send direct gunshot alert: confidence=%.3f "
+                "capture_ref=%d - not calling send_lora_alert (dry run). "
+                "Never fused: a gunshot is not elephant-presence evidence "
+                "(ADR 0007 5)",
+                confidence,
+                capture_ref,
+            )
+            return AcousticOutcome(
+                class_label=class_label, fusion=None, direct_alert=True, lora_ack=None
+            )
+        ack = send_lora_alert(schema_version, confidence, capture_ref)
         logger.info(
-            "[SAFE_MODE] would send direct gunshot alert: confidence=%.3f "
-            "capture_ref=%d - no LoRa transport exists yet (comms/ is empty, "
-            "module not joining, see docs/KNOWN_GAPS.md), so nothing goes on "
-            "the wire. Never fused: a gunshot is not elephant-presence "
-            "evidence (ADR 0007 5)",
+            "send_lora_alert ack=%s: confidence=%.3f capture_ref=%d - ack "
+            "reflects queued/logged on the MCU, not delivered - no real "
+            "LoRa transport exists yet (module not joining, see "
+            "docs/KNOWN_GAPS.md). Never fused: a gunshot is not "
+            "elephant-presence evidence (ADR 0007 5)",
+            ack,
             confidence,
             capture_ref,
         )
-        return AcousticOutcome(class_label=class_label, fusion=None, direct_alert=True)
+        return AcousticOutcome(
+            class_label=class_label, fusion=None, direct_alert=True, lora_ack=ack
+        )
 
     fuses = class_label in _FUSING_ACOUSTIC_CLASSES
     readings = [
@@ -854,5 +887,5 @@ def handle_acoustic_event(
         [m.value for m in fusion_result.dropped],
     )
     return AcousticOutcome(
-        class_label=class_label, fusion=fusion_result, direct_alert=False
+        class_label=class_label, fusion=fusion_result, direct_alert=False, lora_ack=None
     )

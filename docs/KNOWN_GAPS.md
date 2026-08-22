@@ -80,11 +80,20 @@ criteria — see each entry's status.
   entry below, which already made this same call in code before it was written down here. Status:
   closed.
 - **AT command syntax and response strings in `lora/mac.cpp` are unverified against the source
-  manual.** The file cites Seeed's *Grove LoRa-E5 AT Command Specification* but was written from
+  manual.** ~~The file cites Seeed's *Grove LoRa-E5 AT Command Specification* but was written from
   memory of typical AT-command LoRaWAN modems, not checked line-by-line against it. Every command
-  is marked `// UNVERIFIED against AT manual` inline. High severity — an unverified token fails
-  the join silently on real hardware. Effort: one read-through of the manual against the file.
-  Status: open, must be resolved before the first real join attempt.
+  is marked `// UNVERIFIED against AT manual` inline.~~ **Stale, closed — this entry was never
+  updated after the work happened, found while re-checking on 22 Aug.** `device/mcu/src/mac.cpp`'s
+  own header comment already states it was checked line-by-line against the manual's text layer
+  (`pdftotext -layout`): section 4.23 (MODE), 4.13 (DR), 3.9 (Band Specific Limitation), 4.20 (KEY),
+  4.3 (ID), and 4.24 (JOIN). Every command in the file cites its section inline (`AT+MODE=LWOTAA` →
+  4.23, `AT+DR=IN865` → 4.13.2, `AT+ID=AppEui,"..."` → 4.3, `AT+KEY=APPKEY,"..."` → 4.20, `AT+JOIN` →
+  4.24) and zero `UNVERIFIED` markers remain anywhere in `mac.cpp`/`mac.h` — likely folded into the
+  `b69799f` "+JOIN: Done" string fix (see the 18 Aug LORA_SERIAL entry below) without this entry
+  being closed at the time. Status: **closed** — command syntax is verified against the source
+  manual. This does not touch the separate, still-open problem that the physically wired module
+  doesn't respond to any AT probe at all (18 Aug entry below) — a correct command sent to a silent
+  module still gets no reply.
 - **LTA window length is bounded by the 2.048 s bench window (`SEISMIC_WINDOW_SAMPLES = 512` at
   250 SPS).** The LPBAM swap (ADR 0009) that replaces the ADS1115 stand-in should revisit whether
   a longer buffer is worth the SRAM cost once the internal-ADC path exists. Medium severity.
@@ -530,11 +539,14 @@ criteria — see each entry's status.
   distinct confidences so the test cannot pass by coincidental equality at one input; gunshot is
   proven by test never to reach `fuse()` at all (`outcome.fusion is None`, which is distinguishable
   from an event that fused with acoustic unavailable and so still carries a real `FusionResult`).
-  **Still open, four ways:** (a) *no LoRa transport* — the gunshot branch logs a structured
-  `[SAFE_MODE] would send direct gunshot alert` line instead of sending anything, blocked on the
-  18 Aug join failure above; the `# TODO` in that branch names the intended `SendLoraAlertFn`
-  Protocol + `main.py` binding. The line is emitted unconditionally rather than gated on
-  `safe_mode`, because the absence of a transport is not a run mode. (b) *`AMBIENT`'s mapping is
+  **Still open, four ways:** (a) *transport interface scaffolded, not connected* — `SendLoraAlertFn`
+  (`reflex_loop.py`), `bridge_send_lora_alert` (`device/mcu/src/bridge_handlers.h/.cpp`), and the
+  `send_lora_alert` `schema.md` row now exist and are host-tested (`test_reflex_loop.py`); the
+  gunshot branch calls it for real when `safe_mode=False`. Both `Bridge.provide("send_lora_alert",
+  ...)` in `main.cpp` and the `report_acoustic_event` registration gating it in `main.py` stay
+  commented out per `DEVICE_DEVELOPMENT_WORKFLOW.md` §3, and the MCU-side handler always acks
+  `false` — the real send is still blocked on the 18 Aug join failure above, not on missing code.
+  (b) *`AMBIENT`'s mapping is
   invented* — ADR 0007 names only four classes and never routes ambient; it is fused as
   `available=False` on ADR 0001's addendum reasoning (a modality with nothing to say is excluded
   from the sum, never scored as negative evidence), which is this session's judgement, not an ADR

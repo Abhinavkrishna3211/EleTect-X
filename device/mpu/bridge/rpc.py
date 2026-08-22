@@ -6,7 +6,7 @@ bug where registering an extra `Bridge.provide()` function (a float-argument
 one specifically) broke every previously-working function on the same
 sketch; the practical discipline that earns is registering one function at
 a time on real hardware, testing between each addition - not wiring a batch
-of seven from a host build with no board attached. The MCU side observes
+of eight from a host build with no board attached. The MCU side observes
 the same caution (device/mcu/src/main.cpp).
 
 This module must stay importable with no board attached: `arduino.app_utils`
@@ -249,5 +249,34 @@ def get_system_state(schema_version: int) -> SystemState:
         The same struct report_system_status pushes periodically:
         battery_v, geophone_ok, acoustic_ok, uptime_s. Never blocks past
         one cached-struct read on the MCU side.
+    """
+    raise NotImplementedError
+
+
+def send_lora_alert(schema_version: int, confidence: float, capture_ref: int) -> bool:
+    """Request a direct gunshot alert uplink (ADR 0007 5's anti-poaching path).
+
+    Bridge target: `call` (synchronous, blocks up to
+    services.config.BRIDGE_CALL_TIMEOUT_S). Not idempotent - never retried
+    on timeout (services.config.BRIDGE_ACTUATOR_CALL_RETRIES): retrying a
+    timed-out call would risk sending a duplicate alert, not just a
+    duplicate request.
+
+    No real LoRa transport exists on the MCU side yet - the Grove E5 module
+    is not answering AT probes (docs/KNOWN_GAPS.md, 18 Aug entry), so the
+    MCU-side handler only logs the request and always returns False. A True
+    ack, once the module joins, would still mean "queued/logged on the
+    MCU", never "delivered over the air" - schema.md's own wording for this
+    row.
+
+    Args:
+        schema_version: Wire schema version; must equal SCHEMA_VERSION.
+        confidence: Classifier confidence, 0-1, as reported by
+            report_acoustic_event.
+        capture_ref: Index into the MCU's raw-window ring buffer.
+
+    Returns:
+        True if the MCU queued/logged the alert. False today, always - no
+        real transport exists for it to queue into yet.
     """
     raise NotImplementedError
