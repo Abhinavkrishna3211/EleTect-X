@@ -31,6 +31,7 @@ import time
 
 import pytest
 
+from bridge.rpc import AcousticClass
 from cognition import config as cognition_config
 from cognition.bandit import Tier
 from cognition.experience import IN_MEMORY_PATH, ExperienceStore
@@ -169,6 +170,22 @@ def _expected_seismic_fusion(probability: float):
     log_odds_seismic = math.log(probability / (1.0 - probability))
     contribution = cognition_config.WEIGHT_SEISMIC * (
         log_odds_seismic - cognition_config.BASELINE_SEISMIC
+    )
+    fused_log_odds = cognition_config.L_PRIOR + contribution
+    return fused_log_odds, sigmoid(fused_log_odds)
+
+
+def _expected_acoustic_fusion(confidence: float):
+    """Hand-computed (L, P) for an acoustic event with seismic/vision unavailable.
+
+    L = L_PRIOR + WEIGHT_ACOUSTIC * (logit(confidence) - BASELINE_ACOUSTIC);
+    seismic/vision contribute nothing (dropped, not scored as 0). Same
+    anti-tautology discipline as _expected_seismic_fusion above - math.log
+    directly, never logit() or fuse().
+    """
+    log_odds_acoustic = math.log(confidence / (1.0 - confidence))
+    contribution = cognition_config.WEIGHT_ACOUSTIC * (
+        log_odds_acoustic - cognition_config.BASELINE_ACOUSTIC
     )
     fused_log_odds = cognition_config.L_PRIOR + contribution
     return fused_log_odds, sigmoid(fused_log_odds)
@@ -726,12 +743,148 @@ def test_exploration_is_reported_when_it_happens():
 # ---------------------------------------------------------------------------
 
 
-def test_acoustic_event_is_logged_and_returns_none(caplog):
-    """Acoustic events are logged for visibility only - never fused, per module docstring."""
-    from bridge.rpc import AcousticClass
-
+def test_acoustic_event_is_logged_and_returns_its_outcome(caplog):
+    """Every acoustic event is logged and reports which route ADR 0007 5 sent it down."""
     with caplog.at_level("INFO"):
-        result = reflex_loop.handle_acoustic_event(1, AcousticClass.GUNSHOT, 0.87, 42)
+        outcome = reflex_loop.handle_acoustic_event(1, AcousticClass.GUNSHOT, 0.87, 42)
 
-    assert result is None
+    assert outcome.class_label is AcousticClass.GUNSHOT
+    assert outcome.direct_alert is True
     assert any("gunshot" in record.message for record in caplog.records)
+
+
+def test_gunshot_never_reaches_fusion_and_logs_a_direct_alert(caplog):
+    """ADR 0007 5's central rule, as a regression guard.
+
+    The ADR is explicit that a gunshot is not evidence toward "is an elephant
+    present", and that folding it into the elephant-presence fusion score
+    would be a modeling error. A None fusion here means fuse() was never
+    called at all - an event that fused with acoustic unavailable still
+    carries a real FusionResult (see test_ambient_is_fused_as_unavailable
+    below), so this assertion distinguishes the two.
+    """
+    with caplog.at_level("INFO"):
+        outcome = reflex_loop.handle_acoustic_event(1, AcousticClass.GUNSHOT, 0.93, 7)
+
+    assert outcome.fusion is None
+    assert outcome.direct_alert is True
+
+    messages = [record.message for record in caplog.records]
+    assert any(
+        "[SAFE_MODE]" in m and "would send direct gunshot alert" in m for m in messages
+    )
+    # The would-send line carries the real confidence/capture_ref an actual
+    # uplink would have to put on the wire, not a placeholder.
+    assert any("confidence=0.930" in m and "capture_ref=7" in m for m in messages)
+    # Nothing anywhere in this event claims a fused probability.
+    assert not any("fused_P" in m for m in messages)
+
+
+def test_gunshot_direct_alert_is_logged_even_outside_safe_mode(caplog):
+    """The absence of a LoRa transport is not a run mode.
+
+    ELETECT_SAFE_MODE=0 does not conjure a radio that is not joining, so the
+    would-send line stands on both settings until comms/ exists.
+    """
+    with caplog.at_level("INFO"):
+        outcome = reflex_loop.handle_acoustic_event(
+            1, AcousticClass.GUNSHOT, 0.93, 7, safe_mode=False
+        )
+
+    assert outcome.fusion is None
+    assert outcome.direct_alert is True
+    assert any("would send direct gunshot alert" in r.message for r in caplog.records)
+
+
+def test_chainsaw_feeds_fusion_as_the_acoustic_modality():
+    """A chainsaw is elephant-presence evidence and fuses at WEIGHT_ACOUSTIC."""
+    expected_log_odds, expected_p = _expected_acoustic_fusion(0.8)
+
+    outcome = reflex_loop.handle_acoustic_event(1, AcousticClass.CHAINSAW, 0.8, 3)
+
+    assert outcome.direct_alert is False
+    assert outcome.fusion is not None
+    assert outcome.fusion.log_odds == pytest.approx(expected_log_odds)
+    assert outcome.fusion.probability == pytest.approx(expected_p)
+    assert outcome.fusion.used == (Modality.ACOUSTIC,)
+    assert set(outcome.fusion.dropped) == {Modality.SEISMIC, Modality.VISION}
+    assert Modality.SEISMIC not in outcome.fusion.contributions
+    assert Modality.VISION not in outcome.fusion.contributions
+
+
+@pytest.mark.parametrize(
+    "class_label, confidence",
+    [
+        (AcousticClass.CHAINSAW, 0.62),
+        (AcousticClass.VEHICLE, 0.77),
+        (AcousticClass.ANIMAL_CALL, 0.91),
+    ],
+)
+def test_the_three_fusing_classes_share_one_acoustic_modality(class_label, confidence):
+    """ADR 0007 treats chainsaw/vehicle/animal_call as one modality, not three.
+
+    Each class is checked at a *different* confidence deliberately: agreeing
+    on one shared input would not distinguish "all three use WEIGHT_ACOUSTIC"
+    from "all three happen to coincide at this particular value". Matching
+    the single-modality hand computation across three distinct inputs can
+    only hold if each really is routed through the same weight and baseline.
+    """
+    expected_log_odds, expected_p = _expected_acoustic_fusion(confidence)
+
+    outcome = reflex_loop.handle_acoustic_event(1, class_label, confidence, 11)
+
+    assert outcome.class_label is class_label
+    assert outcome.direct_alert is False
+    assert outcome.fusion.log_odds == pytest.approx(expected_log_odds)
+    assert outcome.fusion.probability == pytest.approx(expected_p)
+    assert outcome.fusion.used == (Modality.ACOUSTIC,)
+
+
+def test_ambient_is_fused_as_unavailable():
+    """Ambient is "nothing to say", excluded from the sum - never negative evidence.
+
+    INVENTED mapping: ADR 0007 names only four classes and never routes
+    ambient. ADR 0001's addendum fixes the shape - a missing modality is
+    excluded, not scored down - so the fused result must land exactly on the
+    prior, with no acoustic contribution, even at a high confidence.
+    """
+    outcome = reflex_loop.handle_acoustic_event(1, AcousticClass.AMBIENT, 0.99, 5)
+
+    assert outcome.direct_alert is False
+    assert outcome.fusion is not None
+    assert outcome.fusion.used == ()
+    assert set(outcome.fusion.dropped) == {
+        Modality.ACOUSTIC,
+        Modality.SEISMIC,
+        Modality.VISION,
+    }
+    assert Modality.ACOUSTIC not in outcome.fusion.contributions
+    assert outcome.fusion.log_odds == pytest.approx(cognition_config.L_PRIOR)
+    assert outcome.fusion.probability == pytest.approx(sigmoid(cognition_config.L_PRIOR))
+
+
+def test_acoustic_confidence_at_exactly_zero_or_one_does_not_crash():
+    """logit() rejects 0.0/1.0 outright - the shared epsilon clamp protects this call too.
+
+    Same guard as the footfall test above, exercised on the other caller of
+    _confidence_log_odds(): the wire field is a plain float with no
+    protocol-level bound either way.
+    """
+    outcome_zero = reflex_loop.handle_acoustic_event(1, AcousticClass.VEHICLE, 0.0, 1)
+    outcome_one = reflex_loop.handle_acoustic_event(1, AcousticClass.VEHICLE, 1.0, 2)
+
+    assert math.isfinite(outcome_zero.fusion.log_odds)
+    assert math.isfinite(outcome_one.fusion.log_odds)
+    assert outcome_zero.fusion.probability < outcome_one.fusion.probability
+
+
+def test_acoustic_schema_version_mismatch_is_logged_not_raised(caplog):
+    """A mismatched schema_version is a warning, never an exception - and still routes."""
+    with caplog.at_level("WARNING"):
+        outcome = reflex_loop.handle_acoustic_event(99, AcousticClass.CHAINSAW, 0.8, 4)
+
+    assert outcome.fusion is not None
+    assert any(
+        "schema_version mismatch" in record.message and record.levelname == "WARNING"
+        for record in caplog.records
+    )

@@ -55,18 +55,26 @@ oversight:
 - **Vision**: no detector exists (perception/camera.py is capture-only, no
   pixel -> log-odds model - cognition/fusion.py's own module docstring
   names this a future build call). Always passed to fuse() as unavailable.
-- **Acoustic**: report_acoustic_event's classifier output (gunshot/
-  chainsaw/vehicle/animal_call/ambient) has no defined mapping onto
-  elephant-presence log-odds, and ADR 0007 5 routes gunshot to a direct
-  LoRa alert that bypasses fusion entirely - a routing path this repo has
-  not built yet (comms/ is empty). handle_acoustic_event() logs the event
-  for visibility only; it never reaches fuse(). See docs/KNOWN_GAPS.md.
+- **Acoustic**: handle_acoustic_event() now implements ADR 0007 5's
+  routing split, so acoustic does reach fuse() - but never on the footfall
+  path above, which still passes it as unavailable because no acoustic
+  reading is in hand at that moment. Chainsaw/vehicle/animal_call convert
+  to log-odds and fuse as the single ACOUSTIC modality; gunshot never
+  touches fuse() at all (it is an anti-poaching alert, not evidence that
+  an elephant is present); ambient fuses as unavailable. The gunshot
+  branch logs the alert it would send rather than sending one - comms/ is
+  empty and the LoRa module is not joining, so there is no transport. Two
+  caveats stand: no acoustic classifier runs on the MCU yet, so nothing
+  calls this path in the field, and fuse() is stateless per event, so an
+  acoustic reading cannot actually corroborate a seismic one - which is
+  why handle_acoustic_event() stops at fuse() and never calls decide().
+  See docs/KNOWN_GAPS.md.
 
-Only seismic is wired end-to-end: the MCU's own on-board footfall model
-already reports a probability (schema.md's report_footfall_event), and
-converting that into fusion's log-odds input via cognition.fusion.logit()
-is a direct, non-invented transformation - not a new detector this module
-had to build.
+Only seismic is wired end-to-end into the alert-and-actuate path: the MCU's
+own on-board footfall model already reports a probability (schema.md's
+report_footfall_event), and converting that into fusion's log-odds input via
+cognition.fusion.logit() is a direct, non-invented transformation - not a new
+detector this module had to build.
 
 SAFE_MODE (default on) is the dry-run gate: when true, an alert decision and
 the tier the bandit selected for it are logged, but drive_horn is never
@@ -309,21 +317,56 @@ class FootfallOutcome:
     trigger_to_first_frame_s: float | None
 
 
-def _seismic_log_odds(probability: float) -> float:
-    """Convert the MCU's on-board footfall probability into fusion's log-odds input.
+@dataclass(frozen=True)
+class AcousticOutcome:
+    """What one handle_acoustic_event() call routed and computed.
+
+    Returned (rather than left as a side effect only) so tests can assert on
+    it directly, matching FootfallOutcome's own rationale above - and in
+    particular so ADR 0007 5's rule that gunshot never reaches fuse() is
+    provable from a returned value rather than inferred from log text.
+
+    Attributes:
+        class_label: The AcousticClass this event carried, echoed back so a
+            caller can branch on which route was taken without re-deriving
+            it from the input.
+        fusion: The FusionResult fuse() produced for this event, or None on
+            the gunshot branch, which never calls fuse() at all (ADR 0007
+            5). None here means "never fused", never "fused to nothing" -
+            an event that fused with the acoustic modality unavailable
+            still carries a real FusionResult.
+        direct_alert: True only for gunshot: this event took the direct
+            anti-poaching alert path instead of the elephant-presence one.
+            The alert is logged rather than sent - see
+            handle_acoustic_event()'s docstring for why.
+    """
+
+    class_label: AcousticClass
+    fusion: FusionResult | None
+    direct_alert: bool
+
+
+def _confidence_log_odds(probability: float) -> float:
+    """Convert a detector's reported confidence into fusion's log-odds input.
 
     logit() rejects the closed interval's endpoints (0.0 and 1.0) - both are
-    representable float values report_footfall_event's wire probability
-    could in principle carry, even though the MCU's own model realistically
-    saturates just short of them. Clamping into an epsilon-narrowed open
-    interval before calling logit() is a numerical safety guard here (same
-    category as fusion.sigmoid()'s own two-branch overflow handling), not a
-    policy choice - it changes nothing for any probability logit() would
-    already have accepted unclamped.
+    representable float values a wire probability could in principle carry,
+    even though a real model realistically saturates just short of them.
+    Clamping into an epsilon-narrowed open interval before calling logit()
+    is a numerical safety guard here (same category as fusion.sigmoid()'s
+    own two-branch overflow handling), not a policy choice - it changes
+    nothing for any probability logit() would already have accepted
+    unclamped.
+
+    Shared by both wired modalities rather than duplicated per caller:
+    report_footfall_event's `probability` and report_acoustic_event's
+    `confidence` are the same kind of number arriving over the same Bridge,
+    and the clamp is a property of logit(), not of either sensor.
 
     Args:
-        probability: report_footfall_event's `probability` field, expected
-            in [0.0, 1.0].
+        probability: A detector's reported confidence, expected in
+            [0.0, 1.0] - report_footfall_event's `probability` field or
+            report_acoustic_event's `confidence` field.
 
     Returns:
         The log-odds logit() returns for the epsilon-clamped probability.
@@ -503,8 +546,12 @@ def handle_footfall_event(
         )
 
     readings = [
-        ModalityReading(Modality.SEISMIC, _seismic_log_odds(probability), available=True),
-        # Acoustic/vision: no wired detector yet - see module docstring.
+        ModalityReading(Modality.SEISMIC, _confidence_log_odds(probability), available=True),
+        # Acoustic/vision: no reading in hand on this path. A footfall notify
+        # carries neither, and nothing correlates an acoustic event with this
+        # one across time yet - acoustic fuses only on its own event, in
+        # handle_acoustic_event(). Vision has no detector at all. See module
+        # docstring.
         ModalityReading(Modality.ACOUSTIC, 0.0, available=False),
         ModalityReading(Modality.VISION, 0.0, available=False),
     ]
@@ -667,27 +714,90 @@ def handle_footfall_event(
     )
 
 
+# Which AcousticClass values are evidence toward "is an elephant present".
+# ADR 0007 5 names exactly these three and treats them as one modality rather
+# than three: they all feed the same WEIGHT_ACOUSTIC/BASELINE_ACOUSTIC pair in
+# cognition/config.py. The other two classes are each excluded for their own
+# distinct reason - see handle_acoustic_event().
+_FUSING_ACOUSTIC_CLASSES = frozenset(
+    {
+        AcousticClass.CHAINSAW,
+        AcousticClass.VEHICLE,
+        AcousticClass.ANIMAL_CALL,
+    }
+)
+
+
 def handle_acoustic_event(
     schema_version: int,
     class_label: AcousticClass,
     confidence: float,
     capture_ref: int,
-) -> None:
-    """Log one report_acoustic_event notify. Does not reach fuse() - see module docstring.
+    *,
+    safe_mode: bool = SAFE_MODE,
+) -> AcousticOutcome:
+    """Route one report_acoustic_event notify per ADR 0007 5's fusion/alert split.
+
+    Which of three branches an event takes is the whole point of this
+    function:
+
+    - **gunshot** never reaches fuse(). ADR 0007 5 is explicit that a
+      gunshot is not evidence toward "is an elephant present" - it is a
+      categorically different alert (anti-poaching, human safety), and
+      folding it into the elephant-presence score would be a modeling
+      error, not just an oversimplification. It takes its own direct alert
+      path to forest officers, independent of fusion and of the deterrence
+      decision entirely: you do not deter a gunshot with a horn and LEDs.
+    - **chainsaw/vehicle/animal_call** convert to log-odds via
+      _confidence_log_odds() and fuse as the single ACOUSTIC modality. One
+      modality for all three, per ADR 0007 - they share cognition/config.py's
+      WEIGHT_ACOUSTIC and BASELINE_ACOUSTIC, whose magnitudes are themselves
+      still invented (docs/KNOWN_GAPS.md).
+    - **ambient** fuses as unavailable. INVENTED mapping: ADR 0007 names only
+      four classes and never assigns ambient a route at all, but ADR 0001's
+      addendum settles the shape - a modality with nothing to say is excluded
+      from the sum, never scored as negative evidence. It still goes through
+      fuse(), so the result honestly records "acoustic was present and had
+      nothing to say" rather than "acoustic never reported".
+
+    Two things this deliberately does not do:
+
+    - **It never calls decide() and never actuates.** fuse() is stateless
+      per event, so an acoustic classification arrives with no concurrent
+      seismic or vision reading to corroborate. With both unavailable, a
+      chainsaw at confidence 0.9 fuses on its own past
+      ALERT_PROBABILITY_THRESHOLD - which would make acoustic a standalone
+      elephant detector, exactly what ADR 0007/0009 scope it out of being.
+      The missing piece is cross-modality temporal state, tracked as its own
+      entry in docs/KNOWN_GAPS.md rather than papered over here with a
+      threshold tweak.
+    - **It sends no gunshot alert.** comms/ is empty and the LoRa module is
+      not answering AT probes (docs/KNOWN_GAPS.md, 18 Aug), so there is
+      nowhere for a real alert to go. The branch logs what it would send, in
+      the same [SAFE_MODE] shape handle_footfall_event() uses above for
+      actuators it cannot drive. That line is emitted unconditionally rather
+      than gated on safe_mode: the absence of a transport is not a run mode,
+      and ELETECT_SAFE_MODE=0 would not conjure one.
 
     Precondition: none - schema_version mismatches are logged, not raised,
-    same reasoning as handle_footfall_event(). Never blocks: logging only,
-    no Bridge call on this path.
+    same reasoning as handle_footfall_event(). Never blocks: no Bridge call
+    and no sleep on any branch.
 
     Args:
         schema_version: As received from the MCU; logged if it does not
             match services.config.SCHEMA_VERSION.
         class_label: One of bridge.rpc.AcousticClass's values.
-        confidence: Classifier confidence, 0-1.
+        confidence: Classifier confidence, 0-1. Epsilon-clamped before
+            logit() on the fusing branch; unused on the other two beyond
+            being logged.
         capture_ref: Index into the MCU's raw-window ring buffer.
+        safe_mode: Accepted for symmetry with handle_footfall_event(), and
+            for the day the gunshot branch has a real transport to suppress.
+            Changes nothing today - see above.
 
     Returns:
-        None - matches report_acoustic_event's own notify contract.
+        An AcousticOutcome carrying the class, the FusionResult (None on the
+        gunshot branch), and whether this event took the direct-alert path.
     """
     if schema_version != services_config.SCHEMA_VERSION:
         logger.warning(
@@ -695,10 +805,54 @@ def handle_acoustic_event(
             schema_version,
             services_config.SCHEMA_VERSION,
         )
+
+    if class_label is AcousticClass.GUNSHOT:
+        # TODO: replace this log with a real uplink once the LoRa module
+        # joins (docs/KNOWN_GAPS.md, 18 Aug). Shape: a SendLoraAlertFn
+        # Protocol declared alongside DriveHornFn above, injected as a
+        # keyword-only argument here, and bound in main.py to the real
+        # Bridge.call - the same dependency-injection discipline every other
+        # side effect in this module already follows, so tests keep asserting
+        # against a recording fake. Gate the real send on safe_mode then;
+        # today there is nothing to gate.
+        logger.info(
+            "[SAFE_MODE] would send direct gunshot alert: confidence=%.3f "
+            "capture_ref=%d - no LoRa transport exists yet (comms/ is empty, "
+            "module not joining, see docs/KNOWN_GAPS.md), so nothing goes on "
+            "the wire. Never fused: a gunshot is not elephant-presence "
+            "evidence (ADR 0007 5)",
+            confidence,
+            capture_ref,
+        )
+        return AcousticOutcome(class_label=class_label, fusion=None, direct_alert=True)
+
+    fuses = class_label in _FUSING_ACOUSTIC_CLASSES
+    readings = [
+        ModalityReading(
+            Modality.ACOUSTIC,
+            _confidence_log_odds(confidence) if fuses else 0.0,
+            available=fuses,
+        ),
+        # Seismic/vision: no reading in hand on this path. An acoustic notify
+        # carries neither, and nothing correlates a footfall event with this
+        # one across time yet - see this function's docstring on why that is
+        # also the reason decide() is not called here.
+        ModalityReading(Modality.SEISMIC, 0.0, available=False),
+        ModalityReading(Modality.VISION, 0.0, available=False),
+    ]
+    fusion_result = fuse(readings, cognition_config.DEFAULT_FUSION_PARAMS)
+
     logger.info(
         "acoustic event: class_label=%s confidence=%.3f capture_ref=%d "
-        "(not fused - no elephant-relevant mapping defined yet, see docs/KNOWN_GAPS.md)",
+        "fused_P=%.3f used=%s dropped=%s (fusion only - no decide() or "
+        "actuation on this path, acoustic is corroboration per ADR 0007/0009)",
         class_label.value,
         confidence,
         capture_ref,
+        fusion_result.probability,
+        [m.value for m in fusion_result.used],
+        [m.value for m in fusion_result.dropped],
+    )
+    return AcousticOutcome(
+        class_label=class_label, fusion=fusion_result, direct_alert=False
     )
