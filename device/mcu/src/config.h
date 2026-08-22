@@ -326,7 +326,10 @@
 // The DFPlayer is triggered by a GPIO pulse on its IO/ADKEY input rather than
 // over UART: USART1 on D0/D1 is the only UART broken out to the top headers
 // and the Grove LoRa-E5 has it.
-#define AUDIO_TRIGGER_PIN 2  // PB3, plain GPIO -> DFPlayer IO/ADKEY input
+// PB3, plain GPIO -> DFPlayer PRO (DFR0768) KEY input. Active-low: the
+// DF1101S pulls KEY up to its own IO rail (idle high) and reads a direct
+// short to ground as key K1 (Play & Pause) - see horn.cpp's top comment.
+#define AUDIO_TRIGGER_PIN 2
 
 // TPA3116D2 shutdown pin, active low. ADR 0003 drives a single BTL channel,
 // not PBTL: at the 12.8 V rail one channel already puts the SUH-15 well above

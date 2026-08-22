@@ -1,5 +1,10 @@
 // AUDIO_TRIGGER_PIN (D2) and HORN_AMP_ENABLE_PIN (D4) sequencing.
 //
+// AUDIO_TRIGGER_PIN is active-low: the DFPlayer PRO's DF1101S chip pulls its
+// KEY (ADKEY) input up to its own IO rail through a 22k resistor, idle high,
+// and reads a direct short to ground as key K1 (Play & Pause). This MCU pin
+// must therefore idle high and pulse low to register a press.
+//
 // fire:  AMP_ENABLE low  (TPA3116D2 held in shutdown)
 //     -> pulse AUDIO_TRIGGER (DFPlayer starts seeking the track)
 //     -> wait HORN_AMP_ENABLE_DELAY_MS
@@ -39,9 +44,9 @@ const gate_limits kHornLimits = {
 
 void horn_fire_sequence(uint16_t duration_ms) {
   digitalWrite(HORN_AMP_ENABLE_PIN, LOW);
-  digitalWrite(AUDIO_TRIGGER_PIN, HIGH);
-  delay(AUDIO_TRIGGER_PULSE_MS);
   digitalWrite(AUDIO_TRIGGER_PIN, LOW);
+  delay(AUDIO_TRIGGER_PULSE_MS);
+  digitalWrite(AUDIO_TRIGGER_PIN, HIGH);
 
   delay(HORN_AMP_ENABLE_DELAY_MS);
   digitalWrite(HORN_AMP_ENABLE_PIN, HIGH);
@@ -56,7 +61,7 @@ void horn_fire_sequence(uint16_t duration_ms) {
 void horn_init() {
   pinMode(AUDIO_TRIGGER_PIN, OUTPUT);
   pinMode(HORN_AMP_ENABLE_PIN, OUTPUT);
-  digitalWrite(AUDIO_TRIGGER_PIN, LOW);
+  digitalWrite(AUDIO_TRIGGER_PIN, HIGH);  // idle high - DFPlayer KEY pull-up rests unpressed
   digitalWrite(HORN_AMP_ENABLE_PIN, LOW);  // amp held in shutdown at boot
 }
 
