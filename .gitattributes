@@ -10,5 +10,7 @@
 *.jpeg binary
 *.step binary
 *.stl binary
+*.stp binary
+*.f3z binary
 *.xlsx binary
 *.pdf binary
