@@ -2,8 +2,14 @@
 
 `fusion.py` implements the fusion formula `L = L_prior + sum(a_i * w_i *
 (l_i - l0_i))`, `P = sigmoid(L)` (CONTEXT.md 4) as a pure function over
-plain floats, with `config.py` holding its weights/baselines/prior - see
-their own module docstrings. The contextual bandit's action-value update and
-the SQLite experience store are not built yet: populated in a future build
-call, once a Bridge-delivered event actually reaches this package.
+plain floats; `decision.py` turns `P` into an alert; `bandit.py` picks which
+of three deterrence tiers to fire, epsilon-greedily and with a hard
+escalation floor on repeat triggers; `experience.py` persists that learning
+in SQLite so it survives the suspend/resume cycle. `config.py` holds every
+tuning value the other four need - see their own module docstrings.
+
+One honest boundary on all of that: the bandit learns against an
+unvalidated proxy reward (quiet time since the last firing), not against
+any measured animal outcome, because nothing on this device observes one.
+`bandit.proxy_reward()` and docs/KNOWN_GAPS.md both say so at length.
 """
