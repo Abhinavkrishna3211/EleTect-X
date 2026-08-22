@@ -52,6 +52,9 @@ docs/design-reference/uploads/
 scripts/bench-logs/
 device/mpu/bench/camera_check/output/
 
+# --- MPU runtime state (bandit experience DB + deterrent-event captures) ---
+device/mpu/data/
+
 # --- OS / editor ---
 .DS_Store
 Thumbs.db

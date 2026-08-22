@@ -47,6 +47,7 @@ import time
 from arduino.app_utils import Bridge
 
 from bridge.rpc import AcousticClass
+from cognition.experience import ExperienceStore
 from perception.camera import Camera
 from perception.storage import save_burst
 from services import config, reflex_loop
@@ -94,6 +95,15 @@ Bridge.provide("debug_stream_raw_seismic_sample", debug_stream_raw_seismic_sampl
 # device, so the camera is never left held open between events.
 _camera = Camera()
 
+# One experience store per process, held open across events and across the
+# MPU's suspend/resume cycles. Constructed at module scope for the same
+# reason the camera is: ExperienceStore.__init__ does no I/O, so it neither
+# creates the database nor touches the filesystem until the first real
+# event. It is deliberately never closed here - the process runs until it is
+# killed, and every method commits, so there is no unflushed state a close()
+# would rescue.
+_experience = ExperienceStore()
+
 
 def _on_footfall_event(
     schema_version: int,
@@ -106,8 +116,9 @@ def _on_footfall_event(
     Thin wrapper: the real logic is reflex_loop.handle_footfall_event(),
     tested independently in tests/test_reflex_loop.py. This function exists
     only to bind the real Bridge.call-backed drive_horn/drive_led/pulse_ir,
-    the real Camera, and the real save_burst in as the injected
-    dependencies reflex_loop's signature requires.
+    the real Camera, the real save_burst, and the real SQLite-backed
+    experience store in as the injected dependencies reflex_loop's signature
+    requires.
     """
     reflex_loop.handle_footfall_event(
         schema_version,
@@ -123,6 +134,7 @@ def _on_footfall_event(
         pulse_ir=lambda sv, duration_ms: Bridge.call("pulse_ir", sv, duration_ms),
         camera=_camera,
         save_frames=save_burst,
+        experience=_experience,
     )
 
 

@@ -30,12 +30,21 @@ Two things this script does openly fabricate:
   tests/test_reflex_loop.py already uses.
 
 Always runs with safe_mode=True: this laptop has no horn/LED/IR to
-drive. The "would fire" lines below are reflex_loop's own
-ALERT_HORN_GAIN_PCT/ALERT_HORN_DURATION_MS/etc constants -- the same
-values a real alert would request on hardware. The actuator/camera fakes
-passed in raise if ever called, since SAFE_MODE should make that
-impossible; a raise here would mean SAFE_MODE itself broke, not a demo
-cosmetic issue.
+drive. The "would fire" lines below are the real DeterrenceAction the
+contextual bandit selected for that event -- the same request a real
+alert would put on the wire on hardware. The actuator/camera fakes passed
+in raise if ever called, since SAFE_MODE should make that impossible; a
+raise here would mean SAFE_MODE itself broke, not a demo cosmetic issue.
+
+The experience store is in-memory (cognition.experience.IN_MEMORY_PATH),
+so a replay never writes to the real device/mpu/data/experience.sqlite3
+and never contaminates learning state with synthetic events. That does
+mean each run starts cold, which is the honest thing to show anyway: the
+escalation visible across the twelve stomps comes from the habituation
+floor, which is deterministic, not from values learned in some earlier
+run the audience cannot see. The stomps arrive well inside
+HABITUATION_WINDOW_S of each other, so the ladder climbs exactly as it
+would for an animal that keeps coming back.
 """
 
 from __future__ import annotations
@@ -51,6 +60,7 @@ from pathlib import Path
 # same pattern as bench/camera_check/capture_check.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from cognition.experience import IN_MEMORY_PATH, ExperienceStore  # noqa: E402
 from cognition.fusion import Modality  # noqa: E402
 from services import config as services_config  # noqa: E402
 from services import reflex_loop  # noqa: E402
@@ -188,7 +198,8 @@ def _print_banner(style: _Style) -> None:
     print(rule)
     print("source:   docs/KNOWN_GAPS.md, multi-trial stomp validation, 2026-08-15")
     print("pipeline: services.reflex_loop.handle_footfall_event()")
-    print("          real fuse()/decide(), SAFE_MODE dry run")
+    print("          real fuse()/decide()/bandit select, SAFE_MODE dry run")
+    print("          experience store: in-memory (no learning state written)")
     print()
     print(QUIET_FLOOR_NOTE)
     print()
@@ -231,17 +242,28 @@ def _print_detected(
         f"  decide                    {verdict_color}{verdict}{style.reset}"
         f"  (threshold {outcome.decision.threshold:.2f})"
     )
-    if outcome.decision.alert:
+    if outcome.decision.alert and outcome.action is not None:
+        action = outcome.action
+        source = "exploring" if outcome.exploring else "greedy"
+        print(
+            f"  decide -> select          bandit tier {style.green}"
+            f"{int(action.tier)}{style.reset} of 3"
+            f"   (context {outcome.context}, {outcome.repeat_count} repeats in window,"
+            f" {source})"
+        )
         print("  would actuate (SAFE_MODE -- dry run, no hardware attached)")
         print(
-            f"    horn   gain={reflex_loop.ALERT_HORN_GAIN_PCT:.1f}%"
-            f"   duration={reflex_loop.ALERT_HORN_DURATION_MS}ms"
+            f"    horn   gain={action.horn_gain_pct:.1f}%"
+            f"   duration={action.horn_duration_ms}ms"
         )
         print(
-            f"    led    pattern={reflex_loop.ALERT_LED_PATTERN_ID}"
-            f"   duration={reflex_loop.ALERT_LED_DURATION_MS}ms"
+            f"    led    pattern={action.led_pattern_id}"
+            f"   duration={action.led_duration_ms}ms"
         )
-        print(f"    ir     duration={reflex_loop.ALERT_IR_DURATION_MS}ms")
+        if action.fire_ir:
+            print(f"    ir     duration={action.ir_duration_ms}ms")
+        else:
+            print("    ir     not fired at this tier")
     print()
 
 
@@ -299,6 +321,9 @@ def main() -> int:
     _print_banner(style)
     time.sleep(args.interval)
 
+    # In-memory, never the real path -- see module docstring.
+    experience = ExperienceStore(IN_MEMORY_PATH)
+
     detected_count = 0
     alert_count = 0
     for event in REPLAY_EVENTS:
@@ -319,6 +344,7 @@ def main() -> int:
             pulse_ir=_never_called("pulse_ir"),
             camera=_NoOpCamera(),
             save_frames=_never_called("save_frames"),
+            experience=experience,
             safe_mode=True,
         )
         if outcome.decision.alert:
@@ -327,6 +353,7 @@ def main() -> int:
         time.sleep(args.interval)
 
     _print_summary(style, alert_count, detected_count)
+    experience.close()
     return 0
 
 

@@ -1,11 +1,12 @@
-"""The real sense -> fuse -> decide -> actuate loop (CONTEXT.md 4).
+"""The real sense -> fuse -> decide -> select -> actuate loop (CONTEXT.md 4).
 
-This is the wiring, not a stub: cognition.fusion.fuse() and
-cognition.decision.decide() are both real, tested pure functions, and this
-module is the imperative shell around them (ENGINEERING_CONVENTIONS.md 2) -
-it owns logging and the real side effects (drive_horn/drive_led/pulse_ir
-Bridge.call()s, plus an injected camera opened for the duration of the
-deterrent sequence and a frame-storage callable). Every one of those is
+This is the wiring, not a stub: cognition.fusion.fuse(),
+cognition.decision.decide() and cognition.bandit's selection functions are
+all real, tested pure functions, and this module is the imperative shell
+around them (ENGINEERING_CONVENTIONS.md 2) - it owns logging and the real
+side effects (drive_horn/drive_led/pulse_ir Bridge.call()s, an injected
+camera opened for the duration of the deterrent sequence, a frame-storage
+callable, and an injected experience store). Every one of those is
 injected as a callable/Protocol rather than imported directly, so this
 module stays importable and testable on a dev laptop with no board or camera
 attached - the same discipline perception/camera.py uses for cv2
@@ -18,13 +19,35 @@ output).
 
 Alert-path event order (only when safe_mode is False and decide() returns
 alert=True): camera.open() -> camera.capture_burst() -> drive_horn() ->
-drive_led() -> pulse_ir() -> a short post-fire tail sleep ->
-camera.close() -> save_frames(). The camera opens before any actuator call
-(footage should start as close to trigger as possible) and only closes once
-the full deterrent sequence plus the tail has elapsed. A camera or storage
-failure is logged and never allowed to suppress or delay the actuator calls
-- deterrence is the safety-critical function here, footage is
-contest-critical but secondary. See docs/KNOWN_GAPS.md.
+drive_led() -> pulse_ir() (tier 2 and 3 only) -> a short post-fire tail
+sleep -> camera.close() -> save_frames(). The camera opens before any
+actuator call (footage should start as close to trigger as possible) and
+only closes once the full deterrent sequence plus the tail has elapsed. A
+camera or storage failure is logged and never allowed to suppress or delay
+the actuator calls - deterrence is the safety-critical function here,
+footage is contest-critical but secondary. See docs/KNOWN_GAPS.md.
+
+What fires is chosen per event rather than fixed. decide() remains the
+alert gate on the fused probability and is unchanged; once it says alert,
+cognition/bandit.py selects one of cognition/config.py's three deterrence
+tiers epsilon-greedily from action values persisted in the injected
+experience store, with a hard escalation floor driven by how many triggers
+this node has seen inside HABITUATION_WINDOW_S. That floor is the
+habituation-avoidance mechanism: an animal that comes straight back cannot
+receive the same response twice.
+
+Two ordering rules in that path are load-bearing rather than incidental:
+
+- Every footfall event is recorded as a trigger and settles any pending
+  attempt, **before** the alert gate. A repeated STA/LTA crossing is
+  evidence about habituation whether or not fusion cleared the threshold,
+  and an animal circling a node while staying just under it is exactly the
+  case the context should notice.
+- An attempt is recorded **only when the horn ack came back true**. SAFE_MODE
+  fires nothing, and the MCU refuses a request inside its own cooldown
+  (rule_gate_apply()'s allowed=false, which is what the ack carries) - in
+  neither case did a deterrence happen, so in neither case may the bandit
+  be credited for one.
 
 Two of the three fusion modalities are not wired in yet, by design, not
 oversight:
@@ -45,8 +68,9 @@ converting that into fusion's log-odds input via cognition.fusion.logit()
 is a direct, non-invented transformation - not a new detector this module
 had to build.
 
-SAFE_MODE (default on) is the dry-run gate: when true, an alert decision is
-logged but drive_horn is never called. Read once at import time from the
+SAFE_MODE (default on) is the dry-run gate: when true, an alert decision and
+the tier the bandit selected for it are logged, but drive_horn is never
+called and no attempt is ever recorded. Read once at import time from the
 ELETECT_SAFE_MODE environment variable, so flipping it for a live session is
 an explicit, visible operational step (`export ELETECT_SAFE_MODE=0`), never
 a silent code default change - this mirrors device/mcu/src/config.h's own
@@ -58,13 +82,23 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import time
 from dataclasses import dataclass
 from typing import Protocol
 
 from bridge.rpc import AcousticClass
 from cognition import config as cognition_config
+from cognition.bandit import (
+    BanditParams,
+    DeterrenceAction,
+    Tier,
+    escalation_floor,
+    habituation_context,
+    select_tier,
+)
 from cognition.decision import Decision, decide
+from cognition.experience import SettledAttempt
 from cognition.fusion import FusionResult, Modality, ModalityReading, fuse, logit
 from perception.camera import CameraError, Frame
 from perception.storage import CaptureEventTag
@@ -103,39 +137,30 @@ SAFE_MODE = os.environ.get("ELETECT_SAFE_MODE", "1") != "0"
 ALERT_PROBABILITY_THRESHOLD = 0.5
 
 # ---------------------------------------------------------------------------
-# Placeholder deterrence request - INVENTED, see docs/KNOWN_GAPS.md
+# Deterrence action selection
 # ---------------------------------------------------------------------------
 
-# Which actuator(s) to fire and at what gain/duration is the contextual
-# bandit's job once it exists (cognition/fusion.py module docstring); until
-# then this loop drives the horn only (the primary audible deterrent) and
-# requests the wire protocol's own maximum - 100.0 pct (schema.md's
-# documented 0-100 gain_pct range) and 65535 ms (duration_ms's uint16
-# ceiling) - rather than inventing a specific mid-range gain/duration
-# figure. device/mcu/src/rule_gate.cpp already clamps any out-of-bounds
-# request down to the MCU's real, separately-configured caps
-# (HORN_GAIN_MAX_PCT / HORN_BURST_MAX_MS, device/mcu/src/config.h)
-# regardless of what is asked for, and services/config.py's own docstring
-# is explicit that those real caps deliberately do not get duplicated on
-# the MPU side - so "ask for the protocol max, let the MCU clamp it" avoids
-# inventing a second, unreviewed limit rather than just moving the
-# invention somewhere else.
-ALERT_HORN_GAIN_PCT = 100.0
-ALERT_HORN_DURATION_MS = 65535
+# Which actuator(s) to fire and at what gain/duration is no longer decided
+# here: cognition/bandit.py picks one of cognition/config.py's three
+# DETERRENCE_TIERS per event, and this module only executes the choice. The
+# previous fixed request - protocol-max gain on horn, LED and IR on every
+# single alert - survives unchanged as tier 3, so nothing about the loudest
+# response has been weakened; what changed is that it is now reserved for
+# repeat triggers and for events the bandit has learned to prefer it on.
+#
+# The "ask for the protocol max, let the MCU clamp it" policy that comment
+# block described still holds for every tier: device/mcu/src/rule_gate.cpp
+# remains the sole authority on real limits, nothing here duplicates them,
+# and cognition/config.py's ladder comments carry the full rationale for
+# how the three tiers are separated (and, honestly, for how little of that
+# separation is physically audible today).
 
-# LED/IR follow the exact same "ask for the protocol max, let the MCU
-# clamp" policy as the horn above - device/mcu/src/bridge_handlers.cpp
-# already resolves gain_pct to LED_GAIN_MAX_PCT/IR_GAIN_MAX_PCT MCU-side
-# (schema.md's drive_led/pulse_ir rows carry no gain_pct field at all), so
-# there is nothing to request here beyond duration_ms. pattern_id 0 selects
-# led_channel_for_pattern_id()'s default (white) channel -
-# device/mcu/src/bridge_handlers.h documents that mapping itself as an
-# INVENTED placeholder pending real pattern design; this loop firing
-# pattern_id 0 on every alert is the same "least presumptuous placeholder"
-# choice, not a resolved deterrence-pattern decision. See docs/KNOWN_GAPS.md.
-ALERT_LED_PATTERN_ID = 0
-ALERT_LED_DURATION_MS = 65535
-ALERT_IR_DURATION_MS = 65535
+# The bandit's exploration draw. Module-level rather than per-call so a
+# process does not reseed on every event, and injectable so a test gets an
+# exact, reproducible selection rather than a statistical one - the same
+# reason cognition/bandit.select_tier() takes the RNG at all instead of
+# reaching for the `random` module's global singleton.
+_DEFAULT_RNG = random.Random()
 
 # How long to keep the camera open (and capturing) after the actuator
 # sequence completes before closing it - the "post-fire tail" the footage
@@ -198,6 +223,35 @@ class SaveFramesFn(Protocol):
         ...
 
 
+class ExperienceStoreProtocol(Protocol):
+    """The subset of cognition.experience.ExperienceStore this loop calls.
+
+    Structural, not the concrete class, for the same reason CameraProtocol
+    is: a test (or bench/demo_replay.py) can substitute an in-memory or
+    recording store without this module ever importing sqlite3. close() is
+    deliberately absent - the store outlives any single event, so closing it
+    is the process owner's job (device/mpu/main.py), never this function's.
+    """
+
+    def record_trigger(self, event_ts_s: float, window_s: float) -> int:
+        """Log a trigger; returns the in-window repeat count before it."""
+        ...
+
+    def settle_pending(
+        self, now_ts_s: float, params: BanditParams
+    ) -> SettledAttempt | None:
+        """Score the oldest unsettled attempt against the quiet since it fired."""
+        ...
+
+    def action_values(self) -> dict[tuple[int, Tier], float]:
+        """Return every learned value, keyed by (context, tier)."""
+        ...
+
+    def record_attempt(self, event_ts_s: float, context: int, tier: Tier) -> None:
+        """Open an unsettled attempt for a deterrence that actually fired."""
+        ...
+
+
 @dataclass(frozen=True)
 class FootfallOutcome:
     """What one handle_footfall_event() call decided and did.
@@ -209,12 +263,27 @@ class FootfallOutcome:
     Attributes:
         fusion: The FusionResult fuse() produced for this event.
         decision: The Decision decide() produced for this event.
+        repeat_count: Triggers this node saw within HABITUATION_WINDOW_S
+            before this one. Recorded for every event, alert or not.
+        context: The bandit context repeat_count bucketed into, or None if
+            no alert fired (no selection happened, so no context applied).
+        action: The DeterrenceAction selected for this event, or None if no
+            alert fired. Populated even under SAFE_MODE - the selection is
+            real, only the firing is suppressed.
+        exploring: True if the selected tier came from epsilon-greedy's
+            exploration branch rather than from the learned values. None
+            when no selection happened.
+        settled: The SettledAttempt this event's arrival scored, or None if
+            nothing was pending. Note this scores the *previous* attempt,
+            not this one - the reward is quiet time, which cannot be known
+            until the quiet ends.
         horn_ack: drive_horn's returned ack, or None if it was never called
             (no alert, or SAFE_MODE suppressed the call).
         led_ack: drive_led's returned ack, or None under the same conditions
             as horn_ack.
         ir_ack: pulse_ir's returned ack, or None under the same conditions
-            as horn_ack.
+            as horn_ack - and also None on tier 1, which does not fire IR at
+            all.
         capture_frame_count: Number of frames actually captured for this
             event (0 if no alert, SAFE_MODE suppressed it, or the camera
             failed - see module docstring on camera failures never blocking
@@ -228,6 +297,11 @@ class FootfallOutcome:
 
     fusion: FusionResult
     decision: Decision
+    repeat_count: int
+    context: int | None
+    action: DeterrenceAction | None
+    exploring: bool | None
+    settled: SettledAttempt | None
     horn_ack: bool | None
     led_ack: bool | None
     ir_ack: bool | None
@@ -341,9 +415,12 @@ def handle_footfall_event(
     pulse_ir: PulseIrFn,
     camera: CameraProtocol,
     save_frames: SaveFramesFn,
+    experience: ExperienceStoreProtocol,
     safe_mode: bool = SAFE_MODE,
     threshold: float = ALERT_PROBABILITY_THRESHOLD,
     capture_post_fire_tail_s: float = CAPTURE_POST_FIRE_TAIL_S,
+    bandit_params: BanditParams = cognition_config.DEFAULT_BANDIT_PARAMS,
+    rng: random.Random = _DEFAULT_RNG,
 ) -> FootfallOutcome:
     """Sense -> fuse -> decide -> actuate for one report_footfall_event notify.
 
@@ -358,12 +435,19 @@ def handle_footfall_event(
     true or no alert fires.
 
     On a real alert (safe_mode False), the event order is: camera.open() ->
-    camera.capture_burst() -> drive_horn() -> drive_led() -> pulse_ir() ->
-    sleep(CAPTURE_POST_FIRE_TAIL_S) -> camera.close() -> save_frames(). The
-    camera opens before any actuator call and only closes once the full
-    deterrent sequence plus the tail has elapsed (module docstring). A
-    camera or storage failure at any point is logged and never allowed to
-    suppress or delay the actuator calls that follow it.
+    camera.capture_burst() -> drive_horn() -> drive_led() -> pulse_ir()
+    (skipped entirely on tier 1) -> sleep(CAPTURE_POST_FIRE_TAIL_S) ->
+    camera.close() -> save_frames(). The camera opens before any actuator
+    call and only closes once the full deterrent sequence plus the tail has
+    elapsed (module docstring). A camera or storage failure at any point is
+    logged and never allowed to suppress or delay the actuator calls that
+    follow it.
+
+    Which tier fires is the bandit's choice, made after decide() and before
+    any actuator call. The trigger is recorded and any pending attempt
+    settled before the alert gate, so a sub-threshold event still counts
+    toward habituation - see the module docstring for why both of those
+    orderings matter.
 
     Args:
         schema_version: As received from the MCU; logged if it does not
@@ -382,22 +466,34 @@ def handle_footfall_event(
         save_frames: Callable matching perception.storage.save_burst's
             signature. Called once per alert event with whatever frames
             were captured (skipped entirely if none were).
-            All five above are injected so this function needs no board or
-            camera attached to test - device/mpu/main.py wires the real
-            Bridge.calls, Camera, and save_burst in; tests pass recording
-            fakes.
-        safe_mode: When true (the default, SAFE_MODE), an alert decision is
-            logged but none of drive_horn/drive_led/pulse_ir/camera/
-            save_frames are ever called.
+        experience: Object matching ExperienceStoreProtocol. Carries the
+            bandit's learned values and trigger history across events and
+            across restarts; the only cross-event state this loop has.
+            All six above are injected so this function needs no board,
+            camera or database attached to test - device/mpu/main.py wires
+            the real Bridge.calls, Camera, save_burst and ExperienceStore
+            in; tests pass recording fakes.
+        safe_mode: When true (the default, SAFE_MODE), the decision and the
+            selected tier are logged but none of drive_horn/drive_led/
+            pulse_ir/camera/save_frames are ever called, and no attempt is
+            recorded. The trigger itself is still recorded - a dry run
+            observes real events, it just does not respond to them.
         threshold: Passed to cognition.decision.decide(). Defaults to
             ALERT_PROBABILITY_THRESHOLD (see that constant's own comment).
-        capture_post_fire_tail_s: Seconds to wait after pulse_ir() before
-            closing the camera. Defaults to CAPTURE_POST_FIRE_TAIL_S;
-            overridable so tests don't have to sleep for real.
+        capture_post_fire_tail_s: Seconds to wait after the actuator
+            sequence before closing the camera. Defaults to
+            CAPTURE_POST_FIRE_TAIL_S; overridable so tests don't have to
+            sleep for real.
+        bandit_params: Hyperparameters for selection and reward. Defaults to
+            cognition.config.DEFAULT_BANDIT_PARAMS.
+        rng: Source of the epsilon-greedy exploration draw. Defaults to a
+            module-level random.Random; seed one and pass it for an exact,
+            reproducible selection under test.
 
     Returns:
         A FootfallOutcome carrying the fusion result, the decision, the
-        three actuator acks, and this event's capture outcome.
+        selected action and its context, the three actuator acks, and this
+        event's capture outcome.
     """
     if schema_version != services_config.SCHEMA_VERSION:
         logger.warning(
@@ -415,22 +511,55 @@ def handle_footfall_event(
     fusion_result = fuse(readings, cognition_config.DEFAULT_FUSION_PARAMS)
     decision = decide(fusion_result, threshold)
 
+    # One wall-clock reading for the whole event, taken before any of the
+    # store calls below. Wall clock rather than monotonic because it has to
+    # stay comparable across the MPU suspend/resume cycles ADR 0008
+    # describes, and a single reading rather than several so the trigger,
+    # the settlement and any recorded attempt all agree on when this event
+    # happened - the reward is a difference between two of these timestamps,
+    # so drift between them would be drift in the reward itself.
+    event_wall_s = time.time()
+    repeat_count = experience.record_trigger(event_wall_s, bandit_params.habituation_window_s)
+    settled = experience.settle_pending(event_wall_s, bandit_params)
+
     logger.info(
         "footfall event: mcu_probability=%.3f sta_lta_ratio=%.3f fused_P=%.3f "
-        "alert=%s used=%s dropped=%s feature_vector=%s",
+        "alert=%s used=%s dropped=%s repeats_in_window=%d feature_vector=%s",
         probability,
         sta_lta_ratio,
         fusion_result.probability,
         decision.alert,
         [m.value for m in fusion_result.used],
         [m.value for m in fusion_result.dropped],
+        repeat_count,
         feature_vector,
     )
+    if settled is not None:
+        logger.info(
+            "settled previous attempt: context=%d tier=%d quiet=%.1fs "
+            "proxy_reward=%.3f value=%.3f visits=%d (proxy is unvalidated - "
+            "see cognition/bandit.proxy_reward)",
+            settled.context,
+            int(settled.tier),
+            settled.gap_s,
+            settled.reward,
+            settled.value,
+            settled.visits,
+        )
 
-    def _no_actuation_outcome() -> FootfallOutcome:
+    def _no_actuation_outcome(
+        context: int | None = None,
+        action: DeterrenceAction | None = None,
+        exploring: bool | None = None,
+    ) -> FootfallOutcome:
         return FootfallOutcome(
             fusion=fusion_result,
             decision=decision,
+            repeat_count=repeat_count,
+            context=context,
+            action=action,
+            exploring=exploring,
+            settled=settled,
             horn_ack=None,
             led_ack=None,
             ir_ack=None,
@@ -441,34 +570,70 @@ def handle_footfall_event(
     if not decision.alert:
         return _no_actuation_outcome()
 
+    context = habituation_context(repeat_count, cognition_config.HABITUATION_BUCKET_COUNT)
+    floor = escalation_floor(context, bandit_params)
+    tier, exploring = select_tier(
+        context, experience.action_values(), bandit_params, rng, floor
+    )
+    action = cognition_config.DETERRENCE_TIERS[tier]
+    logger.info(
+        "deterrence tier %d selected: context=%d floor=%d exploring=%s "
+        "gain_pct=%.1f fire_ir=%s",
+        int(tier),
+        context,
+        int(floor),
+        exploring,
+        action.horn_gain_pct,
+        action.fire_ir,
+    )
+
     if safe_mode:
         logger.info(
             "[SAFE_MODE] would open camera, call drive_horn(schema_version=%d, "
-            "gain_pct=%.1f, duration_ms=%d), drive_led(pattern_id=%d, duration_ms=%d), "
-            "pulse_ir(duration_ms=%d) - not calling (dry run)",
+            "gain_pct=%.1f, duration_ms=%d), drive_led(pattern_id=%d, duration_ms=%d)"
+            "%s - not calling (dry run), and recording no attempt",
             schema_version,
-            ALERT_HORN_GAIN_PCT,
-            ALERT_HORN_DURATION_MS,
-            ALERT_LED_PATTERN_ID,
-            ALERT_LED_DURATION_MS,
-            ALERT_IR_DURATION_MS,
+            action.horn_gain_pct,
+            action.horn_duration_ms,
+            action.led_pattern_id,
+            action.led_duration_ms,
+            f", pulse_ir(duration_ms={action.ir_duration_ms})" if action.fire_ir else "",
         )
-        return _no_actuation_outcome()
+        return _no_actuation_outcome(context=context, action=action, exploring=exploring)
 
     trigger_monotonic = time.monotonic()
-    trigger_wall_s = time.time()
+    trigger_wall_s = event_wall_s
 
     camera_opened = _open_camera(camera)
     frames = _capture_burst(camera, trigger_monotonic) if camera_opened else []
 
-    horn_ack = drive_horn(schema_version, ALERT_HORN_GAIN_PCT, ALERT_HORN_DURATION_MS)
+    horn_ack = drive_horn(schema_version, action.horn_gain_pct, action.horn_duration_ms)
     logger.info("drive_horn ack=%s", horn_ack)
 
-    led_ack = drive_led(schema_version, ALERT_LED_PATTERN_ID, ALERT_LED_DURATION_MS)
+    led_ack = drive_led(schema_version, action.led_pattern_id, action.led_duration_ms)
     logger.info("drive_led ack=%s", led_ack)
 
-    ir_ack = pulse_ir(schema_version, ALERT_IR_DURATION_MS)
-    logger.info("pulse_ir ack=%s", ir_ack)
+    # Tier 1 skips pulse_ir entirely rather than requesting a zero duration:
+    # a zero-length request would still consume the IR MOSFET's
+    # IR_MIN_INTERVAL_MS duty budget MCU-side, which is one of the two
+    # reasons the low tier leaves IR alone (cognition/config.py).
+    ir_ack: bool | None = None
+    if action.fire_ir:
+        ir_ack = pulse_ir(schema_version, action.ir_duration_ms)
+        logger.info("pulse_ir ack=%s", ir_ack)
+
+    # The bandit learns only from deterrence that actually happened. A false
+    # ack means rule_gate_apply() refused the request inside HORN_COOLDOWN_MS
+    # - nothing fired, so crediting this tier for whatever quiet follows
+    # would attribute the animal's behaviour to a burst that never occurred.
+    if horn_ack:
+        experience.record_attempt(trigger_wall_s, context, tier)
+    else:
+        logger.info(
+            "drive_horn refused (MCU cooldown) - recording no attempt, tier %d "
+            "is not credited for this event",
+            int(tier),
+        )
 
     if camera_opened:
         time.sleep(capture_post_fire_tail_s)
@@ -489,6 +654,11 @@ def handle_footfall_event(
     return FootfallOutcome(
         fusion=fusion_result,
         decision=decision,
+        repeat_count=repeat_count,
+        context=context,
+        action=action,
+        exploring=exploring,
+        settled=settled,
         horn_ack=horn_ack,
         led_ack=led_ack,
         ir_ack=ir_ack,
