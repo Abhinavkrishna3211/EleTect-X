@@ -556,6 +556,7 @@ def main() -> int:
                 class_label,
                 ILLUSTRATIVE_ACOUSTIC_CONFIDENCE,
                 ILLUSTRATIVE_CAPTURE_REF,
+                send_lora_alert=_never_called("send_lora_alert"),
                 safe_mode=True,
             )
         _print_acoustic(class_label, outcome, first_fused_p, log_lines, style)

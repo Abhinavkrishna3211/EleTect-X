@@ -26,6 +26,7 @@ actuator commands (the MPU needs to know the action actually executed before dec
 | `drive_led` | `schema_version, pattern_id: uint8, duration_ms: uint16` | `ack: bool` | Same cooldown/cap discipline as `drive_horn`, independent counters. No `gain_pct` wire field — always driven at `config.h`'s `LED_GAIN_MAX_PCT` internally (see "Actuator gain defaults" below). |
 | `pulse_ir` | `schema_version, duration_ms: uint16` | `ack: bool` | Gated by the IR MOSFET's own thermal/duty limits (`config.h`); over-duration requests clamp, and the clamp is reported in `ack`, never silently dropped. No `gain_pct` wire field — always driven at `config.h`'s `IR_GAIN_MAX_PCT` internally (see "Actuator gain defaults" below). |
 | `get_system_state` | `schema_version` | `battery_v: float, geophone_ok: bool, acoustic_ok: bool, uptime_s: uint32` | Never blocks past one cached-struct read (same struct `report_system_status` pushes periodically) — not a fresh sensor poll. |
+| `send_lora_alert` | `schema_version, confidence: float, capture_ref: uint32` | `ack: bool` | No real transport exists yet — the Grove E5 is not answering AT probes (`docs/KNOWN_GAPS.md`, 18 Aug entry), so the MCU-side handler only logs the request and always returns `ack=false`. `ack` means "queued/logged on the MCU," never "delivered over the air," until the module joins and a real uplink is wired in. Not idempotent, same as `drive_horn` — never retried on timeout. |
 
 ### Actuator gain defaults
 

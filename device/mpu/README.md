@@ -40,7 +40,7 @@ below is a separate App and is **not** covered by this script — see its own pr
 ```text
 bridge/
   schema.md      Bridge contract — source of truth for every function below
-  rpc.py         signatures + docstrings for all 7 schema.md functions, no Bridge wiring yet
+  rpc.py         signatures + docstrings for all 8 schema.md functions, no Bridge wiring yet
 perception/
   camera.py      IMX462 V4L2 capture wrapper — open/capture/burst/release, no trigger/IR logic
   (vision INT8 detector itself: future build call)
@@ -64,7 +64,7 @@ bench/demo_replay.py host-only replay of both reflex-loop entry points, see belo
 `Bridge.provide()` — `DEVICE_DEVELOPMENT_WORKFLOW.md` §3 documents a live, reproducible bug where
 registering an extra `Bridge.provide()` function broke every previously-working function on the
 same sketch. The practical discipline that earns: register one function at a time on real
-hardware, testing between each addition, not a batch of seven from a host build with no board
+hardware, testing between each addition, not a batch of eight from a host build with no board
 attached. The MCU side observes the same caution (`device/mcu/src/main.cpp`).
 
 ## Ping bench — hello-world Bridge round trip (MCU → MPU direction)

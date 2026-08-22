@@ -97,6 +97,20 @@ class _FakePulseIr:
         return self.ack
 
 
+class _FakeSendLoraAlert:
+    """Recording stand-in for bridge.rpc.send_lora_alert, injected per call."""
+
+    def __init__(self, ack: bool = False, call_log: list | None = None):
+        self.ack = ack
+        self.calls = []
+        self.call_log = call_log if call_log is not None else []
+
+    def __call__(self, schema_version, confidence, capture_ref):
+        self.calls.append((schema_version, confidence, capture_ref))
+        self.call_log.append("send_lora_alert")
+        return self.ack
+
+
 class _FakeCamera:
     """Recording stand-in for perception.camera.Camera, injected per event.
 
@@ -743,10 +757,33 @@ def test_exploration_is_reported_when_it_happens():
 # ---------------------------------------------------------------------------
 
 
+def _route(
+    schema_version=1,
+    class_label=AcousticClass.CHAINSAW,
+    confidence=0.5,
+    capture_ref=0,
+    *,
+    safe_mode=True,
+    call_log=None,
+    send_lora_alert=None,
+):
+    log = call_log if call_log is not None else []
+    fake = send_lora_alert if send_lora_alert is not None else _FakeSendLoraAlert(call_log=log)
+    outcome = reflex_loop.handle_acoustic_event(
+        schema_version,
+        class_label,
+        confidence,
+        capture_ref,
+        safe_mode=safe_mode,
+        send_lora_alert=fake,
+    )
+    return outcome, fake, log
+
+
 def test_acoustic_event_is_logged_and_returns_its_outcome(caplog):
     """Every acoustic event is logged and reports which route ADR 0007 5 sent it down."""
     with caplog.at_level("INFO"):
-        outcome = reflex_loop.handle_acoustic_event(1, AcousticClass.GUNSHOT, 0.87, 42)
+        outcome, _, _ = _route(class_label=AcousticClass.GUNSHOT, confidence=0.87, capture_ref=42)
 
     assert outcome.class_label is AcousticClass.GUNSHOT
     assert outcome.direct_alert is True
@@ -764,10 +801,12 @@ def test_gunshot_never_reaches_fusion_and_logs_a_direct_alert(caplog):
     below), so this assertion distinguishes the two.
     """
     with caplog.at_level("INFO"):
-        outcome = reflex_loop.handle_acoustic_event(1, AcousticClass.GUNSHOT, 0.93, 7)
+        outcome, fake, _ = _route(class_label=AcousticClass.GUNSHOT, confidence=0.93, capture_ref=7)
 
     assert outcome.fusion is None
     assert outcome.direct_alert is True
+    assert outcome.lora_ack is None
+    assert fake.calls == []
 
     messages = [record.message for record in caplog.records]
     assert any(
@@ -780,27 +819,55 @@ def test_gunshot_never_reaches_fusion_and_logs_a_direct_alert(caplog):
     assert not any("fused_P" in m for m in messages)
 
 
-def test_gunshot_direct_alert_is_logged_even_outside_safe_mode(caplog):
-    """The absence of a LoRa transport is not a run mode.
+def test_gunshot_calls_send_lora_alert_outside_safe_mode(caplog):
+    """Outside safe_mode, the gunshot branch calls the injected transport for real.
 
-    ELETECT_SAFE_MODE=0 does not conjure a radio that is not joining, so the
-    would-send line stands on both settings until comms/ exists.
+    ELETECT_SAFE_MODE=0 does not conjure a radio that is not joining - the
+    ack send_lora_alert returns still only means "queued/logged on the MCU",
+    never "delivered" - but the call itself is real, not logged-and-skipped.
     """
     with caplog.at_level("INFO"):
-        outcome = reflex_loop.handle_acoustic_event(
-            1, AcousticClass.GUNSHOT, 0.93, 7, safe_mode=False
+        outcome, fake, _ = _route(
+            class_label=AcousticClass.GUNSHOT,
+            confidence=0.93,
+            capture_ref=7,
+            safe_mode=False,
+            send_lora_alert=_FakeSendLoraAlert(ack=True),
         )
 
     assert outcome.fusion is None
     assert outcome.direct_alert is True
-    assert any("would send direct gunshot alert" in r.message for r in caplog.records)
+    assert outcome.lora_ack is True
+    assert fake.calls == [(1, 0.93, 7)]
+
+    messages = [record.message for record in caplog.records]
+    assert any("send_lora_alert ack=True" in m and "confidence=0.930" in m for m in messages)
+
+
+@pytest.mark.parametrize(
+    "class_label",
+    [
+        AcousticClass.CHAINSAW,
+        AcousticClass.VEHICLE,
+        AcousticClass.ANIMAL_CALL,
+        AcousticClass.AMBIENT,
+    ],
+)
+def test_send_lora_alert_is_never_called_for_non_gunshot_classes(class_label):
+    """Only a gunshot classification may touch send_lora_alert, safe_mode or not."""
+    outcome, fake, _ = _route(
+        class_label=class_label, confidence=0.8, capture_ref=9, safe_mode=False
+    )
+
+    assert outcome.direct_alert is False
+    assert fake.calls == []
 
 
 def test_chainsaw_feeds_fusion_as_the_acoustic_modality():
     """A chainsaw is elephant-presence evidence and fuses at WEIGHT_ACOUSTIC."""
     expected_log_odds, expected_p = _expected_acoustic_fusion(0.8)
 
-    outcome = reflex_loop.handle_acoustic_event(1, AcousticClass.CHAINSAW, 0.8, 3)
+    outcome, _, _ = _route(class_label=AcousticClass.CHAINSAW, confidence=0.8, capture_ref=3)
 
     assert outcome.direct_alert is False
     assert outcome.fusion is not None
@@ -831,7 +898,7 @@ def test_the_three_fusing_classes_share_one_acoustic_modality(class_label, confi
     """
     expected_log_odds, expected_p = _expected_acoustic_fusion(confidence)
 
-    outcome = reflex_loop.handle_acoustic_event(1, class_label, confidence, 11)
+    outcome, _, _ = _route(class_label=class_label, confidence=confidence, capture_ref=11)
 
     assert outcome.class_label is class_label
     assert outcome.direct_alert is False
@@ -848,7 +915,7 @@ def test_ambient_is_fused_as_unavailable():
     excluded, not scored down - so the fused result must land exactly on the
     prior, with no acoustic contribution, even at a high confidence.
     """
-    outcome = reflex_loop.handle_acoustic_event(1, AcousticClass.AMBIENT, 0.99, 5)
+    outcome, _, _ = _route(class_label=AcousticClass.AMBIENT, confidence=0.99, capture_ref=5)
 
     assert outcome.direct_alert is False
     assert outcome.fusion is not None
@@ -870,8 +937,8 @@ def test_acoustic_confidence_at_exactly_zero_or_one_does_not_crash():
     _confidence_log_odds(): the wire field is a plain float with no
     protocol-level bound either way.
     """
-    outcome_zero = reflex_loop.handle_acoustic_event(1, AcousticClass.VEHICLE, 0.0, 1)
-    outcome_one = reflex_loop.handle_acoustic_event(1, AcousticClass.VEHICLE, 1.0, 2)
+    outcome_zero, _, _ = _route(class_label=AcousticClass.VEHICLE, confidence=0.0, capture_ref=1)
+    outcome_one, _, _ = _route(class_label=AcousticClass.VEHICLE, confidence=1.0, capture_ref=2)
 
     assert math.isfinite(outcome_zero.fusion.log_odds)
     assert math.isfinite(outcome_one.fusion.log_odds)
@@ -881,7 +948,9 @@ def test_acoustic_confidence_at_exactly_zero_or_one_does_not_crash():
 def test_acoustic_schema_version_mismatch_is_logged_not_raised(caplog):
     """A mismatched schema_version is a warning, never an exception - and still routes."""
     with caplog.at_level("WARNING"):
-        outcome = reflex_loop.handle_acoustic_event(99, AcousticClass.CHAINSAW, 0.8, 4)
+        outcome, _, _ = _route(
+            schema_version=99, class_label=AcousticClass.CHAINSAW, confidence=0.8, capture_ref=4
+        )
 
     assert outcome.fusion is not None
     assert any(
