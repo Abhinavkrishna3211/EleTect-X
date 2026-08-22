@@ -10,8 +10,8 @@ Two things this file deliberately does NOT hold:
   on-MCU (device/mcu/include/config.h) and the MPU only ever sees the
   clamped ack, never a raw limit to duplicate here
   (device/mpu/bridge/schema.md).
-- Fusion weights, bandit hyperparameters, and risk thresholds. Those belong
-  to cognition/ once that module lands, not to this bridge-facing config.
+- Fusion weights, bandit hyperparameters, and risk thresholds. Those live in
+  cognition/config.py, not in this bridge-facing config.
 
 Camera device path, resolution, and pixel format DO belong here even though
 they're perception/-facing, not bridge-facing - they're device-configuration
@@ -73,8 +73,11 @@ MPU_WAKE_HOLD_S = 30.0
 _MODULE_DIR = Path(__file__).resolve().parent.parent
 
 # SQLite experience store backing the contextual bandit's never-repeat /
-# stop-on-retreat learning (CONTEXT.md 4). Created by cognition/ once that
-# module lands; only the path is fixed here.
+# stop-on-retreat learning (CONTEXT.md 4). Opened lazily by
+# cognition/experience.py, which creates DATA_DIR on first write; only the
+# path is fixed here. Tests and bench/demo_replay.py inject their own path
+# (a tmp_path, or cognition.experience.IN_MEMORY_PATH) so neither ever
+# writes real learning state.
 DATA_DIR = _MODULE_DIR / "data"
 EXPERIENCE_DB_PATH = DATA_DIR / "experience.sqlite3"
 
