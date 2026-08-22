@@ -205,7 +205,10 @@ criteria — see each entry's status.
   open, intentionally deferred to a hardware session.
 - **Edge Impulse projects (footfall, acoustic, vision) are created manually via Studio's own UI; no
   project IDs are recorded in-repo.** Not part of this build call's scope. Low severity. Status:
-  open, tracked for a future session.
+  **closed for seismic** (22 Aug) — the seismic project is **1094084** (`EleTect-X-Seismic`),
+  recorded in `ml/seismic/README.md` along with its dataset, impulse configuration and result. ID
+  only: the API key is supplied through `EI_API_KEY` at run time and is not in the repo (`.env*` is
+  already gitignored). Still open for acoustic and vision — neither project exists yet.
 
 ## Build-call 3 (`device/mpu/perception` vision capture)
 
@@ -426,8 +429,10 @@ criteria — see each entry's status.
 - **`report_footfall_event`'s `probability` and `feature_vector` are an honest placeholder, not the
   on-MCU TinyML model `device/mpu/services/reflex_loop.py`'s module docstring assumes exists
   (`config.h`'s `FOOTFALL_PROBABILITY_SATURATION_C`, `state_machine.cpp`/`footfall_features.cpp`,
-  2026-08-14).** `ml/seismic/` is empty — only STA/LTA exists on the MCU today, so there is no trained
-  model to produce a real `probability` or a real 8-feature `feature_vector` behind it. Rather than
+  2026-08-14).** `ml/seismic/` held nothing but a `.gitkeep` when this was written — only STA/LTA
+  exists on the MCU today, so there is no trained model to produce a real `probability` or a real
+  8-feature `feature_vector` behind it. (As of 22 Aug a first trained model exists off-device but
+  changes nothing on the MCU — see the entry below.) Rather than
   invent an unrelated number, `footfall_features.cpp` derives `probability` from `peak_ratio` via a
   saturating function anchored on the two real bench data points this project has (the quiet-floor
   ceiling ratio 1.13 and the real stomp ratio 4.60, both from the bench stomp-test entry above).
@@ -445,9 +450,33 @@ criteria — see each entry's status.
   every `report_footfall_event` the field trial produces carries this placeholder, not a real model
   confidence — any fusion/decision output downstream of it inherits the same caveat. Confirmed working
   end to end on real hardware, 2026-08-14 (see the log capture above) — `mcu_probability=0.865` for a
-  real `sta_lta_ratio=4.040` tap, consistent with this formula. Status: open, pending `ml/seismic`'s
-  not-yet-started TinyML model; the saturating-function shape and the eight chosen features are this
+  real `sta_lta_ratio=4.040` tap, consistent with this formula. Status: open, pending a *deployed*
+  `ml/seismic` TinyML model; the saturating-function shape and the eight chosen features are this
   session's engineering judgement, not a validated feature design.
+- **A first seismic classifier is trained, but on 12 events, and it is not deployed.** (22 Aug)
+  Edge Impulse project **1094084**; full record, including every caveat below in longer form, in
+  `ml/seismic/README.md`. The 12 real 512-sample bench windows from the 14/15 Aug stomp sessions are
+  committed as `ml/seismic/bench_windows_20260814_15.json` — `scripts/bench-logs/` is gitignored, so
+  without that artifact the dataset behind the number would be unreproducible from a fresh clone;
+  `scripts/edge_impulse_upload_seismic.py` now falls back to it and was verified to produce
+  byte-identical samples either way. Each event splits into a real 512 ms pre-trigger `quiet`
+  segment and the real 256 ms `footfall` transient (every logged trigger has `idx=511`, so the two
+  never overlap), giving 24 samples split by event: 9 events training, 3 events testing. Impulse:
+  256 ms/256 ms time-series windows at the declared 250 Hz, spectral analysis (power edges retuned
+  to 5/10/20/40/80 Hz for the SM-24's 10 Hz natural frequency; `scale-axes = 1000` to move volts to
+  millivolts), Keras classification. **Held-out result: 9/9 test windows correct, 100%, 0
+  uncertain.** What keeps this open, and what must travel with that number anywhere it is quoted:
+  (a) n=12 events, a 3-event/6-sample/9-window test set — one wrong window would read as 89%;
+  (b) the `quiet` and `footfall` classes come from the *same* 12 recordings, so they are not
+  independently sampled; (c) one person, one geophone, one bench, no elephants and no field
+  conditions; (d) the classes are trivially separable at this scale — quiet RMS averages 1.34e-4 V
+  against footfall's 2.93e-3 V with zero overlap, so a single RMS threshold would score the same,
+  and the model should not be presented as doing anything subtle; (e) 250 Hz is the declared rate,
+  while 226.98 Hz was measured on a lean field-flag build (entry above), which scales the DSP
+  block's frequency axis; (f) **nothing on the MCU uses this** — it does not replace
+  `footfall_features.cpp`'s placeholder probability, and no deployment path has been built. Medium
+  severity: it is real evidence that the seismic channel carries a learnable signal, and it is not
+  yet evidence of field performance. Status: open.
 - **The horn-only "request the wire protocol's max, let the MCU clamp" deterrence policy
   (`services/reflex_loop.py`'s `ALERT_HORN_GAIN_PCT=100.0`/`ALERT_HORN_DURATION_MS=65535`) is an
   invented placeholder standing in for the contextual bandit that is supposed to pick which

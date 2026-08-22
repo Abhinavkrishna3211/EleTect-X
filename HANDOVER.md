@@ -1,4 +1,4 @@
-# EleTect X — Handover (last updated 22 Aug 2026 — live hardware session, bare board only, no actuators wired: clean field-build flash confirmed (silent console is correct/expected — flagged as a real gap below), fire-test harness fully re-verified live (all four commands + cooldown refusals), `FIRE_TEST_HARNESS` confirmed back to `0` and inert; App Lab GUI was unavailable this session — board driven entirely over SSH + `arduino-app-cli` + the board's own socat bridge, now confirmed bidirectional (`docs/eletect-x-applab-notes.md`); 20 Aug entries below — MPPT solar controller dropped for a manually-set XL4015 buck (ADR 0012, `docs(decisions)` 04d1398 + `docs(hardware)` c0ae7db), `state_machine.cpp` console prints gated off the shared LoRa wire (`fix(mcu)` b4087d1), login-page demo-account doc-drift closed with a regression test (`test(web)` 42ced90), `notify-officer-request`'s fan-out extracted and unit-tested to match `send-alert` (`test(backend)` a15ea23); 18 Aug entries below — LED/IR fire + deterrent-event footage capture wired into the MPU reflex loop; 17 Aug entries — camera path closed out on real hardware: `CAMERA_DEVICE` fixed to a udev by-id path and proven stable across a full reboot and a physical unplug/replug, `python3-opencv` installed, `capture_check.py` passing end-to-end, `Camera.open()` now retries with backoff; 15 Aug entries — multi-trial stomp validation closed on real hardware; fire-test harness software path verified on real hardware, physical actuators not yet wired — still current)
+# EleTect X — Handover (last updated 22 Aug 2026 — software session: ADR 0007 5's acoustic fusion/direct-alert routing split now implemented and host-tested in `device/mpu/services/reflex_loop.py` (`feat(mpu)` 2183cf6), and a first seismic classifier trained on the real 14/15 Aug bench captures (Edge Impulse `1094084`, 9/9 held-out test windows, undeployed — read `ml/seismic/README.md`'s caveats before quoting that number); earlier 22 Aug live hardware session, bare board only, no actuators wired: clean field-build flash confirmed (silent console is correct/expected — flagged as a real gap below), fire-test harness fully re-verified live (all four commands + cooldown refusals), `FIRE_TEST_HARNESS` confirmed back to `0` and inert; App Lab GUI was unavailable this session — board driven entirely over SSH + `arduino-app-cli` + the board's own socat bridge, now confirmed bidirectional (`docs/eletect-x-applab-notes.md`); 20 Aug entries below — MPPT solar controller dropped for a manually-set XL4015 buck (ADR 0012, `docs(decisions)` 04d1398 + `docs(hardware)` c0ae7db), `state_machine.cpp` console prints gated off the shared LoRa wire (`fix(mcu)` b4087d1), login-page demo-account doc-drift closed with a regression test (`test(web)` 42ced90), `notify-officer-request`'s fan-out extracted and unit-tested to match `send-alert` (`test(backend)` a15ea23); 18 Aug entries below — LED/IR fire + deterrent-event footage capture wired into the MPU reflex loop; 17 Aug entries — camera path closed out on real hardware: `CAMERA_DEVICE` fixed to a udev by-id path and proven stable across a full reboot and a physical unplug/replug, `python3-opencv` installed, `capture_check.py` passing end-to-end, `Camera.open()` now retries with backoff; 15 Aug entries — multi-trial stomp validation closed on real hardware; fire-test harness software path verified on real hardware, physical actuators not yet wired — still current)
 
 This file exists so work can continue with zero lost context if the planning session moves to a
 different Claude account/session. Read this file, then `CONTEXT.md`, before doing anything else.
@@ -29,7 +29,8 @@ what the field test produces (see `edge-impulse-hackster-writeup` skill when tha
 
 **Completeness ranking:** `web/frontend` > `web/backend` / `web/ingest` (all essentially done) >>
 `device/mcu` (real, in bench-validation) > `device/mpu` (fusion math built, integration loop missing)
->> `ml/` (still empty — `.gitkeep` placeholders only in acoustic/datasets/evaluation/seismic/vision).
+>> `ml/` (`seismic/` now holds a real dataset + a first trained model, 22 Aug; acoustic/datasets/
+evaluation/vision are still `.gitkeep` placeholders).
 
 - **`web/frontend`, `web/backend`, `web/ingest`** — built and real. Supabase schema + RLS + edge
   functions + migrations exist, MQTT→Supabase ingest bridge exists, full React PWA (public site +
@@ -174,9 +175,10 @@ what the field test produces (see `edge-impulse-hackster-writeup` skill when tha
       `peak_ratio`, `trigger_index`, window min/max/mean/population stdev) computed by the new
       `footfall_features.cpp`/`.h`, host-tested (`tests/test_footfall_features/`, 6 known-answer
       tests). `probability` is a real, honestly-derived saturating function of `peak_ratio` — **not**
-      the on-MCU TinyML model output the schema was originally written assuming; `ml/seismic/` is
-      still empty, so this is a documented placeholder, tracked as its own open gap in
-      `KNOWN_GAPS.md` right next to the `ALERT_PROBABILITY_THRESHOLD` entry. Closing this also
+      the on-MCU TinyML model output the schema was originally written assuming, and the 22 Aug
+      `ml/seismic/` model does not change that (it is off-device and undeployed), so this stays a
+      documented placeholder, tracked as its own open gap in `KNOWN_GAPS.md` right next to the
+      `ALERT_PROBABILITY_THRESHOLD` entry. Closing this also
       required making `Bridge.begin()`/`Bridge.update()` unconditional in `main.cpp` (previously
       gated behind the bench-only `SEISMIC_DEBUG_STREAM_RAW` flag, which would have silently kept the
       new notify from ever firing in the real field build) — confirmed safe on real hardware and the
@@ -249,9 +251,24 @@ what the field test produces (see `edge-impulse-hackster-writeup` skill when tha
     registrations in `main.cpp` remain commented out (same one-at-a-time discipline, see item 2 below),
     so nothing here has fired an actual LED/IR/camera together on real hardware yet. Full detail in
     `docs/KNOWN_GAPS.md`'s "Deterrent-event camera capture wired into `reflex_loop.py`..." entry (18 Aug).
-- **`ml/`** — still untouched. No training data, no models, nothing. Not blocking the Aug 20 trial
-  (vision uses a fixed pretrained detector per CONTEXT.md §4), but relevant to the "scientifically
-  rigorous" goal and the Hackster write-up's DSP/model section.
+- **`ml/`** — `seismic/` is real as of 22 Aug; `acoustic/`, `datasets/`, `evaluation/`, `vision/`
+  are still untouched. Not blocking the Aug 20 trial (vision uses a fixed pretrained detector per
+  CONTEXT.md §4), but relevant to the "scientifically rigorous" goal and the Hackster write-up's
+  DSP/model section.
+  - **22 Aug — first trained seismic model, Edge Impulse project `1094084` (`EleTect-X-Seismic`).**
+    The 12 real 512-sample geophone windows from the 14/15 Aug bench stomp sessions were uploaded
+    (24 samples: a 512 ms `quiet` segment and the 256 ms `footfall` transient from each event, split
+    by event 9 training / 3 testing) and a spectral-analysis + Keras classifier trained on them.
+    **Held-out test result: 9/9 windows correct, 100%, 0 uncertain.** Everything about how that
+    number was derived, and the five caveats that must travel with it, is in `ml/seismic/README.md`
+    — the short version: n=12 events, a 3-event test set, `quiet` and `footfall` drawn from the same
+    recordings, one person on one bench, and classes so separable (quiet RMS 1.34e-4 V vs footfall
+    2.93e-3 V, zero overlap) that a plain RMS threshold would score identically. **Nothing on the MCU
+    uses it** — `footfall_features.cpp`'s placeholder probability is unchanged and no deployment path
+    exists. Because `scripts/bench-logs/` is gitignored, the 12 windows are committed verbatim as
+    `ml/seismic/bench_windows_20260814_15.json` and `scripts/edge_impulse_upload_seismic.py` falls
+    back to that artifact, so the dataset is reproducible from a fresh clone. The API key is not in
+    the repo — supply it via `EI_API_KEY`.
 - **`hardware/` power system — MPPT dropped, 20 Aug (ADR 0012).** Every "smart" LiFePO4 MPPT
   controller checked (amiciSmart 10A, Sparkel SPSCC-1012LiMPPT) turned out disqualified on real
   verification (wrong chemistry default, unreachable config path, a reported no-auto-resume firmware
