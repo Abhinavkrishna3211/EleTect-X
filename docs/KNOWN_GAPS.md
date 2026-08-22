@@ -474,14 +474,17 @@ criteria — see each entry's status.
   vision detector's output (not yet built) into a `ModalityReading`'s `log_odds`/`available` pair —
   `cognition/fusion.py`'s `logit()` is the intended conversion primitive, but nothing calls it yet.
   High severity — this is the actual integration gap between the Bridge and cognition layers.
-  Status: **closed for seismic** —
-  `device/mpu/services/reflex_loop.py`'s `handle_footfall_event()` (added this build call) converts
+  Status: **closed for seismic and acoustic** (22 Aug) —
+  `device/mpu/services/reflex_loop.py`'s `handle_footfall_event()` converts
   `report_footfall_event`'s `probability` via `logit()` (epsilon-clamped against the 0.0/1.0
   endpoints `logit()` rejects) into the `SEISMIC` reading it passes to `fuse()`, host-tested against
   hand-computed `cognition.config.DEFAULT_FUSION_PARAMS` values in
-  `device/mpu/tests/test_reflex_loop.py`. Still **open for acoustic and vision** — no detector or
-  classifier-to-elephant-log-odds mapping exists for either (see the two entries below); both are
-  passed to `fuse()` as `available=False` for now, never scored.
+  `device/mpu/tests/test_reflex_loop.py`. `handle_acoustic_event()` (22 Aug) converts
+  `report_acoustic_event`'s `confidence` the same way, through the same clamp — the helper was
+  generalised from `_seismic_log_odds()` to a shared `_confidence_log_odds()` rather than
+  duplicated, since the clamp is a property of `logit()`, not of either sensor. Still **open for
+  vision** — no detector exists (see the vision entry below), so it is still passed to `fuse()` as
+  `available=False`, never scored.
 - **`report_acoustic_event`'s classifier output has no defined mapping onto elephant-presence
   log-odds, and is not fed into `fuse()`.** `AcousticClass` (gunshot/chainsaw/vehicle/animal_call/
   ambient, `bridge/rpc.py`) is a threat/context classification, not an elephant-presence signal, and
@@ -490,7 +493,42 @@ criteria — see each entry's status.
   (added this build call) logs every event for visibility only. Medium severity: acoustic was always
   scoped as corroboration, never a standalone detector (ADR 0007/0009), so this does not block a
   seismic-only alert path, but the gunshot direct-alert routing is itself a real, undesigned gap.
-  Status: open.
+  Status: **partially closed** (22 Aug) — ADR 0007 §5's routing split now exists as code in
+  `handle_acoustic_event()`, which returns an `AcousticOutcome` recording which of three routes an
+  event took, host-tested in `device/mpu/tests/test_reflex_loop.py`. **Closed:** chainsaw, vehicle
+  and animal_call convert to log-odds and fuse as the *single* `ACOUSTIC` modality (one modality for
+  all three, per ADR 0007 — they share `WEIGHT_ACOUSTIC`/`BASELINE_ACOUSTIC`), verified across three
+  distinct confidences so the test cannot pass by coincidental equality at one input; gunshot is
+  proven by test never to reach `fuse()` at all (`outcome.fusion is None`, which is distinguishable
+  from an event that fused with acoustic unavailable and so still carries a real `FusionResult`).
+  **Still open, four ways:** (a) *no LoRa transport* — the gunshot branch logs a structured
+  `[SAFE_MODE] would send direct gunshot alert` line instead of sending anything, blocked on the
+  18 Aug join failure above; the `# TODO` in that branch names the intended `SendLoraAlertFn`
+  Protocol + `main.py` binding. The line is emitted unconditionally rather than gated on
+  `safe_mode`, because the absence of a transport is not a run mode. (b) *`AMBIENT`'s mapping is
+  invented* — ADR 0007 names only four classes and never routes ambient; it is fused as
+  `available=False` on ADR 0001's addendum reasoning (a modality with nothing to say is excluded
+  from the sum, never scored as negative evidence), which is this session's judgement, not an ADR
+  decision. (c) `WEIGHT_ACOUSTIC`/`BASELINE_ACOUSTIC` remain the invented magnitudes already flagged
+  at the top of this section — the routing is now real, the numbers it routes through are not.
+  (d) *nothing calls this path in the field* — no acoustic classifier runs on the MCU yet, and
+  `main.py`'s `Bridge.provide("report_acoustic_event", ...)` registration is still commented out
+  pending hardware verification.
+- **No cross-modality temporal correlation state exists, so acoustic can never actually
+  corroborate a seismic reading.** `fuse()` is a pure function called fresh per event with whatever
+  single modality that event carried: a `report_footfall_event` notify passes acoustic and vision as
+  unavailable, and a `report_acoustic_event` notify passes seismic and vision as unavailable.
+  Nothing holds a recent-readings window that would let two modalities appear in the same `fuse()`
+  call, which is the entire premise of ADR 0001's fusion formula. This is why
+  `handle_acoustic_event()` deliberately stops at `fuse()` and never calls `decide()`: with seismic
+  and vision unavailable, a chainsaw at confidence 0.9 fuses on its own to P≈0.84, past
+  `ALERT_PROBABILITY_THRESHOLD` (0.5) — which would silently promote acoustic to a standalone
+  elephant detector, exactly what ADR 0007/0009 scope it out of being. Logging the fused
+  contribution without acting on it is the honest half-step; the threshold is not the thing to tune
+  here. Medium severity — it does not block the seismic-only alert path that actually runs today,
+  but no multi-modality alert is possible until it is built, and both remaining weights
+  (`WEIGHT_ACOUSTIC`, `WEIGHT_VISION`) are unexercised in any real decision until then. Status:
+  open.
 - **No vision detector exists, so the vision modality is always passed to `fuse()` as
   unavailable.** `perception/camera.py` is capture-only (no pixel → log-odds model);
   `cognition/fusion.py`'s own module docstring already named this a future build call. High

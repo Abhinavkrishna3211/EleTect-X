@@ -144,7 +144,13 @@ def _on_acoustic_event(
     confidence: float,
     capture_ref: int,
 ) -> None:
-    """Bridge.provide() adapter for report_acoustic_event - see schema.md."""
+    """Bridge.provide() adapter for report_acoustic_event - see schema.md.
+
+    Discards the returned AcousticOutcome: a notify has no return channel,
+    so the outcome exists for tests and for a future caller that wants to
+    branch on the routing, not for this adapter. Same reason
+    _on_footfall_event above drops its FootfallOutcome.
+    """
     reflex_loop.handle_acoustic_event(schema_version, class_label, confidence, capture_ref)
 
 
