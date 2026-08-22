@@ -6,11 +6,13 @@ availability flag per modality; returns the fused log-odds and probability.
 Zero ADC calls, zero Bridge calls, zero SQLite, zero logging inside the
 function body - matching the functional-core discipline already established
 by device/mcu/src/footfall/sta_lta.cpp and device/mcu/src/actuators/
-rule_gate.cpp (ENGINEERING_CONVENTIONS.md 2). This module has no callers yet:
-the vision detector, geophone feature extraction, and acoustic classifier
-that would produce real l_i values, the Bridge wiring that would deliver
-them here, and the contextual bandit that would consume the fused P are all
-future build calls (device/mpu/README.md's Layout table).
+rule_gate.cpp (ENGINEERING_CONVENTIONS.md 2). The fused P now has a real
+consumer - services/reflex_loop.py calls decide() on it and cognition/
+bandit.py selects a deterrence tier once it alerts - but the inputs are
+still partly synthetic: the vision detector, geophone feature extraction,
+and acoustic classifier that would produce real l_i values, plus the Bridge
+wiring that would deliver them here, remain future build calls
+(device/mpu/README.md's Layout table).
 
 Availability-gated dropout (docs/decisions/0001-physical-ai-sensing-and-
 fusion-architecture.md 6, addendum): a modality with `available=False` is

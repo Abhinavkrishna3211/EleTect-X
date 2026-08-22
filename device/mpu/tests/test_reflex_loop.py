@@ -1,9 +1,12 @@
 """Behavioral tests for services/reflex_loop.py.
 
-Exercises the real sense -> fuse -> decide -> actuate wiring with mocked
-sensor inputs and recording fakes in place of the real Bridge.call-backed
-drive_horn/drive_led/pulse_ir, the real perception.camera.Camera, and the
-real perception.storage.save_burst.
+Exercises the real sense -> fuse -> decide -> select -> actuate wiring with
+mocked sensor inputs and recording fakes in place of the real
+Bridge.call-backed drive_horn/drive_led/pulse_ir, the real
+perception.camera.Camera, and the real perception.storage.save_burst. The
+experience store is real cognition.experience.ExperienceStore, backed by
+SQLite's in-memory database - a recording fake there would let a broken
+store satisfy every assertion below.
 
 Every expected fused log-odds/probability below is hand-computed against the
 real cognition.config.DEFAULT_FUSION_PARAMS values (not a test-local
@@ -13,18 +16,35 @@ these tests cannot pass by tautology (ENGINEERING_CONVENTIONS.md 4).
 
 capture_post_fire_tail_s is always overridden to 0.0 below so these tests
 don't actually sleep for CAPTURE_POST_FIRE_TAIL_S real seconds each.
+
+Exploration is disabled (epsilon 0.0) in _fire()'s default params. The real
+DEFAULT_BANDIT_PARAMS explores on roughly one event in seven, which would
+make every actuator-argument assertion here fail intermittently for a reason
+that has nothing to do with what it is testing. Exploration itself is
+covered directly in tests/test_bandit.py and by the one test below that
+turns it back on deliberately.
 """
 
+import dataclasses
 import math
 import time
 
 import pytest
 
 from cognition import config as cognition_config
+from cognition.bandit import Tier
+from cognition.experience import IN_MEMORY_PATH, ExperienceStore
 from cognition.fusion import Modality, sigmoid
 from perception.camera import CameraError, Frame
 from perception.storage import CaptureEventTag
 from services import reflex_loop
+
+# The real tuning, minus the randomness - see the module docstring.
+DETERMINISTIC_PARAMS = dataclasses.replace(cognition_config.DEFAULT_BANDIT_PARAMS, epsilon=0.0)
+
+TIER_1 = cognition_config.DETERRENCE_TIERS[Tier.TIER_1]
+TIER_2 = cognition_config.DETERRENCE_TIERS[Tier.TIER_2]
+TIER_3 = cognition_config.DETERRENCE_TIERS[Tier.TIER_3]
 
 
 class _FakeDriveHorn:
@@ -157,9 +177,14 @@ def _expected_seismic_fusion(probability: float):
 def _fire(probability=0.9, sta_lta_ratio=6.0, schema_version=1, call_log=None, **fakes):
     """Call handle_footfall_event with sensible defaults and a shared call_log.
 
-    Any of drive_horn/drive_led/pulse_ir/camera/save_frames can be
+    Any of drive_horn/drive_led/pulse_ir/camera/save_frames/experience can be
     overridden via **fakes; unspecified ones get a default fake sharing
     call_log, so a test only has to construct the fake(s) it cares about.
+
+    The default experience store is fresh and in-memory, so an unspecified
+    one means a cold store: no repeats, no learned values, and therefore
+    tier 1. A test that needs history across events constructs one store and
+    passes it to several _fire() calls.
     """
     log = call_log if call_log is not None else []
     kwargs = {
@@ -168,6 +193,8 @@ def _fire(probability=0.9, sta_lta_ratio=6.0, schema_version=1, call_log=None, *
         "pulse_ir": fakes.pop("pulse_ir", _FakePulseIr(call_log=log)),
         "camera": fakes.pop("camera", _FakeCamera(call_log=log)),
         "save_frames": fakes.pop("save_frames", _FakeSaveFrames(call_log=log)),
+        "experience": fakes.pop("experience", ExperienceStore(IN_MEMORY_PATH)),
+        "bandit_params": fakes.pop("bandit_params", DETERMINISTIC_PARAMS),
     }
     kwargs.update(fakes)
     outcome = reflex_loop.handle_footfall_event(
@@ -187,8 +214,13 @@ def _fire(probability=0.9, sta_lta_ratio=6.0, schema_version=1, call_log=None, *
 # ---------------------------------------------------------------------------
 
 
-def test_high_probability_alerts_and_fires_full_deterrent_stack_outside_safe_mode():
-    """A strong footfall probability fuses well past the threshold and fires horn+LED+IR."""
+def test_high_probability_alerts_and_fires_the_selected_tier_outside_safe_mode():
+    """A strong footfall fuses past the threshold and fires the tier the bandit picked.
+
+    On a cold store that is tier 1: horn and LED at tier 1's own values, and
+    no IR at all. The IR assertion is the one that changed when the bandit
+    landed - every alert used to fire all three actuators unconditionally.
+    """
     expected_log_odds, expected_p = _expected_seismic_fusion(0.9)
     outcome, kwargs, _ = _fire(0.9)
 
@@ -200,16 +232,20 @@ def test_high_probability_alerts_and_fires_full_deterrent_stack_outside_safe_mod
     assert Modality.VISION not in outcome.fusion.contributions
 
     assert outcome.decision.alert is True
+    assert outcome.action is TIER_1
+    assert outcome.context == 0
+    assert outcome.repeat_count == 0
+    assert outcome.exploring is False
     assert outcome.horn_ack is True
     assert outcome.led_ack is True
-    assert outcome.ir_ack is True
+    assert outcome.ir_ack is None
     assert kwargs["drive_horn"].calls == [
-        (1, reflex_loop.ALERT_HORN_GAIN_PCT, reflex_loop.ALERT_HORN_DURATION_MS)
+        (1, TIER_1.horn_gain_pct, TIER_1.horn_duration_ms)
     ]
     assert kwargs["drive_led"].calls == [
-        (1, reflex_loop.ALERT_LED_PATTERN_ID, reflex_loop.ALERT_LED_DURATION_MS)
+        (1, TIER_1.led_pattern_id, TIER_1.led_duration_ms)
     ]
-    assert kwargs["pulse_ir"].calls == [(1, reflex_loop.ALERT_IR_DURATION_MS)]
+    assert kwargs["pulse_ir"].calls == []
 
 
 def test_safe_mode_suppresses_all_actuation_and_camera():
@@ -231,6 +267,8 @@ def test_safe_mode_suppresses_all_actuation_and_camera():
         pulse_ir=pulse_ir,
         camera=camera,
         save_frames=save_frames,
+        experience=ExperienceStore(IN_MEMORY_PATH),
+        bandit_params=DETERMINISTIC_PARAMS,
         safe_mode=True,
     )
 
@@ -299,7 +337,12 @@ def test_schema_version_mismatch_is_logged_not_raised(caplog):
 
 
 def test_camera_opens_before_actuators_and_closes_after_them_with_frames_saved():
-    """Event order must be open -> capture -> horn -> led -> ir -> close -> save."""
+    """Event order must be open -> capture -> horn -> led -> close -> save.
+
+    No pulse_ir entry: this is tier 1 on a cold store, which fires no IR.
+    The tiers that do fire it are covered by
+    test_escalated_tier_fires_ir_in_the_documented_position.
+    """
     outcome, kwargs, log = _fire(0.9)
 
     assert log == [
@@ -307,7 +350,6 @@ def test_camera_opens_before_actuators_and_closes_after_them_with_frames_saved()
         "camera.capture_burst",
         "drive_horn",
         "drive_led",
-        "pulse_ir",
         "camera.close",
         "save_frames",
     ]
@@ -340,10 +382,9 @@ def test_camera_open_failure_never_blocks_actuator_firing(caplog):
 
     assert outcome.horn_ack is True
     assert outcome.led_ack is True
-    assert outcome.ir_ack is True
     assert outcome.capture_frame_count == 0
     assert outcome.trigger_to_first_frame_s is None
-    assert log == ["camera.open", "drive_horn", "drive_led", "pulse_ir"]  # no capture, no close
+    assert log == ["camera.open", "drive_horn", "drive_led"]  # no capture, no close
     assert kwargs["save_frames"].calls == []
     assert any("camera open failed" in record.message for record in caplog.records)
 
@@ -358,14 +399,12 @@ def test_camera_capture_failure_never_blocks_actuator_firing_and_camera_still_cl
 
     assert outcome.horn_ack is True
     assert outcome.led_ack is True
-    assert outcome.ir_ack is True
     assert outcome.capture_frame_count == 0
     assert log == [
         "camera.open",
         "camera.capture_burst",
         "drive_horn",
         "drive_led",
-        "pulse_ir",
         "camera.close",
     ]
     assert kwargs["save_frames"].calls == []  # nothing to save
@@ -405,6 +444,281 @@ def test_trigger_to_first_frame_latency_is_instrumented_and_logged(caplog):
     assert outcome.trigger_to_first_frame_s is not None
     assert 0.0 <= outcome.trigger_to_first_frame_s < 1.0
     assert any("trigger-to-first-frame latency" in record.message for record in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# handle_footfall_event() - bandit selection and habituation avoidance
+# ---------------------------------------------------------------------------
+
+
+def test_repeat_triggers_close_together_escalate_the_tier():
+    """The habituation-avoidance mechanism, end to end through the real loop.
+
+    Three alerts against one shared store, all inside
+    HABITUATION_WINDOW_S of each other: the escalation floor forces tier 1,
+    then 2, then 3. Nothing here depends on what the bandit learned - the
+    floor is deterministic precisely so a returning animal cannot receive
+    the same response twice while the values are still settling.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    tiers = []
+    for _ in range(3):
+        outcome, _, _ = _fire(0.9, experience=experience)
+        assert outcome.action is not None
+        tiers.append(outcome.action.tier)
+
+    assert tiers == [Tier.TIER_1, Tier.TIER_2, Tier.TIER_3]
+    experience.close()
+
+
+def test_escalation_saturates_at_the_top_tier():
+    """A fourth and fifth repeat stay at tier 3 - the ladder has a top."""
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    tiers = []
+    for _ in range(5):
+        outcome, _, _ = _fire(0.9, experience=experience)
+        assert outcome.action is not None
+        tiers.append(outcome.action.tier)
+
+    assert tiers[-2:] == [Tier.TIER_3, Tier.TIER_3]
+    experience.close()
+
+
+def test_escalated_tier_fires_ir_in_the_documented_position():
+    """Tier 2 fires all three actuators, with pulse_ir after drive_led.
+
+    The counterpart to the tier-1 ordering test above: the order the module
+    docstring promises is unchanged, IR is simply present again once the
+    tier calls for it.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    _fire(0.9, experience=experience)
+
+    log: list = []
+    outcome, kwargs, log = _fire(0.9, experience=experience, call_log=log)
+
+    assert outcome.action is TIER_2
+    assert outcome.ir_ack is True
+    assert kwargs["pulse_ir"].calls == [(1, TIER_2.ir_duration_ms)]
+    assert log == [
+        "camera.open",
+        "camera.capture_burst",
+        "drive_horn",
+        "drive_led",
+        "pulse_ir",
+        "camera.close",
+        "save_frames",
+    ]
+    experience.close()
+
+
+def test_sub_threshold_events_still_count_toward_habituation():
+    """A non-alerting trigger must still escalate the next real alert.
+
+    An animal circling a node while fusion stays just under the threshold is
+    exactly the case the repeat count exists for - if only alerts were
+    counted, the loop would keep answering a persistent visitor at tier 1.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    quiet, _, _ = _fire(0.05, sta_lta_ratio=3.0, experience=experience)
+    assert quiet.decision.alert is False
+    assert quiet.action is None
+    assert quiet.context is None
+
+    loud, _, _ = _fire(0.9, experience=experience)
+    assert loud.repeat_count == 1
+    assert loud.action is TIER_2
+    experience.close()
+
+
+def test_a_fired_attempt_is_recorded_and_settled_by_the_next_event():
+    """The full learning round trip: fire, come back, score, store the value.
+
+    The gap between the two events here is milliseconds against a 1800s
+    horizon, so the proxy reward is essentially zero - a returning animal is
+    the failure case, and the value that lands in the store must reflect
+    that. Asserting "a value now exists and it is near zero" is the honest
+    assertion; asserting a specific figure would be asserting how long the
+    test itself took to run.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    _fire(0.9, experience=experience)
+    assert experience.action_values() == {}
+
+    second, _, _ = _fire(0.9, experience=experience)
+    assert second.settled is not None
+    assert second.settled.tier is Tier.TIER_1
+    assert second.settled.context == 0
+    assert second.settled.visits == 1
+    assert second.settled.reward == pytest.approx(0.0, abs=0.01)
+
+    assert (0, Tier.TIER_1) in experience.action_values()
+    experience.close()
+
+
+def test_learning_survives_a_restart_through_the_real_loop(tmp_path):
+    """Two runs against one on-disk database: the second sees the first's history.
+
+    A real file, a real close(), and a second ExperienceStore constructed
+    from scratch - the closest a host test gets to the MPU's own
+    suspend/resume cycle. The escalation carrying across is the observable
+    proof: run two starts at tier 2, which is only possible if run one's
+    trigger persisted.
+    """
+    db_path = tmp_path / "data" / "experience.sqlite3"
+
+    first = ExperienceStore(db_path)
+    first_outcome, _, _ = _fire(0.9, experience=first)
+    first.close()
+
+    assert first_outcome.action is TIER_1
+
+    second = ExperienceStore(db_path)
+    second_outcome, _, _ = _fire(0.9, experience=second)
+    second.close()
+
+    assert second_outcome.repeat_count == 1
+    assert second_outcome.action is TIER_2
+    assert second_outcome.settled is not None  # run one's attempt scored here
+
+
+def test_a_refused_horn_records_no_attempt(caplog):
+    """A false ack means nothing fired, so the tier must not be credited.
+
+    rule_gate_apply() returns allowed=false only when it refuses a request
+    inside HORN_COOLDOWN_MS - the horn stayed silent. Learning from that
+    would attribute whatever the animal did next to a burst that never
+    happened.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    with caplog.at_level("INFO"):
+        outcome, _, _ = _fire(
+            0.9, experience=experience, drive_horn=_FakeDriveHorn(ack=False)
+        )
+
+    assert outcome.horn_ack is False
+    _fire(0.9, experience=experience)
+    assert experience.action_values() == {}
+    assert any("recording no attempt" in record.message for record in caplog.records)
+    experience.close()
+
+
+def test_safe_mode_selects_a_tier_but_records_no_attempt(caplog):
+    """A dry run must still choose and log a tier, and must still learn nothing.
+
+    Both halves matter. The selection has to be real or the SAFE_MODE log
+    would not tell an operator what the device would actually have done; the
+    attempt has to be absent because nothing fired, and a bandit credited
+    for silence would learn from a deterrence that never occurred.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    with caplog.at_level("INFO"):
+        outcome = reflex_loop.handle_footfall_event(
+            1,
+            0.9,
+            sta_lta_ratio=6.0,
+            feature_vector=[0.0] * 8,
+            drive_horn=_FakeDriveHorn(),
+            drive_led=_FakeDriveLed(),
+            pulse_ir=_FakePulseIr(),
+            camera=_FakeCamera(),
+            save_frames=_FakeSaveFrames(),
+            experience=experience,
+            bandit_params=DETERMINISTIC_PARAMS,
+            safe_mode=True,
+        )
+
+    assert outcome.action is TIER_1
+    assert outcome.exploring is False
+    assert any("[SAFE_MODE]" in record.message for record in caplog.records)
+
+    # A second event has nothing to settle, because the first recorded nothing.
+    second = reflex_loop.handle_footfall_event(
+        1,
+        0.9,
+        sta_lta_ratio=6.0,
+        feature_vector=[0.0] * 8,
+        drive_horn=_FakeDriveHorn(),
+        drive_led=_FakeDriveLed(),
+        pulse_ir=_FakePulseIr(),
+        camera=_FakeCamera(),
+        save_frames=_FakeSaveFrames(),
+        experience=experience,
+        bandit_params=DETERMINISTIC_PARAMS,
+        safe_mode=True,
+    )
+    assert second.settled is None
+    assert experience.action_values() == {}
+    experience.close()
+
+
+def test_safe_mode_still_records_the_trigger():
+    """A dry run observes real events even though it does not respond to them.
+
+    The repeat count is a property of what the node saw, not of what it
+    fired, so suppressing it under SAFE_MODE would make a dry run report a
+    context the device would never actually have been in.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    for _ in range(2):
+        reflex_loop.handle_footfall_event(
+            1,
+            0.9,
+            sta_lta_ratio=6.0,
+            feature_vector=[0.0] * 8,
+            drive_horn=_FakeDriveHorn(),
+            drive_led=_FakeDriveLed(),
+            pulse_ir=_FakePulseIr(),
+            camera=_FakeCamera(),
+            save_frames=_FakeSaveFrames(),
+            experience=experience,
+            bandit_params=DETERMINISTIC_PARAMS,
+            safe_mode=True,
+        )
+
+    third, _, _ = _fire(0.9, experience=experience)
+    assert third.repeat_count == 2
+    assert third.action is TIER_3
+    experience.close()
+
+
+def test_a_learned_preference_beats_the_default_tie_break():
+    """Once a tier has earned value, greedy selection prefers it over tier 1.
+
+    Seeded directly into the store rather than trained through the loop:
+    training a preference in-process would take a real 1800s horizon's worth
+    of wall clock. What is under test is that the loop reads the stored
+    values and acts on them, not that the update arithmetic works - that is
+    tests/test_experience.py's job.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    experience.record_attempt(time.time() - 3600.0, 0, Tier.TIER_3)
+    experience.settle_pending(time.time(), DETERMINISTIC_PARAMS)
+
+    outcome, kwargs, _ = _fire(0.9, experience=experience)
+
+    assert outcome.action is TIER_3
+    assert outcome.exploring is False
+    assert kwargs["pulse_ir"].calls == [(1, TIER_3.ir_duration_ms)]
+    experience.close()
+
+
+def test_exploration_is_reported_when_it_happens():
+    """With epsilon 1.0 the outcome must say the tier came from exploration.
+
+    Reported rather than inferred so a field log can distinguish "the bandit
+    believes tier 3 is best here" from "the bandit rolled a die" - the two
+    look identical in the actuator record otherwise.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    always_explores = dataclasses.replace(cognition_config.DEFAULT_BANDIT_PARAMS, epsilon=1.0)
+
+    outcome, _, _ = _fire(0.9, experience=experience, bandit_params=always_explores)
+
+    assert outcome.exploring is True
+    assert outcome.action is not None
+    assert outcome.action.tier in (Tier.TIER_1, Tier.TIER_2, Tier.TIER_3)
+    experience.close()
 
 
 # ---------------------------------------------------------------------------

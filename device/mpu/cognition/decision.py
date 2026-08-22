@@ -1,11 +1,13 @@
 """Alert decision - pure function turning a fused probability into an action.
 
-`decide()` is the simplest possible policy standing in for the contextual
-bandit fusion.py's own module docstring names as a future build call: one
-probability threshold, no learning, no per-actuator selection. It exists so
-device/mpu/services/reflex_loop.py has something real (not a stub) to call
-today, without pretending the eventual bandit's scope - which actuator(s) to
-fire, at what gain/duration, learned from outcomes - is already solved.
+`decide()` is the alert gate and nothing more: one probability threshold, no
+learning, no per-actuator selection. That is now a deliberate division of
+labour rather than a placeholder - cognition/bandit.py owns the rest of what
+this docstring used to defer (which actuator(s) to fire, at what
+gain/duration, learned from outcomes), and services/reflex_loop.py calls it
+only once decide() has already said alert. Keeping the gate separate from
+the selection keeps this function pure of any experience state and leaves
+the threshold question (below) exactly where it was.
 
 No default threshold lives in this module, for the same reason fuse() takes
 FusionParams as a required argument with no default (cognition/fusion.py's
