@@ -214,10 +214,17 @@ criteria — see each entry's status.
   open, intentionally deferred to a hardware session.
 - **Edge Impulse projects (footfall, acoustic, vision) are created manually via Studio's own UI; no
   project IDs are recorded in-repo.** Not part of this build call's scope. Low severity. Status:
-  **closed for seismic** (22 Aug) — the seismic project is **1094084** (`EleTect-X-Seismic`),
-  recorded in `ml/seismic/README.md` along with its dataset, impulse configuration and result. ID
-  only: the API key is supplied through `EI_API_KEY` at run time and is not in the repo (`.env*` is
-  already gitignored). Still open for acoustic and vision — neither project exists yet.
+  **closed for seismic and acoustic** (23 Aug) — the acoustic project is **1094275**
+  (`EleTect-X-Acoustic`), recorded in `ml/acoustic/README.md` along with its five dataset sources,
+  licenses, impulse configuration and (once run) result; the seismic project is **1094084**
+  (`EleTect-X-Seismic`), recorded in `ml/seismic/README.md`. ID only in both cases: the API key is
+  supplied through `EI_API_KEY` at run time and is not in the repo (`.env*` is already gitignored).
+  **Closed for vision too** (23 Aug) — project **1094260** (`EleTect-X-Vision`), a two-class FOMO
+  detector (Elephant / Boar) trained on two real CC BY 4.0 Roboflow Universe datasets (3,280 +
+  1,901 images), recorded in `ml/vision/README.md` along with both dataset citations, the split
+  ledger, and the held-out per-class result (F1 0.67 Elephant / 0.57 Boar) — read that file's
+  caveats before quoting either number: neither source dataset is night-IR footage, and nothing
+  is wired into the field path yet (see the new Build-call 3 entry below).
 
 ## Build-call 3 (`device/mpu/perception` vision capture)
 
@@ -396,6 +403,45 @@ criteria — see each entry's status.
   has no dependency on `Bridge` at all — wiring that coordination is later build-call scope, once the
   ping bench proves the Bridge round trip works at all. Medium severity. Status: open, deferred by
   design.
+- **The trained FOMO detector (`ml/vision/README.md`, Edge Impulse project 1094260) is not exported
+  or wired into anything on this board.** No `.eim` runner has been generated, `perception/__init__.py`
+  still states the detector is unbuilt, `perception/camera.py` stays capture-only, and
+  `services/reflex_loop.py` saves the camera burst without running it through any classifier — so
+  `cognition/fusion.py`'s `VISION` modality stays permanently unpopulated regardless of what the
+  camera captures. Follow-up-sized, not attempted as part of training the model: needs the `.eim`
+  export step, a decision on where inference runs in the reflex-loop event path, and a real on-device
+  latency figure before it can be scoped further. Status: **open**.
+- **Vision-model resolution-increase experiment concluded (23 Aug) — hypothesis rejected, reverted
+  to the 96px baseline.** The working theory (96px's coarse 12×12 grid under-detects small boxes;
+  see the 65.1%/56.7% F1 diagnosis in the entry directly below) predicted a finer grid would recover
+  detections. Three controlled trials at 128px, 160px, and a compute-cap-rejected attempt at 224px —
+  everything else held fixed — instead showed resolution increase alone **monotonically regresses
+  both classes**, Boar far more than Elephant (Boar F1 0.567 → 0.313 → 0.165 as resolution rose;
+  Elephant 0.670 → 0.593 → 0.639). Full per-class numbers and the leading explanation (per-cycle
+  training cost scales faster than linearly with resolution, so finer grids left less of the 1-hour
+  compute-cap budget to also raise cycle count, likely undertraining them) in `ml/vision/README.md`'s
+  23 Aug entries. `IMAGE_SIZE` reverted to 96 rather than ship a worse model. EON Tuner (the plan's
+  systematic-search step) was checked and found to need an organization-level API key this account
+  doesn't have — not run. Next queued test: cycle count at the 96px baseline (100 vs. the default 60),
+  since cycles have never actually been varied at any resolution tested so far. Status: **open** —
+  three resolution variants tried and rejected, model still short of the ~90% target, cycle-count
+  test queued next.
+- **`CONTEXT.md:30`'s "Adreno/OpenCL" and ADR 0001 §3's "generic CPU/TFLite path (no QNN/Hexagon
+  delegate available on this chip)" are not actually the contradiction they read as** (23 Aug,
+  investigated as part of the vision-model remediation pass — this was an open inconsistency flagged
+  earlier, not a new question). QNN/Hexagon is Qualcomm's NPU delegate; Adreno/OpenCL is the GPU
+  delegate, a separate TFLite acceleration path. ADR 0001 rules out the former only, on record: "no
+  Hexagon NPU" (line 8, research context). Edge Impulse's own documented Linux/AARCH64 CLI workflow
+  (`docs/DEVICE_DEVELOPMENT_WORKFLOW.md:269`, sourced from EI's docs) states GPU acceleration through
+  `edge-impulse-linux-runner` is automatic, not hand-configured. **What is still unverified: this has
+  never actually been run on real UNO Q hardware in this repo** — no `edge-impulse-linux-runner`
+  execution log exists anywhere (`docs/eletect-x-applab-notes.md`'s 22 Aug hardware session only
+  mentions the runner as a planned deployment path, not a run one). So: doc-confirmed, not
+  hardware-confirmed. `ml/vision/README.md`'s caveat 6 is updated to say this precisely instead of
+  describing an unresolved contradiction. Low severity — doesn't block model-size decisions (CPU-only
+  on a quad Cortex-A53 already has real headroom for this model regardless of which delegate ends up
+  running it). Status: open only on the "confirm on real hardware" half; closed on the "is it actually
+  contradictory" half.
 
 ## Build-call 4 (`device/mpu/cognition` fusion math)
 
@@ -552,9 +598,27 @@ criteria — see each entry's status.
   from the sum, never scored as negative evidence), which is this session's judgement, not an ADR
   decision. (c) `WEIGHT_ACOUSTIC`/`BASELINE_ACOUSTIC` remain the invented magnitudes already flagged
   at the top of this section — the routing is now real, the numbers it routes through are not.
-  (d) *nothing calls this path in the field* — no acoustic classifier runs on the MCU yet, and
-  `main.py`'s `Bridge.provide("report_acoustic_event", ...)` registration is still commented out
-  pending hardware verification.
+  (d) *nothing calls this path in the field* — updated 23 Aug: a real 5-class acoustic classifier
+  now exists (Edge Impulse project **1094275**, `EleTect-X-Acoustic`; `scripts/edge_impulse_upload_acoustic.py`
+  and `scripts/edge_impulse_train_acoustic.py`; sources, licenses and per-class held-out numbers, once
+  trained, in `ml/acoustic/README.md`), trained on real, licensed public audio (Mendeley tropical-forest
+  gunshot/background recordings, ESC-50's chainsaw clips, Freesound engine-idling and elephant-call
+  clips) — but none of it was captured on this project's own INMP441 or in Kerala forest conditions, and
+  none of it runs anywhere near the MCU. `main.py`'s `Bridge.provide("report_acoustic_event", ...)`
+  registration is still commented out pending hardware verification, and this trained model has not
+  been exported or wired to anything — see the new entry below, which tracks that as separate,
+  not-yet-attempted work.
+- **The trained acoustic classifier (project 1094275, `ml/acoustic/README.md`) is not exported or
+  deployed anywhere.** (23 Aug) Training a model and running it on the MCU are two different pieces
+  of work, and only the first is done. Still needed, none of it attempted in this pass: exporting the
+  model as an Edge Impulse C++ inference library (or `.eim` Linux runner, depending on which side of
+  the MCU/MPU split ends up hosting inference — undecided), getting real audio off actual hardware
+  (no I²S, no INMP441 driver, no acoustic capture code exists anywhere under `device/mcu/src/` today —
+  `bridge_handlers.cpp` hardcodes `state.acoustic_ok = false`) into it, and wiring the result into
+  `handle_acoustic_event()` in place of whatever currently calls `report_acoustic_event` with
+  fabricated data. Also unresolved regardless of deployment: the model was trained on public data with
+  no relationship to this project's own microphone, enclosure or acoustic environment — closing this
+  gap does not by itself demonstrate the model works on real field audio.
 - **No cross-modality temporal correlation state exists, so acoustic can never actually
   corroborate a seismic reading.** `fuse()` is a pure function called fresh per event with whatever
   single modality that event carried: a `report_footfall_event` notify passes acoustic and vision as
