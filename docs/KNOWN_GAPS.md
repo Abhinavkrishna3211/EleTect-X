@@ -220,11 +220,12 @@ criteria — see each entry's status.
   (`EleTect-X-Seismic`), recorded in `ml/seismic/README.md`. ID only in both cases: the API key is
   supplied through `EI_API_KEY` at run time and is not in the repo (`.env*` is already gitignored).
   **Closed for vision too** (23 Aug) — project **1094260** (`EleTect-X-Vision`), a two-class FOMO
-  detector (Elephant / Boar) trained on two real CC BY 4.0 Roboflow Universe datasets (3,280 +
-  1,901 images), recorded in `ml/vision/README.md` along with both dataset citations, the split
-  ledger, and the held-out per-class result (F1 0.67 Elephant / 0.57 Boar) — read that file's
-  caveats before quoting either number: neither source dataset is night-IR footage, and nothing
-  is wired into the field path yet (see the new Build-call 3 entry below).
+  detector (Elephant / Boar) trained on three real CC BY 4.0 Roboflow Universe datasets (3,280
+  Elephant + 3,280 Boar images, the latter across two sources after a same-day top-up), recorded
+  in `ml/vision/README.md` along with all dataset citations, the split ledger, and the held-out
+  per-class result (F1 0.69 Elephant / 0.62 Boar) — read that file's caveats before quoting either
+  number: neither source dataset is night-IR footage, and nothing is wired into the field path yet
+  (see the new Build-call 3 entry below).
 
 ## Build-call 3 (`device/mpu/perception` vision capture)
 
@@ -427,15 +428,21 @@ criteria — see each entry's status.
   0.670 → 0.705, every metric up); Boar's held-out F1 stayed flat (0.567 → 0.565, noise-level) despite
   its training-time validation F1 improving (0.500 → 0.589) — Boar's smaller training set (2,403 vs
   Elephant's 3,193 box instances) likely overfits the validation split rather than generalizing as
-  training runs longer. **Best real result to date: Elephant F1 0.705 / Boar F1 0.565, both well short
-  of the ~90% target.** Every stock-FOMO knob available on this account (backbone size, resolution,
-  cycles, class weighting, augmentation) has now been tried; the two paths that remain are a heavier/
-  custom architecture (BYOM or ONNX custom learning block) or sourcing/generating more Boar training
-  images specifically (targeted augmentation via new data, distinct from the loss-reweighting and
-  stock image-augmentation already maxed). Full per-class numbers and reasoning in
-  `ml/vision/README.md`'s 23 Aug entries. Status: **open** — three resolution variants and one
-  cycle-count variant tried; next step is an architecture or dataset decision, not a further
-  single-variable retrain.
+  training runs longer. Every stock-FOMO knob available on this account (backbone size, resolution,
+  cycles, class weighting, augmentation) was exhausted at this point, leaving two open paths: a
+  heavier/custom architecture (BYOM or ONNX custom learning block) or sourcing more Boar training
+  images specifically. **Boar top-up sourced and retrained (23 Aug):** Boar brought from 1,901 to
+  3,280 images via BoarWatch (a second CC BY 4.0 dataset, group-sampled to avoid near-duplicate
+  redundancy — see `ml/vision/README.md`'s Dataset section), reaching image parity with Elephant.
+  Retrained at the same 96px/100-cycle config: **Boar F1 0.565 → 0.618 (real gain, mostly recall),
+  Elephant F1 0.705 → 0.692 (small give-back, within the noise floor already established for this
+  config).** Held-out aggregate essentially flat (53.3% → 52.2%) since the two moves largely cancel
+  once reweighted by the larger held-out set. **Best real result to date: Elephant F1 0.692 / Boar
+  F1 0.618, both still well short of the ~90% target.** Full per-class numbers and reasoning in
+  `ml/vision/README.md`'s 23 Aug entries. Status: **open** — three resolution variants, one
+  cycle-count variant, and one dataset top-up tried; the one remaining lever is a heavier/custom
+  architecture (BYOM or ONNX custom learning block), a genuine platform change that should go back
+  to the user as a decision point rather than be started unilaterally.
 - **`CONTEXT.md:30`'s "Adreno/OpenCL" and ADR 0001 §3's "generic CPU/TFLite path (no QNN/Hexagon
   delegate available on this chip)" are not actually the contradiction they read as** (23 Aug,
   investigated as part of the vision-model remediation pass — this was an open inconsistency flagged
