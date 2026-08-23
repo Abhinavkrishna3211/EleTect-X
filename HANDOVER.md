@@ -1,4 +1,20 @@
-# EleTect X — Handover (last updated 22 Aug 2026 — software session: ADR 0007 5's acoustic fusion/direct-alert routing split now implemented and host-tested in `device/mpu/services/reflex_loop.py` (`feat(mpu)` 2183cf6), and a first seismic classifier trained on the real 14/15 Aug bench captures (Edge Impulse `1094084`, 9/9 held-out test windows, undeployed — read `ml/seismic/README.md`'s caveats before quoting that number); earlier 22 Aug live hardware session, bare board only, no actuators wired: clean field-build flash confirmed (silent console is correct/expected — flagged as a real gap below), fire-test harness fully re-verified live (all four commands + cooldown refusals), `FIRE_TEST_HARNESS` confirmed back to `0` and inert; App Lab GUI was unavailable this session — board driven entirely over SSH + `arduino-app-cli` + the board's own socat bridge, now confirmed bidirectional (`docs/eletect-x-applab-notes.md`); 20 Aug entries below — MPPT solar controller dropped for a manually-set XL4015 buck (ADR 0012, `docs(decisions)` 04d1398 + `docs(hardware)` c0ae7db), `state_machine.cpp` console prints gated off the shared LoRa wire (`fix(mcu)` b4087d1), login-page demo-account doc-drift closed with a regression test (`test(web)` 42ced90), `notify-officer-request`'s fan-out extracted and unit-tested to match `send-alert` (`test(backend)` a15ea23); 18 Aug entries below — LED/IR fire + deterrent-event footage capture wired into the MPU reflex loop; 17 Aug entries — camera path closed out on real hardware: `CAMERA_DEVICE` fixed to a udev by-id path and proven stable across a full reboot and a physical unplug/replug, `python3-opencv` installed, `capture_check.py` passing end-to-end, `Camera.open()` now retries with backoff; 15 Aug entries — multi-trial stomp validation closed on real hardware; fire-test harness software path verified on real hardware, physical actuators not yet wired — still current)
+# EleTect X — Handover (last updated 23 Aug 2026 — the two-class FOMO vision model (Elephant + Boar)
+actually trained and ran to completion this session against Edge Impulse project `1094260`
+(`EleTect-X-Vision`): 3,280 Elephant + 1,901 Boar images from two real CC BY 4.0 Roboflow Universe
+datasets, group-aware 80/20 split, held-out per-class F1 0.670 Elephant / 0.567 Boar — see the new
+"23 Aug — vision classifier trained" entry near the top of "Where the project actually stands" below,
+and `ml/vision/README.md`'s caveats before quoting either number anywhere (neither dataset is night-IR
+footage, and nothing is exported/wired into the field path yet); separately, a code-complete acoustic
+classifier upload/train pipeline was written for Edge Impulse project `1094275` (`EleTect-X-Acoustic`),
+closing the training half of the "no acoustic classifier exists" gap the same way `ml/seismic/`'s model
+closed it for seismic; see the "23 Aug — acoustic classifier pipeline written, not yet run" entry below
+for the full state, including the hard blocker (a `FREESOUND_API_KEY` credential does not exist yet,
+and neither script has run against a live project);
+earlier entries below this line describe the 22 Aug late Cowork/Opus planning session hitting its usage
+limit, resuming under a different account, limit resets Monday; that planning session did NOT touch
+firmware/code that round, only the Robu.in report, wiring docs, and contest strategy — see the
+"22 Aug late — Cowork planning session" entry further down for that state; entries below that describe
+the prior software session: gunshot direct-alert path now has a real (still-not-live) transport scaffold — `send_lora_alert` added to `bridge/schema.md`/`rpc.py`, an MCU-side `bridge_send_lora_alert` stub that always acks `false`, and `reflex_loop.py`'s gunshot branch calling it for real outside `safe_mode` (`feat(mpu,mcu)` 67accdb, host-tested: pytest 224/224, `pio test -e native` 49/49); both new `Bridge.provide()` registrations stay commented out, same one-at-a-time discipline as the four pre-existing ones — the real send is still blocked on the Grove LoRa-E5 not joining, not on missing code; ADR 0007 5's acoustic fusion/direct-alert routing split now implemented and host-tested in `device/mpu/services/reflex_loop.py` (`feat(mpu)` 2183cf6), and a first seismic classifier trained on the real 14/15 Aug bench captures (Edge Impulse `1094084`, 9/9 held-out test windows, undeployed — read `ml/seismic/README.md`'s caveats before quoting that number); earlier 22 Aug live hardware session, bare board only, no actuators wired: clean field-build flash confirmed (silent console is correct/expected — flagged as a real gap below), fire-test harness fully re-verified live (all four commands + cooldown refusals), `FIRE_TEST_HARNESS` confirmed back to `0` and inert; App Lab GUI was unavailable this session — board driven entirely over SSH + `arduino-app-cli` + the board's own socat bridge, now confirmed bidirectional (`docs/eletect-x-applab-notes.md`); 20 Aug entries below — MPPT solar controller dropped for a manually-set XL4015 buck (ADR 0012, `docs(decisions)` 04d1398 + `docs(hardware)` c0ae7db), `state_machine.cpp` console prints gated off the shared LoRa wire (`fix(mcu)` b4087d1), login-page demo-account doc-drift closed with a regression test (`test(web)` 42ced90), `notify-officer-request`'s fan-out extracted and unit-tested to match `send-alert` (`test(backend)` a15ea23); 18 Aug entries below — LED/IR fire + deterrent-event footage capture wired into the MPU reflex loop; 17 Aug entries — camera path closed out on real hardware: `CAMERA_DEVICE` fixed to a udev by-id path and proven stable across a full reboot and a physical unplug/replug, `python3-opencv` installed, `capture_check.py` passing end-to-end, `Camera.open()` now retries with backoff; 15 Aug entries — multi-trial stomp validation closed on real hardware; fire-test harness software path verified on real hardware, physical actuators not yet wired — still current)
 
 This file exists so work can continue with zero lost context if the planning session moves to a
 different Claude account/session. Read this file, then `CONTEXT.md`, before doing anything else.
@@ -11,6 +27,82 @@ Nothing here should contradict `CONTEXT.md` — if it does, `CONTEXT.md` wins an
 3. `docs/decisions/` — only the ADRs relevant to whatever you're about to touch (see "ADR trail" below).
 4. `docs/KNOWN_GAPS.md` — the maintained list of unverified/placeholder items, organized by build call.
 5. `hardware/bom/procurement-status.md` — live procurement tracker. Trust this over `bom.md`.
+6. `docs/internal/CONTEST_WIN_PLAN.md` — **local-only, gitignored via `.git/info/exclude`'s
+   `docs/internal/` pattern. Never reference its content or existence in any committed file, commit
+   message, or the contest report itself** — it names and analyzes competing teams' real submissions,
+   which must never appear in our own public repo or report. Read it for the full scoring-rubric
+   breakdown and priority ordering; just don't let anything from it leak into tracked files.
+
+## RESUME HERE — 23 Aug account-switch checkpoint (planning/Cowork session)
+
+Everything in this checkpoint is real and verified against the actual repo state at the moment of
+writing, not just relayed from another session's self-report. Read this block in full before doing
+anything else — it supersedes any impression from the top-line summary above about what's most
+urgent, since several sessions have layered updates on top of each other since 22 Aug.
+
+**Do this first, before any new work, in this exact order:**
+
+1. **Commit the untracked files — this is the single highest-risk open item.** `git status` shows
+   all of the following as untracked, none committed, spanning real hours of work across three
+   separate sessions: `hardware/WIRING_GUIDE.md`, `ml/vision/README.md`,
+   `ml/vision/dataset_manifest.json`, `scripts/edge_impulse_upload_vision.py`,
+   `scripts/edge_impulse_train_vision.py`, `ml/acoustic/README.md`,
+   `scripts/edge_impulse_upload_acoustic.py`, `scripts/edge_impulse_train_acoustic.py` — plus
+   `ml/vision/.gitkeep` deleted, and `HANDOVER.md`/`docs/KNOWN_GAPS.md`/
+   `device/mcu/.vscode/extensions.json` modified. Stage and commit in small, logically-grouped,
+   Conventional-Commits-style commits (e.g. one for the vision pipeline, one for the acoustic
+   pipeline, one for the wiring-guide LED redesign) before touching any of these files further.
+2. **Confirm the GitHub repo (`github.com/Abhinavkrishna3211/EleTect-X`) is Public.** Still
+   unconfirmed as of this checkpoint — gates the Documentation portion of the contest score
+   regardless of how good the code/docs are. Task #2 in the tracker, open since 22 Aug.
+3. **Physical wiring, live fire-test, one real filmed detection→deterrence session — still the
+   single highest-leverage item outstanding, and has not been confirmed done as of this
+   checkpoint.** The contest's published rubric weighs Functionality & Execution at 40 of 100
+   points, more than Documentation (20) and Presentation (15) combined. Everything below this list
+   — vision/acoustic model improvement — is real and valuable but was always explicitly scoped as
+   "only if there's time to spare after physical wiring is done and filmed" (see
+   `docs/internal/CONTEST_WIN_PLAN.md`). If wiring/fire-test/filming hasn't happened yet, do that
+   before resuming any ML work below.
+
+**Real status snapshot, each independently verified this session, not just self-reported:**
+
+- **Seismic model** — done, real, deployed-status honest (trained but not wired into MCU). Edge
+  Impulse project `1094084`, 9/9 held-out windows, n=12 events. Nothing pending here.
+- **Vision model (elephant/boar)** — trained, real numbers, underperforming: held-out F1 0.670
+  Elephant / 0.567 Boar (project `1094260`). Diagnosed root cause: confusion matrix shows near-zero
+  cross-species confusion but 39-43% of each animal class misclassified as background — a recall
+  problem, not a discrimination problem — consistent with the actual impulse config
+  (`fomo_mobilenet_v2_a35`, 96×96 input) being sized for microcontroller-grade resources when the
+  real deployment target (QRB2210) has full Linux/multi-GB-RAM headroom. A detailed improvement
+  prompt (increase input resolution/backbone capacity first since that's the most under-used lever,
+  resolve the CONTEXT.md-vs-ADR-0001 Adreno/OpenCL-delegate inconsistency, check instance-level
+  class balance, verify augmentation, consider EON Tuner or a non-FOMO architecture if capacity
+  alone plateaus below ~90%) was handed to the execution session — **check whether that retrain has
+  been run and report the real resulting numbers before assuming any improvement happened.**
+- **Acoustic model (5-class)** — code-complete (`ml/acoustic/README.md`,
+  `scripts/edge_impulse_upload_acoustic.py`, `scripts/edge_impulse_train_acoustic.py`), verified for
+  real: `ruff check` clean, `pytest device/mpu` 224/224, real ESC-50 metadata fetched, 2 real clips
+  downloaded/normalized byte-exact. **Blocked on two external, human-only actions, not code**: (a) a
+  `FREESOUND_API_KEY` doesn't exist yet — create a free account at freesound.org/apiv2/apply/; (b)
+  Mendeley's public API is behind a persistent Cloudflare bot-challenge (HTTP 403) — needs a manual
+  browser visit to the dataset page to clear it. Neither script has produced a real training number
+  yet; none is fabricated anywhere in the README.
+- **LED subsystem redesign** — decided, documented in `hardware/WIRING_GUIDE.md` §4.0, **not yet in
+  firmware**. Target: 10 LEDs (6 white + 4 blue) across 4 independent channels
+  (white-left/white-right/blue-left/blue-right, D3/PB0 and D8/PB4 newly needed, both confirmed
+  free), reasoned from real deterrent-effectiveness literature (unpredictable pattern beats raw
+  brightness for resisting habituation) rather than enclosure space. Needs `config.h`/`led.h`/
+  `led.cpp`/`bridge_handlers.cpp`/`schema.md` updated (task #11) plus a fuse-margin recheck against
+  the higher LED peak power before it's wired live. The original 6-LED/2-channel plan remains a
+  completely valid fallback if there's no time for the firmware change.
+- **Contest report** — built and upgraded, `EleTect-X_Arduino_Challenge_Report.docx` at the repo
+  root (deliberately not committed — large binary, belongs on the Robu.in portal). Real diagrams,
+  real quantified testing table, real BOM. Still missing: project photos, demo video link, and a
+  real circuit schematic image — all three need the physical build (item 3 above) to exist first.
+
+Task tracker (Cowork task list, may not survive the account switch — this file is the durable
+fallback) as of this checkpoint: #1 circuit schematic pending, #2 GitHub-public check pending, #10
+commit untracked files pending, #11 LED firmware channels pending, #3-#9 completed.
 
 ## Goal, in priority order (per CONTEXT.md §2, reconfirmed 15 Aug)
 
@@ -25,12 +117,157 @@ footage and real deployment story are the strongest material for both write-ups.
 unblocks Aug 20 first; the contest submissions are largely a documentation/write-up pass on top of
 what the field test produces (see `edge-impulse-hackster-writeup` skill when that pass starts).
 
+## 23 Aug — vision classifier trained
+
+`scripts/edge_impulse_upload_vision.py` and `scripts/edge_impulse_train_vision.py` both ran to
+completion this session against Edge Impulse project **1094260** (`EleTect-X-Vision`). Full detail,
+including both dataset citations, the exact split ledger, the impulse config, and every caveat, is
+in `ml/vision/README.md`; short version:
+
+- Two real, CC BY 4.0 Roboflow Universe datasets: `roboflow-universe-projects/elephant-detection-cxnt1`
+  v2 (3,280 images, un-augmented — not v4, which is the same images 5× augmented by Roboflow itself)
+  and `trackabox-4ejy9/wild-boar-a1flm` v1 (1,901 images, source class `Pig` relabeled to `Boar` —
+  the dataset is titled "Wild Boar" and every filename confirms it, a source mislabel, not a judgement
+  call made here).
+- Group-aware 80/20 split (seed `20260822`, committed in `ml/vision/dataset_manifest.json`) so
+  near-identical adjacent video frames never land on both sides of the boundary. 4,042 training /
+  1,139 testing images uploaded, exact reconciliation against source counts printed and logged.
+- Impulse: FOMO (`fomo_mobilenet_v2_a35`), 96×96 RGB input, `autoClassWeights` on for the 1.7:1
+  Elephant:Boar imbalance, both float32 and int8 variants trained and profiled.
+- **Held-out per-class F1 (real, computed from Edge Impulse's own `classify/all/result` grouped by
+  each test image's ground-truth label, since that endpoint reports only a single aggregate
+  pseudo-class for object-detection projects, not a per-label breakdown): Elephant 0.670 (649 test
+  images), Boar 0.567 (418 test images).** Elephant outperforms Boar in both this and the separate
+  training-time validation split, consistent with the 1.7:1 image-count gap — expected, not a
+  surprise. **Read `ml/vision/README.md`'s six caveats before quoting either number**: neither
+  dataset is night-IR camera-trap footage (both are daytime colour photography, while ADR 0001 puts
+  >70% of raids at night), the background/negative sample is small and almost entirely from the
+  Elephant side, and nothing is exported or wired into the field path yet.
+- One real API bug found and fixed along the way, worth knowing if `edge_impulse_train_*.py` scripts
+  are extended further: Edge Impulse's `POST /jobs/train/keras/{learnId}` — the call that actually
+  starts a training job — silently rejects an empty JSON body with a 200-OK
+  `{"success": false, "error": "Not updated configuration. No settable property found in body."}`
+  rather than a normal training-job response; it has to receive the same training-parameter body used
+  to configure the block, not just a bare `{}`. `edge_impulse_train_vision.py`'s `request()` helper
+  now also raises on any `"success": false` response instead of surfacing a confusing `KeyError`
+  further down the call site.
+- `docs/KNOWN_GAPS.md` updated: the Edge Impulse project-ID gap now reads closed for seismic,
+  acoustic, *and* vision; a new Build-call 3 entry tracks exporting this model to `.eim` and wiring
+  it into `services/reflex_loop.py`/`cognition/fusion.py`'s `VISION` modality as separate, not-yet-
+  attempted work. `ml/vision/.gitkeep` removed now that the directory holds real content.
+
+## 23 Aug — acoustic classifier pipeline written, not yet run
+
+**Read this bullet block first if you're resuming after this session.** `scripts/edge_impulse_upload_acoustic.py`
+and `scripts/edge_impulse_train_acoustic.py` are written, complete, and mirror the style/honesty
+discipline of the seismic and vision Edge Impulse scripts — but **neither has actually been executed**.
+Full detail, including every source's verified license and the three originally-named sources that
+turned out not to hold up under checking, is in `ml/acoustic/README.md`; short version:
+
+- Project **1094275** (`EleTect-X-Acoustic`) will hold gunshot/chainsaw/vehicle/animal_call/ambient
+  training data sourced from Mendeley `x48cwz364j` v3 (CC BY 4.0, gunshot + ambient), ESC-50's ESC-10
+  chainsaw clips (CC BY), and Freesound.org text search filtered to CC0/CC BY only (vehicle + animal_call).
+- **UrbanSound8K and the two originally-named elephant sources (Pardo's Zenodo/Dryad records, the
+  HiruDewmi GitHub repo) were checked live and rejected** — UrbanSound8K has no per-clip license field
+  and the whole distribution is CC BY-NC; neither Pardo record actually contains audio; HiruDewmi's
+  repo has real audio but no declared license (`license: null` from GitHub's own API). Vehicle and
+  animal_call were resourced to Freesound directly instead, decided during this session.
+- **Hard blocker: `FREESOUND_API_KEY` does not exist yet.** It is a free credential, but a real one
+  that has to be created by hand at <https://freesound.org/apiv2/apply/> — not something this session
+  could generate. Without it, `edge_impulse_upload_acoustic.py` fails fast at its env-var check before
+  touching Freesound at all; the Mendeley and ESC-50 halves of the script do not depend on it.
+- Neither script has run against a live Edge Impulse project yet, but the acquisition logic *was*
+  verified against real live sources from this machine, which does have real internet access: ESC-50's
+  chainsaw metadata was fetched for real (40 clips, correct 32/8 fold split) and 2 real clips were
+  downloaded and normalized end-to-end (8 kHz, exactly 4.0 s, byte-exact). **Mendeley's public-api
+  endpoint, however, is currently answering with a persistent Cloudflare bot-challenge** (HTTP 403,
+  `Cf-Mitigated: challenge`) rather than the dataset JSON — reproduced consistently across several
+  attempts minutes apart, both via `requests` and (mostly) via `curl`, so this is a live external
+  block on Mendeley's side right now, not a bug in the script. The upload script's `_get()` now
+  detects and prints this specific case distinctly from an ordinary HTTP error, and its own comment
+  records what has worked before in similar situations: opening the dataset page
+  (<https://data.mendeley.com/datasets/x48cwz364j/3>) in a real browser once, then retrying shortly
+  after. Freesound needs `FREESOUND_API_KEY`, unresolved for the separate reason above.
+  **No training numbers exist yet; nothing in `ml/acoustic/README.md` is a fabricated result** — its
+  Result section says plainly that training has not happened.
+- `docs/KNOWN_GAPS.md` updated: the Edge Impulse project-ID gap now reads "closed for seismic and
+  acoustic," the `report_acoustic_event` clause (d) records that a classifier now exists (in code) but
+  nothing runs on the MCU, and a new entry tracks exporting/deploying this model as separate,
+  not-yet-attempted work.
+- Next session, once `FREESOUND_API_KEY` exists: run `edge_impulse_upload_acoustic.py`, then
+  `edge_impulse_train_acoustic.py`, then transcribe the real per-class held-out numbers into
+  `ml/acoustic/README.md` and `docs/KNOWN_GAPS.md` — reported per class, never averaged into one figure.
+
+## 22 Aug late — Cowork planning session (report + contest strategy, no firmware touched)
+
+**Read this bullet block first if you're a fresh Cowork/Opus session resuming after an account
+switch.** Nothing below in this section describes code changes — the VS Code/Sonnet execution
+session did no work this round; this was pure report-writing, documentation, and contest strategy
+by the planning session itself.
+
+1. **Robu.in contest report: built and upgraded, real content only.** Final file:
+   `EleTect-X_Arduino_Challenge_Report.docx` at the repo root (deliberately **not** committed/tracked
+   — added to `.git/info/exclude`, per the "no large binaries" rule; it's a submission artifact for
+   the Robu.in portal, not repo content). Built with `python-docx` against the official contest
+   template. Contains: cover/team tables filled with real registration data (`APC-2026-KL-44330`,
+   track "Industrial & Sustainability AI"); a 23-row real BOM; three generated diagrams (system
+   architecture, MCU pin-level wiring, code structure — all drawn from real `config.h` pin
+   assignments, not invented); a quantified Testing & Results table using only real numbers already
+   established elsewhere in this repo (11/12 stomp detection, 226.98Hz measured rate, camera
+   reboot/replug robustness, pytest 224/224 + pio test 49/49, the real DFPlayer/linker bugs found
+   and fixed). **Still genuinely missing, cannot be filled from a desk**: real project photos, a
+   demo video link, and the actual circuit schematic image (task #1) — all three need the physical
+   build to progress first. GitHub repo public/private status (task #2) is **still unconfirmed** —
+   this is the single highest-leverage 5-minute check outstanding; it gates the Documentation score.
+2. **Competitor research done — kept strictly out of git, by explicit instruction.** Reviewed two
+   real competing submissions in detail (a Word report and a Hackster.io write-up) against the
+   contest's actual published 100-point rubric (Functionality 40 / Innovation 25 / Documentation 20
+   / Presentation 15). Full comparative analysis, priority-ordered action plan, and the ~24-hour
+   schedule live in `docs/internal/CONTEST_WIN_PLAN.md` — **local-only, excluded via
+   `.git/info/exclude`'s existing `docs/internal/` pattern, never to be committed or referenced by
+   name/content in any committed file.** Bottom-line takeaway, safe to restate here since it names no
+   competitor: documentation/diagrams are no longer the gap after item 1 above — the two things still
+   worth real hours are (a) getting an actuator physically wired, fired, and filmed, and (b) the
+   GitHub-public check in item 1. Read that file directly for the full reasoning; don't ask a fresh
+   session to re-derive it.
+3. **LED subsystem redesign, decided but NOT yet in firmware.** `hardware/WIRING_GUIDE.md` §4.0 has
+   the full writeup — short version: real constraint is only 10 heatsink pucks in hand (against a
+   much larger bare-LED stock), so the design target is now **10 LEDs total (6 cool-white + 4
+   royal-blue), wired as 4 independent channels** (white-left/white-right/blue-left/blue-right,
+   still only 2 bucks) instead of the original 2-channel/6-LED plan, so the firmware can alternate
+   side and color across triggers rather than firing identically every time — reasoned from real
+   deterrent-effectiveness literature (unpredictability beats raw brightness for resisting
+   habituation), not from enclosure space. **Two things must happen before this is real**: (a)
+   `config.h`/`led.h`/`led.cpp`/`bridge_handlers.cpp`/`schema.md` need the 2 new channels added
+   (D3/PB0 and D8/PB4, both confirmed free — this is next-VS-Code-session firmware work, not done
+   yet), and (b) the system's worst-case simultaneous power/current peak needs re-checking against
+   the existing 6A fuse now that LED draw is higher (~22.4W vs ~13.4W at full simultaneous fire) —
+   `WIRING_GUIDE.md` §4.0 has the exact numbers to redo that check against.
+4. **Real risk found and flagged, not yet resolved: several genuinely valuable files are
+   uncommitted.** `git status` at end of this session shows `hardware/WIRING_GUIDE.md` itself,
+   `ml/vision/dataset_manifest.json`, `scripts/edge_impulse_train_vision.py`, and
+   `scripts/edge_impulse_upload_vision.py` all untracked (`??`) — real work from earlier sessions
+   that has never been committed. **First thing any resuming session should do is `git status` and
+   get these committed** (small, focused, Conventional-Commits style, per `CLAUDE.md`) before
+   anything else touches those files, so nothing is lost to a bad edit or a disk issue in the
+   meantime.
+5. **Net effect on priority order — unchanged from `docs/internal/CONTEST_WIN_PLAN.md`, restated
+   here since that file may not survive an account switch as visibly as this one does:** (1) commit
+   the untracked files above, (2) confirm GitHub repo is Public, (3) finish physical horn/LED/IR
+   wiring per `WIRING_GUIDE.md` (LED section now reflects the 10-LED/4-channel target, but the
+   original 6-LED/2-channel wiring is still a completely valid fallback if there's no time for the
+   firmware channel-count change — don't let the redesign block getting *something* wired and
+   fired), (4) live fire-test harness run, watched/filmed, (5) one real `SAFE_MODE=0` live
+   detection→deterrence session, filmed, (6) time-boxed LoRa join attempt, (7) submit with margin
+   before 23 Aug 11:59 PM IST.
+
 ## Where the project actually stands (20 Aug 2026)
 
 **Completeness ranking:** `web/frontend` > `web/backend` / `web/ingest` (all essentially done) >>
 `device/mcu` (real, in bench-validation) > `device/mpu` (fusion math built, integration loop missing)
->> `ml/` (`seismic/` now holds a real dataset + a first trained model, 22 Aug; acoustic/datasets/
-evaluation/vision are still `.gitkeep` placeholders).
+>> `ml/` (`seismic/` holds a real dataset + a first trained model, 22 Aug; `vision/` holds a real
+two-class dataset + a first trained FOMO model, 23 Aug; `acoustic/` holds a code-complete, not-yet-run
+upload/train pipeline as of 23 Aug; `datasets/`/`evaluation/` are still `.gitkeep` placeholders).
 
 - **`web/frontend`, `web/backend`, `web/ingest`** — built and real. Supabase schema + RLS + edge
   functions + migrations exist, MQTT→Supabase ingest bridge exists, full React PWA (public site +
@@ -251,10 +488,31 @@ evaluation/vision are still `.gitkeep` placeholders).
     registrations in `main.cpp` remain commented out (same one-at-a-time discipline, see item 2 below),
     so nothing here has fired an actual LED/IR/camera together on real hardware yet. Full detail in
     `docs/KNOWN_GAPS.md`'s "Deterrent-event camera capture wired into `reflex_loop.py`..." entry (18 Aug).
-- **`ml/`** — `seismic/` is real as of 22 Aug; `acoustic/`, `datasets/`, `evaluation/`, `vision/`
-  are still untouched. Not blocking the Aug 20 trial (vision uses a fixed pretrained detector per
-  CONTEXT.md §4), but relevant to the "scientifically rigorous" goal and the Hackster write-up's
-  DSP/model section.
+- **`ml/`** — `seismic/` is real as of 22 Aug; `vision/` is real as of 23 Aug; `acoustic/` holds a
+  code-complete, not-yet-run pipeline as of 23 Aug; `datasets/`, `evaluation/` are still untouched.
+  Not blocking the Aug 20 trial (the field node uses a fixed pretrained detector per CONTEXT.md §4;
+  the newly-trained model below is not exported or wired into anything), but relevant to the
+  "scientifically rigorous" goal and the Hackster write-up's DSP/model section.
+  - **23 Aug — two-class FOMO vision model, Edge Impulse project `1094260` (`EleTect-X-Vision`),
+    trained and evaluated end to end.** `scripts/edge_impulse_upload_vision.py` sourced 3,280
+    Elephant + 1,901 Boar images from two real CC BY 4.0 Roboflow Universe datasets and uploaded
+    them with a group-aware 80/20 split (seed `20260822`); `scripts/edge_impulse_train_vision.py`
+    built the FOMO impulse, trained it, and ran the held-out model test. Real result: per-class F1
+    0.670 Elephant / 0.567 Boar — see `ml/vision/README.md` for the full derivation and required
+    caveats (neither dataset is night-IR footage; nothing here is deployed).
+  - **23 Aug — acoustic classifier pipeline, Edge Impulse project `1094275` (`EleTect-X-Acoustic`),
+    written but not yet run.** `scripts/edge_impulse_upload_acoustic.py` sources gunshot + ambient
+    from Mendeley `x48cwz364j` v3 (CC BY 4.0), chainsaw from ESC-50's ESC-10 subset (CC BY), and
+    vehicle + animal_call from Freesound.org filtered to CC0/CC BY per clip;
+    `scripts/edge_impulse_train_acoustic.py` builds an MFE + Keras classification impulse and reports
+    real per-class held-out results once trained. **Blocked on a `FREESOUND_API_KEY` credential that
+    does not exist yet** (free, but has to be created by hand) and on real internet access this
+    session didn't have — neither script has actually run. UrbanSound8K and the two originally-named
+    elephant sources (Pardo, HiruDewmi) were checked live and rejected for missing/absent licensing;
+    see `ml/acoustic/README.md` for the full derivation. **Nothing on the MCU changed** —
+    `bridge_handlers.cpp` still hardcodes `state.acoustic_ok = false`, and no acoustic capture
+    hardware exists. Full detail in `docs/KNOWN_GAPS.md`'s updated `report_acoustic_event` entry and
+    its new deployment-gap entry.
   - **22 Aug — first trained seismic model, Edge Impulse project `1094084` (`EleTect-X-Seismic`).**
     The 12 real 512-sample geophone windows from the 14/15 Aug bench stomp sessions were uploaded
     (24 samples: a 512 ms `quiet` segment and the 256 ms `footfall` transient from each event, split
