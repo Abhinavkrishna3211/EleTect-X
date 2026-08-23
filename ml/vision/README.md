@@ -261,6 +261,41 @@ including the 96px baseline itself. `TRAINING_CYCLES` raised to 100 at 96px (fit
 undertrained before concluding FOMO's architecture (not its training budget) is the limiting factor
 per the plan's step 6.
 
+## 23 Aug — cycle-count result: real gain on Elephant, Boar unmoved
+
+100 cycles at 96px (job 52989183, 55.4 of the 60-minute cap used), same held-out protocol as above:
+
+| Config | Elephant F1 / P / R | Boar F1 / P / R | Held-out aggregate |
+|---|---|---|---|
+| 96px, 60 cycles (baseline) | 0.670 / 0.729 / 0.669 | 0.567 / 0.563 / 0.634 | 585/1139 good (51.4%) |
+| **96px, 100 cycles** | **0.705 / 0.778 / 0.706** | 0.565 / 0.562 / 0.613 | **607/1139 good (53.3%)** |
+
+This is the best real result to date, and a real (not noise-level) gain — but only on Elephant. Every
+Elephant metric improved; Boar's -0.002 F1 move is within noise. Training-time validation (int8) shows
+the same split: Boar's own validation F1 rose 0.500 → 0.589, so more cycles did help Boar converge
+during training, but that gain didn't survive onto the held-out test — consistent with Boar having
+fewer training instances (2,403 vs Elephant's 3,193 box instances) making it more prone to overfitting
+the validation split specifically as training runs longer, rather than genuinely learning more general
+features. This is a real result, held at the noise floor for Boar, not a win — it must not be reported
+as "cycle count fixed Boar."
+
+100 cycles used 55.4 of the 60-minute compute cap, leaving room for roughly 8 more cycles at this
+resolution before hitting the ceiling again — not enough headroom to meaningfully retest cycle count
+further within a single job.
+
+**Where this leaves the plan's steps 2-7:** resolution (step 2) tested and reverted; class weighting
+(step 4) and augmentation (step 5) were already at Edge Impulse's maximum before this investigation
+started; the Adreno/OpenCL question (step 3) is resolved (caveat 6 above); EON Tuner (step 7) is
+inaccessible on this account tier. Cycle count, the one remaining stock-FOMO knob, produced a real but
+small gain, and only for the majority class. **The model remains well short of the ~90% target: best
+result is Elephant F1 0.705 / Boar F1 0.565, not 0.90 for either class.** Two honest paths remain open,
+neither yet attempted: (a) step 6's heavier/custom architecture (BYOM or ONNX custom learning block,
+a genuine platform change, not a config tweak), or (b) sourcing or generating more Boar training
+images specifically — the relayed guidance's suggestion of targeted Boar-side augmentation via new
+data, not `autoClassWeights` (already on) or `augmentationPolicyImage` (already maxed), which reweight
+or transform existing images rather than add real visual variety. Neither is a small change; both are
+next-session-sized decisions, not a further single-variable retrain.
+
 ## Reproducing
 
 ```
