@@ -43,15 +43,27 @@ import urllib.request
 
 STUDIO = "https://studio.edgeimpulse.com/v1/api"
 
-# FOMO's standard input. 96x96 keeps the grid coarse and the model small enough for
-# the QRB2210; "squash" matches how Roboflow already stretch-resized both source sets
-# (elephant to 640x640, boar to 416x416), so no new aspect-ratio distortion is added.
+# Three controlled trials at 96/128/160px (everything else held constant) showed
+# resolution increase alone monotonically REGRESSES both classes - Boar F1
+# 0.567 -> 0.313 -> 0.165, Elephant 0.670 -> 0.593 -> 0.639. Reverted to 96px (the
+# best real result) rather than keep guessing single hyperparameters against a
+# capped compute budget; see ml/vision/README.md's iteration narrative for the full
+# comparison. "squash" matches how Roboflow already stretch-resized both source
+# sets (elephant to 640x640, boar to 416x416), so no new aspect-ratio distortion.
 IMAGE_SIZE = 96
 RESIZE_MODE = "squash"
 # Edge Impulse documents 0.001 as the learning rate FOMO needs; its stock 0.0005 for
 # other object-detection heads underfits here. Chosen, not inherited.
 LEARNING_RATE = 0.001
-TRAINING_CYCLES = 60
+# EON Tuner (the systematic search Edge Impulse offers) turned out to need an
+# organization-level API key - every plausible /tuner/* endpoint 404'd against this
+# project-scoped key, and there is no org key for this account. Cycle count is the
+# next cheapest untested variable instead: all three resolution trials above left
+# cycles at EI's own default (60), so undertraining at a finer grid is still an
+# unruled-out explanation for those regressions, and it's untested even at the
+# 96px baseline itself. 100 cycles fits the 1h job cap at 96px's ~0.52 min/cycle
+# (~52 min estimated) with headroom to spare.
+TRAINING_CYCLES = 100
 JOB_POLL_S = 20
 JOB_TIMEOUT_S = 7200
 

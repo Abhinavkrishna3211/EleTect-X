@@ -164,16 +164,102 @@ negative sample, see caveat 2.
 5. **Not deployed.** No `.eim` export exists, no detector runs anywhere in the field path, and
    `cognition/fusion.py`'s `VISION` modality stays unpopulated — see the open follow-up entry in
    `docs/KNOWN_GAPS.md`. This README records that a model was trained, not that it does anything yet.
-6. **`CONTEXT.md:30` names the vision runtime "Adreno/OpenCL"; ADR 0001
-   (`docs/decisions/0001-physical-ai-sensing-and-fusion-architecture.md:16`) specifies a "generic
-   CPU/TFLite path (no QNN/Hexagon delegate available on this chip)."** The repo does not reconcile
-   these two statements about the same QRB2210 runtime. INT8 quantization (this model was profiled
-   both ways) is orthogonal to which of the two actually executes it — flagged here, not resolved.
+6. **`CONTEXT.md:30`'s "Adreno/OpenCL" and ADR 0001's "no QNN/Hexagon delegate" are not actually in
+   conflict** (resolved 23 Aug, see `docs/KNOWN_GAPS.md`'s Build-call 3 section). QNN/Hexagon is the
+   NPU delegate, which ADR 0001 rules out; Adreno/OpenCL is the GPU delegate, a separate path Edge
+   Impulse's own Linux SDK docs describe as automatic through `edge-impulse-linux-runner`
+   (`docs/DEVICE_DEVELOPMENT_WORKFLOW.md:269`). What's still open: nobody has actually run that
+   runner on real UNO Q hardware in this repo, so GPU acceleration is doc-confirmed, not
+   hardware-confirmed. Either way it's orthogonal to model size — the quad Cortex-A53 alone has real
+   headroom for this model with no delegate at all.
 
 *Correct framing for a report table: proof-of-concept two-class FOMO detector trained on real,
 CC BY 4.0-licensed daytime wildlife photography (3,280 Elephant / 1,901 Boar images, group-aware
 80/20 split); held-out per-image F1 0.67 Elephant / 0.57 Boar; not field-validated, not night-IR
 validated, not deployed.*
+
+## 23 Aug — resolution-increase diagnostic (retrain in progress)
+
+Step 1 of the improvement plan referenced above, run against project 1094260. Live-checked against
+the API and the generated training script rather than assumed:
+
+- **Backbone is already maxed.** `fomo_mobilenet_v2_a35` is the largest pretrained FOMO backbone
+  Edge Impulse offers — the project's own `/transfer-learning-models` list has weights for alpha
+  0.1 and 0.35 only, nothing bigger. "Bigger backbone" is not an available lever; resolution and
+  data are the only ones left.
+- **Real instance-level class ratio, not just image counts.** Cross-validated against the raw COCO
+  annotations and the split ledger: Elephant 3,193 train / 1,284 test box instances, Boar 2,403
+  train / 600 test — a 1.49:1 ratio, milder than the 1.7:1 image-count ratio already quoted above.
+- **Mechanistic cause of the "defaults to background" result, found and quantified.** Elephant's
+  test split has 35.7% of box instances under 2% of frame area, versus 12.2% in training — a real
+  train/test shift toward smaller objects — compounding 96px's coarse 12×12 FOMO grid, where
+  anything under ~2% of frame area only spans 2-3 grid cells. Both classes defaulting to background
+  at similar rates is consistent with this, not with a discrimination failure between the two
+  classes (cross-species confusion stays near zero throughout).
+- **On-device footprint reconciled.** The 133KB RAM / 81.3KB flash / 6ms figures quoted for the
+  int8 model match the `eon_ram_optimized` build variant specifically (confirmed via the API:
+  ram=136,144B / rom=83,248B); the default balanced `EON` build profiles slightly larger
+  (~153.7KB/67.4KB). Both are for the same UNO Q/QRB2210 profile — not an MCU-vs-QRB2210 mix-up,
+  just two different EON compiler passes over the same trained model. Either number is trivial
+  against real QRB2210 headroom.
+- **224px hit Edge Impulse's free-tier compute cap, not a QRB2210 constraint.** Tried first, to
+  isolate resolution as the only variable — the platform's own pre-flight estimate was 1h31m
+  against a 1-hour free-tier training-job ceiling, an account-tier limit that would disappear on a
+  paid plan, not a sign 224px is too heavy for the field target. Stepped down to 160px (20×20
+  grid, 400 cells — still 2.8× finer than 96px) instead; that run was in progress as of this entry,
+  everything else (backbone, augmentation, `autoClassWeights`, learning rate/cycles) held constant
+  so resolution is the only variable that changed.
+
+No new F1/precision/recall numbers exist yet from this run — the "Result" table above is still the
+96px baseline until the 160px job finishes and reports for real.
+
+## 23 Aug — resolution ladder result: three losses, reverted to 96px
+
+The 160px and 128px jobs referenced above both finished. Same protocol as the baseline: training-time
+validation from the job's own held-out split, then an independent model-testing job over the real
+testing split, aggregated per class with the fixed comma-parsing method (`sample.label` is a
+comma-joined list of every box's class in that image, e.g. `"Boar, Boar, Boar"` — grouping must split
+on `,` and take the first token, not split on whitespace).
+
+| Resolution | Grid | Elephant F1 / P / R | Boar F1 / P / R | Held-out aggregate |
+|---|---|---|---|---|
+| **96px (baseline)** | 12×12, 144 cells | 0.670 / 0.729 / 0.669 | **0.567** / 0.563 / 0.634 | 585/1139 good (51.4%) |
+| 128px | 16×16, 256 cells | 0.593 / 0.640 / 0.587 | 0.313 / 0.328 / 0.330 | 478/1139 good (42.0%) |
+| 160px | 20×20, 400 cells | 0.639 / 0.684 / 0.639 | **0.165** / 0.173 / 0.180 | 452/1139 good (39.7%) |
+| 224px | 28×28, 784 cells | — | — | rejected pre-flight, see below |
+
+224px never trained: Edge Impulse's own pre-flight estimate (1h 31m) exceeded the free-tier account's
+1-hour-per-job compute ceiling, and the job failed after 2.7 minutes without running — an account-tier
+limit, not evidence about the QRB2210 deployment target.
+
+**This result is the opposite of the working hypothesis.** The plan going in (see the 23 Aug entry
+above) was that 96px's coarse grid was the primary cause of the "defaults to background" failure, so a
+finer grid should recover detections on small objects. Instead, resolution increase alone —
+everything else (backbone, learning rate, 60 cycles, augmentation, `autoClassWeights`) held fixed —
+**monotonically regressed both classes**, and Boar was hit far harder than Elephant at every step
+tested. Per-cycle training cost also scales faster than linearly with resolution (96px 0.52 min/cycle,
+128px 0.73 min/cycle, 160px 0.95 min/cycle), so each finer grid left less of the 1-hour budget free to
+also raise cycle count within the same job — the leading explanation is that the finer grids are
+undertrained at the same fixed 60-cycle budget, not that finer resolution is inherently worse for this
+task.
+
+**Reverted `IMAGE_SIZE` to 96 — the best real result of the four — rather than ship a worse model
+for the sake of having changed something.** `scripts/edge_impulse_train_vision.py`'s `IMAGE_SIZE`
+comment carries this same conclusion.
+
+**EON Tuner (the plan's step 7, systematic hyperparameter search) turned out not to be reachable from
+this account.** Checked live: every plausible `/v1/api/{project}/tuner/*` endpoint 404'd against the
+project-scoped `EI_API_KEY`, and a probe against a genuinely tuner-adjacent organization endpoint
+confirmed the reason — it requires an organization-level API key, which this free-tier account does
+not have. Running EON Tuner manually through Studio's UI remains possible but is not scriptable with
+what this project has; not attempted, stated here rather than silently skipped.
+
+**Next controlled test: cycle count, not resolution.** All three trials above left `TRAINING_CYCLES`
+at Edge Impulse's own default (60) — cycle count has never actually been varied, at any resolution,
+including the 96px baseline itself. `TRAINING_CYCLES` raised to 100 at 96px (fits the compute cap at
+~52 estimated minutes) as the next single-variable test, to check whether the baseline itself is
+undertrained before concluding FOMO's architecture (not its training budget) is the limiting factor
+per the plan's step 6.
 
 ## Reproducing
 
