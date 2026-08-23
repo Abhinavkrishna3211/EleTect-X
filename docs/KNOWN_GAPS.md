@@ -422,10 +422,20 @@ criteria — see each entry's status.
   compute-cap budget to also raise cycle count, likely undertraining them) in `ml/vision/README.md`'s
   23 Aug entries. `IMAGE_SIZE` reverted to 96 rather than ship a worse model. EON Tuner (the plan's
   systematic-search step) was checked and found to need an organization-level API key this account
-  doesn't have — not run. Next queued test: cycle count at the 96px baseline (100 vs. the default 60),
-  since cycles have never actually been varied at any resolution tested so far. Status: **open** —
-  three resolution variants tried and rejected, model still short of the ~90% target, cycle-count
-  test queued next.
+  doesn't have — not run. Cycle count (100 vs. the default 60, at 96px) tested next since it had never
+  actually been varied at any resolution tried so far: a real but small gain, Elephant only (F1
+  0.670 → 0.705, every metric up); Boar's held-out F1 stayed flat (0.567 → 0.565, noise-level) despite
+  its training-time validation F1 improving (0.500 → 0.589) — Boar's smaller training set (2,403 vs
+  Elephant's 3,193 box instances) likely overfits the validation split rather than generalizing as
+  training runs longer. **Best real result to date: Elephant F1 0.705 / Boar F1 0.565, both well short
+  of the ~90% target.** Every stock-FOMO knob available on this account (backbone size, resolution,
+  cycles, class weighting, augmentation) has now been tried; the two paths that remain are a heavier/
+  custom architecture (BYOM or ONNX custom learning block) or sourcing/generating more Boar training
+  images specifically (targeted augmentation via new data, distinct from the loss-reweighting and
+  stock image-augmentation already maxed). Full per-class numbers and reasoning in
+  `ml/vision/README.md`'s 23 Aug entries. Status: **open** — three resolution variants and one
+  cycle-count variant tried; next step is an architecture or dataset decision, not a further
+  single-variable retrain.
 - **`CONTEXT.md:30`'s "Adreno/OpenCL" and ADR 0001 §3's "generic CPU/TFLite path (no QNN/Hexagon
   delegate available on this chip)" are not actually the contradiction they read as** (23 Aug,
   investigated as part of the vision-model remediation pass — this was an open inconsistency flagged
