@@ -148,6 +148,43 @@ CAMERA_BURST_FRAMES = 5
 CAMERA_BURST_INTERVAL_S = 0.0
 
 # ---------------------------------------------------------------------------
+# Vision inference (perception/detector.py)
+# ---------------------------------------------------------------------------
+# The trained .eim artifact runs out-of-process as a standing
+# `edge-impulse-linux-runner --run-http-server <port>` HTTP server, not
+# embedded via the edge_impulse_linux Python SDK - neither pip nor
+# ensurepip exists on this board's Python 3.13.5 image and no sudo
+# credential is available to install either (confirmed 28 Aug on the real
+# board). See perception/detector.py's own module docstring for the full
+# rationale and the live verification against a real image.
+
+# 127.0.0.1, not the LAN address used during the 28 Aug bench verification -
+# in production the runner is a same-host companion process to this loop,
+# never reachable off-board. Starting/supervising that process
+# (boot-persistent, restart-on-crash) is not yet built - tracked in
+# docs/KNOWN_GAPS.md, not solved here; main.py assumes it is already
+# running by the time an event needs it, and a detect() call against
+# nothing listening degrades to VISION unavailable, same as a camera
+# failure (perception/detector.py, services/reflex_loop.py).
+VISION_INFERENCE_URL = "http://127.0.0.1:1337"
+
+# Per-frame socket timeout for one detect call. Bench-measured
+# classification time on the real board was ~20ms (28 Aug, real image over
+# the LAN); 2.0s is a generous multiple of that, not a tuned figure -
+# INVENTED, the same "bounded deliberately short so a hung call can't hang
+# the whole event" reasoning as BRIDGE_CALL_TIMEOUT_S above, just guarding a
+# different transport.
+VISION_INFERENCE_TIMEOUT_S = 2.0
+
+# How many frames the pre-decision vision check captures, distinct from
+# CAMERA_BURST_FRAMES (the larger, IR-lit evidence burst captured only once
+# an alert actually fires). INVENTED - a small odd number chosen to give
+# the detector more than one chance at a moving animal without adding much
+# latency ahead of decide(); no real-world tuning data backs this count
+# yet. See docs/KNOWN_GAPS.md.
+VISION_CHECK_FRAME_COUNT = 3
+
+# ---------------------------------------------------------------------------
 # Deterrent-event capture storage (perception/storage.py)
 # ---------------------------------------------------------------------------
 # Where reflex_loop.py's alert-path frame burst gets written, tagged with the
