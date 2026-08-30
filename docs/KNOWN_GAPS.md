@@ -397,21 +397,22 @@ criteria — see each entry's status.
   substitute for actually exercising `perception/camera.py`'s own `Camera` class end to end. High
   severity — this is still the build call's own exit criterion. Status: **pending hardware** — needs
   `sudo apt install python3-opencv` on the board, then a re-run.
-- **Capture and IR illumination are not coordinated, by design.** `pulse_ir()` exists as an MCU-side
-  Bridge stub (`device/mpu/bridge/rpc.py`) but is unregistered on both sides (same
-  `Bridge.provide()` batch-registration caution as `bridge/rpc.py`'s other stubs). Night capture will
-  eventually need capture windows aligned to an IR pulse, but `perception/camera.py` deliberately
-  has no dependency on `Bridge` at all — wiring that coordination is later build-call scope, once the
-  ping bench proves the Bridge round trip works at all. Medium severity. Status: open, deferred by
-  design.
-- **The trained FOMO detector (`ml/vision/README.md`, Edge Impulse project 1094260) is not exported
-  or wired into anything on this board.** No `.eim` runner has been generated, `perception/__init__.py`
-  still states the detector is unbuilt, `perception/camera.py` stays capture-only, and
-  `services/reflex_loop.py` saves the camera burst without running it through any classifier — so
-  `cognition/fusion.py`'s `VISION` modality stays permanently unpopulated regardless of what the
-  camera captures. Follow-up-sized, not attempted as part of training the model: needs the `.eim`
-  export step, a decision on where inference runs in the reflex-loop event path, and a real on-device
-  latency figure before it can be scoped further. Status: **open**.
+- **Capture and IR illumination coordination — superseded, see the 28 Aug entry below.** This entry
+  originally read "not coordinated, by design" and described `pulse_ir()` as an unregistered stub with
+  the coordination deferred to a later build call. That is no longer accurate: `reflex_loop.py` now
+  fires `pulse_ir()` on a short-lived thread concurrent with `camera.capture_burst()`, proven by a real
+  overlap test. Left here rather than deleted so the history of the gap is traceable; the live status
+  is tracked at the entry below ("Fixed MPU-side only, `reflex_loop.py`").
+- **Vision detector export/wiring — superseded, see the 28 Aug entry below.** This entry originally
+  read "not exported or wired into anything on this board," describing `perception/__init__.py` as
+  stating the detector was unbuilt and `cognition/fusion.py`'s `VISION` modality as permanently
+  unpopulated. That was already inaccurate by the time it was checked (28 Aug): `perception/detector.py`
+  (`HttpVisionDetector`) exists, is wired into `main.py`, and is invoked from
+  `services/reflex_loop.py`'s `handle_footfall_event()` before every fuse/decide call. The 29-30 Aug
+  session additionally exported a fresh `.eim` for the finalized threshold-0.05 checkpoint and
+  measured real on-device latency (138 ms mean, CPU, Arduino UNO Q) — see `ml/vision/README.md`'s
+  "29-30 Aug" entry for the full benchmark. Left here rather than deleted so the history of the gap is
+  traceable; the live status is tracked at the entry below ("Status: **closed** (28 Aug)").
 - **Vision-model resolution-increase experiment concluded (23 Aug) — hypothesis rejected, reverted
   to the 96px baseline.** The working theory (96px's coarse 12×12 grid under-detects small boxes;
   see the 65.1%/56.7% F1 diagnosis in the entry directly below) predicted a finer grid would recover
@@ -583,9 +584,9 @@ criteria — see each entry's status.
   `device/mpu/tests/test_reflex_loop.py`. `handle_acoustic_event()` (22 Aug) converts
   `report_acoustic_event`'s `confidence` the same way, through the same clamp — the helper was
   generalised from `_seismic_log_odds()` to a shared `_confidence_log_odds()` rather than
-  duplicated, since the clamp is a property of `logit()`, not of either sensor. Still **open for
-  vision** — no detector exists (see the vision entry below), so it is still passed to `fuse()` as
-  `available=False`, never scored.
+  duplicated, since the clamp is a property of `logit()`, not of either sensor. **Closed for
+  vision too** (28 Aug) — see the vision entry below: `handle_footfall_event()` now runs a
+  pre-decision vision check and feeds a real `VISION` reading into the same `fuse()` call.
 - **`report_acoustic_event`'s classifier output has no defined mapping onto elephant-presence
   log-odds, and is not fed into `fuse()`.** `AcousticClass` (gunshot/chainsaw/vehicle/animal_call/
   ambient, `bridge/rpc.py`) is a threat/context classification, not an elephant-presence signal, and
@@ -655,7 +656,68 @@ criteria — see each entry's status.
   unavailable.** `perception/camera.py` is capture-only (no pixel → log-odds model);
   `cognition/fusion.py`'s own module docstring already named this a future build call. High
   severity — vision is the highest-weighted modality (`WEIGHT_VISION` = 1.5, the largest of the
-  three), so every alert decision today runs on seismic evidence alone. Status: open.
+  three), so every alert decision today runs on seismic evidence alone. Status: **closed** (28 Aug)
+  — `device/mpu/perception/detector.py` (`HttpVisionDetector`) is a real client against the trained
+  ETX-V model, run out-of-process as a standing `edge-impulse-linux-runner --run-http-server`
+  endpoint (Node CLI, not the Python SDK — neither `pip` nor `ensurepip` exists on the board's
+  Python 3.13.5 image and no sudo credential is available to install either, confirmed 28 Aug on
+  the real board). `device/mpu/services/reflex_loop.py`'s `handle_footfall_event()` now opens the
+  camera and runs this detector *before* `fuse()`/`decide()` on every non-safe-mode footfall event
+  — seismic wakes vision, vision attempts to confirm, and only then does the alert decision run,
+  per the 28 Aug architectural correction. Only an `"Elephant"` detection (`VISION_TARGET_LABEL`)
+  counts as elephant-presence evidence; a `"Boar"` match is real signal but for a different question
+  (which deterrent tier is appropriate), not fused here — see the open question below. A vision
+  check that finds nothing scores `available=True` at `cognition.config.BASELINE_VISION` (net-zero
+  fusion contribution), not `available=False` — that flag is reserved for a genuine camera or
+  detector failure (`perception.detector.DetectionError`, treated identically to
+  `perception.camera.CameraError`). Host-tested end to end in
+  `device/mpu/tests/test_reflex_loop.py` (a qualifying detection measurably raises the fused
+  probability against an independent hand computation, a non-target-label detection and a detector
+  failure both provably contribute nothing). **Live-verified 29-30 Aug:** exported a fresh `.eim` for
+  the finalized threshold-0.05 checkpoint, started it as `edge-impulse-linux-runner --run-http-server
+  1337` on the real board, and drove `HttpVisionDetector` itself (not a substitute) against two
+  known-labeled held-out images over an SSH port-forward — both classified correctly (Elephant image
+  → 2 `Elephant` detections at confidence 0.557/0.334; Boar image → 1 `Boar` detection at confidence
+  0.520). Also captured 123 real classify cycles against the board's live out-the-window camera feed
+  (IR on): mean classification latency 138 ms, ~5.7 FPS end to end, zero false positives across all
+  123 frames. Full writeup and the GPU-delegate-target finding (builds, does not run on this board —
+  missing `libtensorflowlite_gpu_delegate.so`) in `ml/vision/README.md`'s "29-30 Aug" entry. The
+  server was left running on port 1337 (the production default) afterward.
+  **Three things still open, all new as of this closure:**
+  - *No production supervision of the `edge-impulse-linux-runner` process.* `services/config.py`'s
+    `VISION_INFERENCE_URL` assumes something is already listening on `127.0.0.1:1337` by the time
+    an event needs it; starting it on boot and restarting it on crash is not built. If nothing is
+    listening, `detect_vision()` raises `DetectionError` and the event degrades to `VISION`
+    unavailable — never blocks or suppresses actuation — but a silently-dead runner means every
+    field alert runs on seismic alone with no visible symptom beyond a log warning. Medium-high
+    severity for the 2 Sept trial: worth an explicit pre-trial check that the runner is actually up,
+    not just that the code path exists.
+  - *The pre-decision vision check runs before any deterrence tier is selected, so `pulse_ir()`
+    (which only fires for tiers 2/3, after `decide()`) never illuminates it.* At night this check
+    will typically see a dark frame and detect nothing, which gracefully degrades to the neutral
+    `BASELINE_VISION` reading described above rather than breaking — but it means vision's
+    corroboration is effectively daylight/moonlight-only until a proactive-illumination redesign
+    (firing IR before knowing whether it is even an elephant) is explicitly evaluated against the
+    real battery/animal-welfare tradeoff that would be. Not this pass's call to make unilaterally —
+    see ADR 0003.
+  - *Open question, not yet decided:* should a `"Boar"` detection ever suppress or modify an alert
+    (e.g. lower the deterrent tier, since a boar is a real but different threat than an elephant)?
+    Currently a Boar match is logged as a real `Detection` but otherwise has no effect on this path
+    at all.
+  - **Correction, 30 Aug: the "zero false positives across all 123 frames" line above is superseded.**
+    A follow-up 2-hour, 40,422-frame live-camera run on the same board/checkpoint/threshold (same
+    outdoor foliage scene, IR on) found a real, non-trivial false-positive rate: 31.53% of frames
+    produced a `Boar` detection, and a small but nonzero tail (32 boxes) survives even at threshold
+    0.5. Zero `Elephant` false positives occurred in either run — the finding is Boar-label-specific.
+    **Containment: this does not currently create false elephant alerts** — only an `"Elephant"`
+    label feeds `fuse()` (see above), and a Boar match still has no effect on the alert decision, so
+    today's field alerting is unaffected. It does matter for the still-open "should Boar suppress/
+    modify an alert" question directly above: whatever design answers that question must account for
+    a real ~31% nuisance-detection rate on foliage, not treat Boar detections as clean signal. Full
+    numbers, confidence histogram, and bounding-box clustering in `ml/vision/README.md`'s "30 Aug —
+    2-hour continuous live-camera run" entry. Status: open, medium-high severity for any future work
+    that wires Boar detections into an actuation decision; not a blocker for the current
+    Elephant-only fusion path.
 - **ADR 0001 §6's two fusion limitations are accepted approximations, not resolved.** Correlated
   noise across modalities (rain/fog degrading seismic SNR and vision IR contrast together) and the
   MCAR assumption behind availability-gated dropout (vision being unavailable due to fog is
@@ -1633,3 +1695,144 @@ day/night IR sensing is real and intact as originally designed; no remediation n
 **Every bandit hyperparameter is INVENTED.** `BANDIT_EPSILON = 0.15`, `BANDIT_STEP_SIZE = 0.2`, `HABITUATION_WINDOW_S = 600.0`, `HABITUATION_BUCKET_COUNT = 3`, `PROXY_REWARD_HORIZON_S = 1800.0` and the tier gain fractions have no field data behind them — they are reasoned choices (the window is 20x `HORN_COOLDOWN_MS` so consecutive permitted bursts land inside it; the horizon is 3x the window; the constant step size rather than a sample average because habituation means the true value drifts and a running average would keep weighting stale early experience) but they are not tuned against anything real. Same disposition as the fusion weights above. Status: **open**, pending real trigger-rate data from a live deployment.
 
 **ADR 0001's "already learns from deterrence outcomes and adapts action selection over time" is now true only in the scoped sense above.** When that ADR was written the claim described the frozen design, not the code; as of this build call there is real per-context action-value learning persisted across restarts, but it learns from an unvalidated proxy, never learns in SAFE_MODE, and cannot observe retreat. The ADR's framing — "action selection already adapts, perception does not" — remains the right one for contest and DFO material, provided the proxy caveat travels with it. Status: **open**, informational.
+
+## `pulse_ir()`/camera capture ordering fixed MPU-side; the MCU-side blocking root cause is not (27 Aug)
+
+Found while planning the vision-model rebuild: `reflex_loop.handle_footfall_event()` previously called `pulse_ir()` *after* `camera.capture_burst()` on tier 2/3 alerts. Because the MCU's `pulse_ir()` blocks for the full requested duration (`device/mcu/src/ir.cpp`: `analogWrite(HIGH)` → `delay(duration_ms)` → `analogWrite(0)`), the RPC only returned once the illuminator was already dark — every night frame this system captured was unilluminated, silently. A simple call reorder does not fix it, since `capture_burst()` still has to run somewhere relative to a call that blocks for the pulse's whole duration.
+
+**Fixed MPU-side only, `reflex_loop.py`:** `pulse_ir()` now starts on a short-lived `threading.Thread` immediately after `camera.open()`, concurrent with `camera.capture_burst()` on the main thread, and is joined before `drive_horn()` fires — emitted ordering is `camera.open() → [pulse_ir() ‖ capture_burst()] → drive_horn() → drive_led()`, unchanged from there on. Proven by `tests/test_reflex_loop.py::test_pulse_ir_overlaps_the_capture_window_not_after_it`, which uses a `_FakePulseIr` that blocks for a measurable `hold_s` and records its own on/off timestamps, then asserts every captured frame's timestamp falls inside that window — a real overlap proof, not just a call-order assertion. `test_escalated_tier_fires_ir_concurrently_with_the_capture` (renamed from the old strict-order test) checks the now-nondeterministic-relative-to-each-other pair (`pulse_ir`, `camera.capture_burst`) as a set rather than a fixed position, since both run on separate threads with no ordering guarantee between them — only `camera.open()` first and `drive_horn()`/`drive_led()` after are guaranteed. Status: **closed**, MPU-side.
+
+**Not fixed: the MCU-side blocking `pulse_ir()` itself remains the correct long-term root cause**, same family as the already-tracked "`loop()` has no task/priority separation, actuator fire blocks sensing for up to ~3.15s" gap above — `ir.cpp`'s blocking `delay()` is one of the actuators named there. The correct fix is making `pulse_ir()` non-blocking on the MCU side (start the pulse, record a deadline, turn it off from a new `ir_service()` polled in `loop()`, mirroring how `horn.cpp`/`led.cpp` would need the same treatment). Deliberately not implemented this pass: it touches trial-critical firmware six days out from the 2 Sept field trial, and a naive non-blocking implementation has its own new failure mode worth naming explicitly — if `ir_service()` is not reached promptly during another actuator's own blocking `delay()` (e.g. the horn's up-to-3000ms burst), the illuminator can over-run its `IR_PULSE_MAX_MS = 500` cap before `ir_service()` gets a chance to turn it off. Any future MCU-side fix must handle that interaction, not just the IR-alone case. Status: **open**, named future work — the MPU-side thread fix above is the field-safe interim measure, not a replacement for this.
+
+## UNO Q board is missing `gstreamer1.0-tools`, blocking live camera capture through the Edge Impulse runner (28 Aug)
+
+Found while on-device benchmarking the vision model over SSH (`arduino@192.168.1.10`). `edge-impulse-linux-runner`'s normal camera path shells out to `gst-launch-1.0`/`gst-inspect-1.0`, which ship in the `gstreamer1.0-tools` Debian package. That package is not installed — confirmed via `dpkg`/`apt list --installed` that the underlying gstreamer *libraries* the runner also needs (`gstreamer1.0-plugins-good`, `-base`, `-libcamera`) are present, but the CLI-tools package specifically is not, and a filesystem-wide search found no `gst-launch-1.0` binary anywhere on the board. Installing it needs `sudo apt-get install gstreamer1.0-tools`, and this SSH session has no sudo password (`sudo -n` fails with "a password is required") — not guessed at or worked around by escalating privileges.
+
+**Impact**: no live camera stream can be run through the runner from this session, which blocked capturing real day and IR-night true-negative frames on the actual deployed hardware for Phase 2 of the vision-rebuild plan (see `ml/vision/README.md`'s "on-device benchmarking" entry). Latency/FPS benchmarking itself was not blocked — worked around with `--fake-camera <file>` against real board-captured frames, which reuses the identical decode→resize→infer path minus the V4L2 capture step, so those numbers remain trustworthy.
+
+**Fix**: whoever has the board's actual `sudo` password (physically or over a future SSH session) runs `sudo apt-get install gstreamer1.0-tools` once, then a live-camera capture session can collect real day/IR-night true-negative frames. **Status: closed (28 Aug)** — the user ran the install directly on the board. A second, previously-undiscovered package gap surfaced immediately after: the runner also needs `gst-device-monitor-1.0` (ships in `gstreamer1.0-plugins-base-apps`, a separate package from `gstreamer1.0-tools`), which was also missing; installed the same way (`sudo apt-get install -y gstreamer1.0-plugins-good gstreamer1.0-plugins-base gstreamer1.0-plugins-base-apps`). With both installed, `edge-impulse-linux-runner --model-file etx_cpu.eim` (no `--camera` flag — the board's camera is enumerated by a libcamera-style path, not `/dev/video0`, so `--camera /dev/video0` fails with "cannot find camera with that name"; omitting it auto-selects the sole camera) ran live end-to-end for the first time: connected to `/base/soc@0/usb@4ef8800/usb@4e00000-1.2:1.0-0c45:6366`, 558 real inference cycles over a 30-second window, steady ~19ms/inference, zero detections fired against whatever was in frame during the test (an unverified scene, not a controlled negative — not claimed as a false-positive-rate measurement). This closes the live-camera-verification gap the CPU latency number above was standing in for.
+
+## UNO Q board is missing `libtensorflowlite_gpu_delegate.so`, blocking the Adreno 702 GPU-delegate export from running (28 Aug)
+
+Found in the same on-device benchmarking pass. Edge Impulse Studio offers an explicit, selectable GPU-delegate export target for this board (`runner-linux-aarch64-gpu`, marked BETA) distinct from the default CPU export (`arduino-uno-q`). The GPU export builds and links cleanly server-side (confirmed `-ltensorflowlite_gpu_delegate` in the captured build log) and downloads a working `.eim` file, but fails to run on the board with `error while loading shared libraries: libtensorflowlite_gpu_delegate.so: cannot open shared object file`. An exhaustive filesystem search (every mount, no `-xdev` restriction) found the library nowhere on the board's host filesystem, and it is also absent from inside Arduino's own official `ghcr.io/arduino/app-bricks/ei-models-runner:0.12.1` Docker image, which additionally lacks `/dev/dri` passthrough by default.
+
+**Impact**: no CPU-vs-GPU latency comparison is possible this pass, so the Adreno 702 GPU-delegate path stays untested — neither confirmed working nor ruled out — going into the 2 Sept trial. The CPU-only path was measured for real on this hardware (~33.8ms/inference, ~29.6 FPS, INT8-quantized `yolo_bgexp`) and is already well above what a trigger-on-motion camera-trap pipeline needs, so this gap does not block the deployment decision by itself.
+
+**Fix**: needs a proprietary Qualcomm Adreno GPU-delegate runtime package installed on the board plus root access, neither available in this session. Status: **open**, lower priority than the `gstreamer1.0-tools` gap above since the CPU number alone already clears deployment requirements.
+
+**29 Aug update — confirmed permanent, with real root access.** Got the board's actual sudo password
+this pass and searched all three configured apt sources directly (Debian trixie+backports+security,
+Arduino's own `apt-repo.arduino.cc`, and the genuine Qualcomm artifactory overlay
+`qartifactory-edge.qualcomm.com/artifactory/qsc-deb-releases`) for any package providing
+`libtensorflowlite_gpu_delegate.so`. **None exists in any of the three.** Two real alternatives are
+present (`mesa-teflon-delegate`, ships `/usr/lib/teflon/libteflon.so`, Mesa's NPU/GPU delegate; ArmNN's
+GPU backend, `libarmnn-gpuacc-backend33`, ships `Arm_GpuAcc_backend.so`, OpenCL via Arm Compute
+Library) but neither is a drop-in fix — both are differently-named libraries with different delegate
+ABIs/symbol tables than what `edge-impulse-linux-runner`'s GPU-target `.eim` actually links against;
+using either would mean building and maintaining a custom ArmNN-based runner to replace
+`edge-impulse-linux-runner` entirely, out of scope for this deployment. **Status: closed as a confirmed
+permanent hardware/software gap** (not an access limitation, not pending further investigation) — the
+CPU-only path remains the deployment path, and its measured numbers already clear requirements.
+
+## Arducam B0490 shows a persistent purple/magenta color cast on live foliage in daylight color mode — optical, not a driver defect (28 Aug)
+
+Found while bench-testing captures for the true-negative/board-captures dataset work. Every outdoor
+capture off the physically connected board — regardless of exposure, gain, saturation, contrast,
+sharpness, or white balance (auto and fixed 5500K both tried) — renders live trunks/foliage
+purple-to-lavender instead of green/brown. Systematically ruled out before concluding this: not caused
+by the USB disconnect/reconnect that happened mid-session (blank-frame signature is distinct and was
+seen both before and independent of any reconnect); not a shadowed photoresistor (visually confirmed
+clear); not a physical lens film/window (board is bare, user-confirmed); not a stuck/dead IR-cut relay
+(a 150-frame/~4.7s continuous capture across a manual cover/uncover motion showed a clean, stable,
+non-oscillating mono↔color transition — the relay switches correctly). A gray-world per-channel gain
+correction computed from a stable color frame (`R,G,B gains 1.109/0.979/0.929`) neutralized the
+*average* channel means numerically but did not fix the *visual* result — the corrected frame still
+reads as a flat gray-mauve wash, because the contamination is per-pixel (proportional to each pixel's
+own NIR reflectance, i.e. how much live chlorophyll is in it) and a single global gain cannot undo that.
+
+**Root cause, confirmed via the vendor's own datasheet language and support precedent, not guessed**:
+the B0490 uses a fixed "940@650nm double-pass" filter — a dual-bandpass filter that always transmits
+both the visible band *and* a ~940nm NIR band, by design, so the camera can serve both day-color and
+IR-night modes without a mechanical IR-cut-filter swap. Because that filter never fully blocks NIR even
+in "day" mode, live chlorophyll's strong ~700-900nm NIR reflectance (the "Wood effect") bleeds into the
+red channel on every daylight color frame, most visibly on the foliage-heavy scenes this deployment
+actually needs. Arducam's own support forum response to the equivalent purple/blue tint on a sibling
+IR-cut product line (IMX477, B0274) called it "the normal expected effect," offering no remedy — this
+is architecturally how this class of cost-reduced (no motorized mechanical ICR) day/night camera
+behaves, not a unit-specific fault. No forum thread, Arducam doc, or driver control was found that
+fixes it; searched Arducam's own forum, their B0490 datasheet, and general dual-bandpass-filter vendor
+documentation.
+
+**Impact assessment**: likely low-impact on the detection model itself — FOMO/YOLO-Pro train and infer
+at 96×96, are shape/texture-driven, and own-board captures are a small slice of the overall corpus, so
+color accuracy matters far less than for a human viewer. **More significant for human-reviewed alert
+snapshots** — a ranger eyeballing a captured frame to confirm a real alert sees a confusing
+purple-tinted forest photo rather than a natural one. No spare camera unit exists to test a
+same-SKU replacement against (`hardware/bom/procurement-status.md` — only one B0490 was ever
+purchased), and a same-SKU swap is not guaranteed to fix a design-level (not unit-level) characteristic
+in any case.
+
+**Fix**: none available in software/firmware. The only real fix is a different camera module with a
+true mechanical IR-cut filter (moves out of the optical path in day mode, physically blocking NIR)
+rather than a fixed dual-bandpass filter — a hardware change, not scoped or budgeted for the 2 Sept
+trial. Status: **open, accepted as a hardware limitation of the current camera SKU** — not blocking the
+trial, but the alert-snapshot color quality should be described to DFO/reviewers as "IR-influenced
+color cast in daylight" rather than presented as a defect that will be patched.
+
+## Vision detector does not reach the ≥92%-per-class-recall bar on either class, at any tested threshold (29 Aug)
+
+After a full dataset-verification pass (every source in the corpus given a real eyes-on sample, 144
+Boar images and 142+ Elephant images individually reviewed across this project's data-quality history,
+confirmed-bad images removed) and a retrain of `yolo-pro-nano-attn_silu` against the fully-cleaned
+12,808-image corpus, real held-out numbers are **Elephant recall 0.781 / Boar recall 0.706** at
+Studio's default threshold. A five-point threshold sweep (`0.05`–`0.5`) was run specifically to probe
+whether a lower confidence cutoff recovers the gap: best case, at threshold 0.05, is **Elephant 0.888,
+Boar 0.837** — still 3.2 and 8.3 points short respectively — bought at a background false-positive
+rate of 0.207 (roughly 1 in 5 empty-scene test images would false-alert), which is not an acceptable
+deployment operating point on its own. See `ml/vision/README.md`'s "29 Aug — YOLO-Pro-nano (attn_silu)
+retrain" and "29 Aug — threshold sweep" entries for the full per-class table and methodology.
+
+**This is not a threshold-selection or a data-quality problem** — the recall ceiling is real and
+measured after both were addressed. Precision is high on both classes (0.97–0.99 at default
+threshold), so the model is not guessing wrong when it fires; the gap is silent misses (no prediction
+at all on 11.1% of Elephant and 23.5% of Boar test images at default threshold). Closing it needs one
+or more of: more/better training data (Boar trails Elephant at every threshold tested, so it needs
+this more), a larger model than the `nano` size class tried, a different architecture not yet tried, or
+an explicit relaxation of the 92% bar with a stated tradeoff, decided by the user — none of those is
+decided here.
+
+**Fix**: none applied this pass; the real number is reported as-is per this project's standing honesty
+discipline rather than smoothed over. Status: **open** — the single largest open item against the
+stated vision-model deployment bar. Does not block the 2 Sept field trial by itself (the system's other
+sensing modalities — seismic, acoustic — are not gated on this number), but should be stated plainly to
+DFO/reviewers as the vision channel's real, current ceiling rather than implied to be closer to the
+target than it is.
+
+**29 Aug update — full four-point model-capacity sweep run, real gain, ladder now closed for this pass.**
+The pipeline was training at `sizing="nano"` (2.4M params) even though the model's own default is
+`sizing="small"` (6.9M) — a hardcoded override, not a deliberate choice, discovered live via the API.
+Added a `--yolo-sizing` flag and ran the full ladder through `large`:
+
+| | nano (2.4M) | small (6.9M) | medium (16.6M) | large (30M) |
+|---|---|---|---|---|
+| Boar recall | 0.706 | 0.730 | 0.770 | **0.762** |
+| Elephant recall | 0.781 | 0.787 | 0.812 | **0.826** |
+| Background FP rate | 0.028 | 0.017 | 0.027 | 0.024 |
+
+Precision held essentially flat across all four sizes on both classes throughout — this is real recall
+gain, not error-type trading. **`large` is the inflection point: Boar recall regressed for the first
+time (0.770 → 0.762) while Elephant kept climbing (+1.4 pt, its biggest single-step gain yet)** —
+training time also kept rising (medium 57.1 min → large 69.1 min). Gap remaining at `large`: **Boar 15.8
+pts short (worse than medium's 15.0), Elephant 9.4 pts short (best yet)**. Decision: stopped the ladder
+here rather than running `xlarge` — Boar has shown no capacity response for two consecutive steps while
+its training-time cost keeps rising, so another capacity step is not the highest-value next experiment,
+especially for Boar specifically. Net across the whole sweep: capacity closed 5.6 pts on Boar and 4.5 pts
+on Elephant (nano→large) but does not reach 92% alone for either class, and Boar now needs a different
+lever. `medium` is the best size/accuracy tradeoff found (real gains on both classes, no Boar regression,
+~12 min cheaper than `large`) and the current best candidate for on-device benchmarking if needed before
+data-side work lands. See `ml/vision/README.md`'s "29 Aug — model-capacity trial" entries for full detail
+including the `large` write-up.
+
+**Revised next-step recommendation**: the Boar/Elephant domain-match Roboflow sourcing named below
+(§3c-2) is now the clear priority — it targets exactly the class (Boar) where capacity has plateaued,
+rather than continuing to spend compute on a lever that has stopped moving that class's number.
