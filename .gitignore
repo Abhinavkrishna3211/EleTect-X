@@ -40,10 +40,15 @@ device/mcu/**/build/
 ml/datasets/**/*.zip
 ml/datasets/**/*.npy
 ml/datasets/**/raw/
+ml/datasets/vision/pseudo_ir/
 device/mpu/models/**/*.tflite
+device/mpu/models/**/*.eim
 *.onnx
 *.pt
 *.pth
+ml/vision/_*.log
+ml/vision/_*.json
+audit_boar_sample.log
 
 # --- Design export cache (keep the .dc.html spec + assets, not the paste cache) ---
 docs/design-reference/uploads/
