@@ -37,6 +37,7 @@ from cognition.bandit import Tier
 from cognition.experience import IN_MEMORY_PATH, ExperienceStore
 from cognition.fusion import Modality, sigmoid
 from perception.camera import CameraError, Frame
+from perception.detector import Detection, DetectionError
 from perception.storage import CaptureEventTag
 from services import reflex_loop
 
@@ -84,16 +85,32 @@ class _FakeDriveLed:
 
 
 class _FakePulseIr:
-    """Recording stand-in for bridge.rpc.pulse_ir, injected per call."""
+    """Recording stand-in for bridge.rpc.pulse_ir, injected per call.
 
-    def __init__(self, ack: bool = True, call_log: list | None = None):
+    Args:
+        ack: What each call should return.
+        hold_s: Simulates the MCU's blocking analogWrite/delay/analogWrite
+            (device/mcu/src/ir.cpp) by sleeping this long before returning -
+            0.0 unless a test needs to prove a concurrent capture actually
+            overlaps the pulse.
+        call_log: Shared cross-fake call-order log, see _FakeDriveHorn.
+    """
+
+    def __init__(self, ack: bool = True, hold_s: float = 0.0, call_log: list | None = None):
         self.ack = ack
+        self.hold_s = hold_s
         self.calls = []
         self.call_log = call_log if call_log is not None else []
+        self.on_at: float | None = None
+        self.off_at: float | None = None
 
     def __call__(self, schema_version, duration_ms):
+        self.on_at = time.monotonic()
         self.calls.append((schema_version, duration_ms))
         self.call_log.append("pulse_ir")
+        if self.hold_s:
+            time.sleep(self.hold_s)
+        self.off_at = time.monotonic()
         return self.ack
 
 
@@ -138,6 +155,7 @@ class _FakeCamera:
         self._fail_capture = fail_capture
         self.call_log = call_log if call_log is not None else []
         self.opened = False
+        self.captured_frames: list[Frame] = []
 
     def open(self):
         self.call_log.append("camera.open")
@@ -149,14 +167,48 @@ class _FakeCamera:
         self.call_log.append("camera.capture_burst")
         if self._fail_capture:
             raise CameraError("fake camera: capture_burst() failed")
-        return [
+        self.captured_frames = [
             Frame(image=None, index=i, timestamp_s=time.monotonic())
             for i in range(self._frame_count)
         ]
+        return self.captured_frames
 
     def close(self):
         self.call_log.append("camera.close")
         self.opened = False
+
+
+class _FakeVisionDetect:
+    """Recording stand-in for perception.detector.VisionDetectFn, injected per event.
+
+    Defaults to "camera saw frames, model found nothing" - the most common
+    real case and the one that keeps every pre-existing fusion assertion
+    numerically valid (an empty-detection reading still contributes exactly
+    zero net evidence, cognition/config.py's BASELINE_VISION - see
+    reflex_loop._vision_reading()'s own docstring). Only affects the
+    used/dropped/contributions bookkeeping, not any fused log-odds value.
+
+    Args:
+        detections: What every call should return - a flat list applied
+            regardless of how many images are passed in, since no test here
+            needs per-image differentiation.
+        raises: If set, __call__ raises this instead of returning.
+    """
+
+    def __init__(
+        self,
+        detections: list[Detection] | None = None,
+        raises: Exception | None = None,
+    ):
+        self._detections = detections if detections is not None else []
+        self._raises = raises
+        self.calls: list[list] = []
+
+    def __call__(self, images):
+        self.calls.append(list(images))
+        if self._raises is not None:
+            raise self._raises
+        return self._detections
 
 
 class _FakeSaveFrames:
@@ -205,12 +257,33 @@ def _expected_acoustic_fusion(confidence: float):
     return fused_log_odds, sigmoid(fused_log_odds)
 
 
+def _expected_seismic_vision_fusion(probability: float, vision_confidence: float):
+    """Hand-computed (L, P) for a footfall event with a qualifying vision match too.
+
+    L = L_PRIOR + WEIGHT_SEISMIC*(logit(probability)-BASELINE_SEISMIC)
+              + WEIGHT_VISION*(logit(vision_confidence)-BASELINE_VISION);
+    acoustic still contributes nothing (dropped). Same anti-tautology
+    discipline as _expected_seismic_fusion above - math.log directly, never
+    logit() or fuse() or reflex_loop's own _confidence_log_odds().
+    """
+    log_odds_seismic = math.log(probability / (1.0 - probability))
+    log_odds_vision = math.log(vision_confidence / (1.0 - vision_confidence))
+    contribution = cognition_config.WEIGHT_SEISMIC * (
+        log_odds_seismic - cognition_config.BASELINE_SEISMIC
+    ) + cognition_config.WEIGHT_VISION * (log_odds_vision - cognition_config.BASELINE_VISION)
+    fused_log_odds = cognition_config.L_PRIOR + contribution
+    return fused_log_odds, sigmoid(fused_log_odds)
+
+
 def _fire(probability=0.9, sta_lta_ratio=6.0, schema_version=1, call_log=None, **fakes):
     """Call handle_footfall_event with sensible defaults and a shared call_log.
 
-    Any of drive_horn/drive_led/pulse_ir/camera/save_frames/experience can be
-    overridden via **fakes; unspecified ones get a default fake sharing
-    call_log, so a test only has to construct the fake(s) it cares about.
+    Any of drive_horn/drive_led/pulse_ir/camera/detect_vision/save_frames/
+    experience can be overridden via **fakes; unspecified ones get a default
+    fake sharing call_log, so a test only has to construct the fake(s) it
+    cares about. detect_vision defaults to a fake that always finds nothing
+    - see _FakeVisionDetect's own docstring for why that keeps the existing
+    fusion-value assertions valid.
 
     The default experience store is fresh and in-memory, so an unspecified
     one means a cold store: no repeats, no learned values, and therefore
@@ -223,6 +296,7 @@ def _fire(probability=0.9, sta_lta_ratio=6.0, schema_version=1, call_log=None, *
         "drive_led": fakes.pop("drive_led", _FakeDriveLed(call_log=log)),
         "pulse_ir": fakes.pop("pulse_ir", _FakePulseIr(call_log=log)),
         "camera": fakes.pop("camera", _FakeCamera(call_log=log)),
+        "detect_vision": fakes.pop("detect_vision", _FakeVisionDetect()),
         "save_frames": fakes.pop("save_frames", _FakeSaveFrames(call_log=log)),
         "experience": fakes.pop("experience", ExperienceStore(IN_MEMORY_PATH)),
         "bandit_params": fakes.pop("bandit_params", DETERMINISTIC_PARAMS),
@@ -251,16 +325,22 @@ def test_high_probability_alerts_and_fires_the_selected_tier_outside_safe_mode()
     On a cold store that is tier 1: horn and LED at tier 1's own values, and
     no IR at all. The IR assertion is the one that changed when the bandit
     landed - every alert used to fire all three actuators unconditionally.
+
+    The default vision-check fake finds nothing (_FakeVisionDetect's own
+    docstring), so VISION reads as available at BASELINE_VISION -
+    contributing exactly zero to the fused log-odds, but that means it now
+    counts as "used", not "dropped" (reflex_loop._vision_reading()'s own
+    docstring on why an unconfirmed check is still an available reading).
     """
     expected_log_odds, expected_p = _expected_seismic_fusion(0.9)
     outcome, kwargs, _ = _fire(0.9)
 
     assert outcome.fusion.log_odds == pytest.approx(expected_log_odds)
     assert outcome.fusion.probability == pytest.approx(expected_p)
-    assert outcome.fusion.used == (Modality.SEISMIC,)
-    assert set(outcome.fusion.dropped) == {Modality.ACOUSTIC, Modality.VISION}
+    assert outcome.fusion.used == (Modality.SEISMIC, Modality.VISION)
+    assert outcome.fusion.dropped == (Modality.ACOUSTIC,)
     assert Modality.ACOUSTIC not in outcome.fusion.contributions
-    assert Modality.VISION not in outcome.fusion.contributions
+    assert outcome.fusion.contributions[Modality.VISION] == pytest.approx(0.0)
 
     assert outcome.decision.alert is True
     assert outcome.action is TIER_1
@@ -297,6 +377,7 @@ def test_safe_mode_suppresses_all_actuation_and_camera():
         drive_led=drive_led,
         pulse_ir=pulse_ir,
         camera=camera,
+        detect_vision=_FakeVisionDetect(),
         save_frames=save_frames,
         experience=ExperienceStore(IN_MEMORY_PATH),
         bandit_params=DETERMINISTIC_PARAMS,
@@ -315,8 +396,17 @@ def test_safe_mode_suppresses_all_actuation_and_camera():
     assert log == []  # nothing in this event touched the camera or storage either
 
 
-def test_low_probability_does_not_alert_and_never_calls_any_actuator_or_camera():
-    """A weak footfall probability must not clear the threshold or fire anything."""
+def test_low_probability_does_not_alert_and_never_calls_any_actuator():
+    """A weak footfall probability must not clear the threshold or fire anything.
+
+    The camera IS still touched - the pre-decision vision check runs before
+    decide() on every non-safe-mode event, alert or not (module docstring's
+    "seismic wakes vision" ordering) - but it opens, captures once, and
+    closes without ever reaching an actuator call or save_frames(). Fusion
+    stays numerically unaffected: the default vision fake finds nothing, so
+    VISION contributes zero either way (see the high-probability test's own
+    note on why).
+    """
     expected_log_odds, expected_p = _expected_seismic_fusion(0.05)
     assert expected_p < reflex_loop.ALERT_PROBABILITY_THRESHOLD  # sanity on the fixture
     outcome, kwargs, log = _fire(0.05, sta_lta_ratio=3.0)
@@ -326,9 +416,10 @@ def test_low_probability_does_not_alert_and_never_calls_any_actuator_or_camera()
     assert outcome.horn_ack is None
     assert outcome.led_ack is None
     assert outcome.ir_ack is None
-    assert outcome.capture_frame_count == 0
+    assert outcome.capture_frame_count == 3  # the vision-check burst only
     assert kwargs["drive_horn"].calls == []
-    assert log == []
+    assert log == ["camera.open", "camera.capture_burst", "camera.close"]
+    assert kwargs["save_frames"].calls == []
 
 
 def test_probability_at_exactly_zero_or_one_does_not_crash():
@@ -368,23 +459,27 @@ def test_schema_version_mismatch_is_logged_not_raised(caplog):
 
 
 def test_camera_opens_before_actuators_and_closes_after_them_with_frames_saved():
-    """Event order must be open -> capture -> horn -> led -> close -> save.
+    """Event order: open -> capture(vision) -> capture(evidence) -> horn -> led -> close -> save.
 
     No pulse_ir entry: this is tier 1 on a cold store, which fires no IR.
     The tiers that do fire it are covered by
-    test_escalated_tier_fires_ir_in_the_documented_position.
+    test_escalated_tier_fires_ir_in_the_documented_position. Two
+    capture_burst entries, not one: the pre-decision vision check and the
+    post-alert evidence burst both draw from the same already-open camera
+    (module docstring) - capture_frame_count reflects both bursts combined.
     """
     outcome, kwargs, log = _fire(0.9)
 
     assert log == [
         "camera.open",
         "camera.capture_burst",
+        "camera.capture_burst",
         "drive_horn",
         "drive_led",
         "camera.close",
         "save_frames",
     ]
-    assert outcome.capture_frame_count == 3
+    assert outcome.capture_frame_count == 6
     assert kwargs["camera"].opened is False  # closed, not left dangling
 
 
@@ -395,7 +490,7 @@ def test_saved_frames_are_tagged_with_the_triggering_event_metadata():
     save_frames = kwargs["save_frames"]
     assert len(save_frames.calls) == 1
     frames, tag = save_frames.calls[0]
-    assert len(frames) == outcome.capture_frame_count == 3
+    assert len(frames) == outcome.capture_frame_count == 6
     assert isinstance(tag, CaptureEventTag)
     assert tag.sta_lta_ratio == 6.0
     assert tag.fused_probability == pytest.approx(outcome.fusion.probability)
@@ -421,7 +516,12 @@ def test_camera_open_failure_never_blocks_actuator_firing(caplog):
 
 
 def test_camera_capture_failure_never_blocks_actuator_firing_and_camera_still_closes(caplog):
-    """A camera that opens but fails to capture must still let deterrence fire, and still close."""
+    """A camera that opens but fails to capture must still let deterrence fire, and still close.
+
+    Two capture_burst attempts, not one - the vision check and the evidence
+    burst are separate calls against the same opened camera (module
+    docstring), and this fake fails both.
+    """
     log: list = []
     camera = _FakeCamera(fail_capture=True, call_log=log)
 
@@ -433,6 +533,7 @@ def test_camera_capture_failure_never_blocks_actuator_firing_and_camera_still_cl
     assert outcome.capture_frame_count == 0
     assert log == [
         "camera.open",
+        "camera.capture_burst",
         "camera.capture_burst",
         "drive_horn",
         "drive_led",
@@ -478,6 +579,98 @@ def test_trigger_to_first_frame_latency_is_instrumented_and_logged(caplog):
 
 
 # ---------------------------------------------------------------------------
+# handle_footfall_event() - vision wiring (28 Aug: seismic wakes vision,
+# vision confirms, only then does fuse()/decide() run)
+# ---------------------------------------------------------------------------
+
+
+def test_a_qualifying_vision_match_raises_the_fused_probability():
+    """An Elephant detection genuinely moves the fused probability, not just a log line.
+
+    This is the core assertion for the whole vision-wiring feature: a real
+    detection must change fuse()'s own math, not merely appear in a log
+    message. Compared against _expected_seismic_vision_fusion's independent
+    hand computation, never against reflex_loop's own _confidence_log_odds()
+    or fuse() a second time (ENGINEERING_CONVENTIONS.md 4).
+    """
+    detection = Detection(
+        label=reflex_loop.VISION_TARGET_LABEL,
+        confidence=0.93,
+        x=10.0,
+        y=10.0,
+        width=50.0,
+        height=50.0,
+    )
+    expected_log_odds, expected_p = _expected_seismic_vision_fusion(0.9, 0.93)
+
+    outcome, kwargs, _ = _fire(0.9, detect_vision=_FakeVisionDetect(detections=[detection]))
+
+    assert outcome.fusion.log_odds == pytest.approx(expected_log_odds)
+    assert outcome.fusion.probability == pytest.approx(expected_p)
+    assert outcome.fusion.used == (Modality.SEISMIC, Modality.VISION)
+    assert outcome.fusion.contributions[Modality.VISION] > 0.0
+    assert kwargs["detect_vision"].calls, "detect_vision must actually have been called"
+
+
+def test_a_non_target_label_detection_still_contributes_nothing():
+    """A Boar detection is real signal, but not for the VISION fusion modality.
+
+    ETX-V is a two-class detector; only VISION_TARGET_LABEL ("Elephant")
+    counts as elephant-presence evidence here (module docstring, and
+    reflex_loop._vision_reading()'s own docstring) - a Boar match must not
+    move the fused probability at all, the same as finding nothing.
+    """
+    boar = Detection(label="Boar", confidence=0.99, x=0.0, y=0.0, width=20.0, height=20.0)
+    expected_log_odds, expected_p = _expected_seismic_fusion(0.9)
+
+    outcome, _, _ = _fire(0.9, detect_vision=_FakeVisionDetect(detections=[boar]))
+
+    assert outcome.fusion.log_odds == pytest.approx(expected_log_odds)
+    assert outcome.fusion.probability == pytest.approx(expected_p)
+    assert outcome.fusion.contributions[Modality.VISION] == pytest.approx(0.0)
+
+
+def test_vision_detect_failure_is_logged_and_reported_unavailable(caplog):
+    """A detector-side failure (network/timeout/bad response) must degrade, never block.
+
+    Treated identically to a camera failure - see
+    perception.detector.DetectionError's own docstring and
+    reflex_loop._vision_reading()'s. The alert path itself must still run to
+    completion on seismic alone.
+    """
+    expected_log_odds, expected_p = _expected_seismic_fusion(0.9)
+
+    with caplog.at_level("WARNING"):
+        outcome, _, _ = _fire(
+            0.9, detect_vision=_FakeVisionDetect(raises=DetectionError("no runner listening"))
+        )
+
+    assert outcome.fusion.log_odds == pytest.approx(expected_log_odds)
+    assert outcome.fusion.probability == pytest.approx(expected_p)
+    assert Modality.VISION in outcome.fusion.dropped
+    assert Modality.VISION not in outcome.fusion.contributions
+    assert outcome.horn_ack is True  # a dark detector must not suppress deterrence
+    assert any("vision detect failed" in record.message for record in caplog.records)
+
+
+def test_vision_check_runs_before_decide_even_without_an_alert():
+    """The vision check happens on every non-safe-mode event, alert or not.
+
+    Proves the "seismic wakes vision" ordering directly: detect_vision is
+    called on a sub-threshold event too, before decide() ever runs - not
+    only as post-alert evidence capture. See
+    test_low_probability_does_not_alert_and_never_calls_any_actuator for the
+    camera-log side of the same behavior.
+    """
+    detect_vision = _FakeVisionDetect()
+
+    outcome, _, _ = _fire(0.05, sta_lta_ratio=3.0, detect_vision=detect_vision)
+
+    assert outcome.decision.alert is False
+    assert detect_vision.calls, "vision must have been checked even though nothing alerted"
+
+
+# ---------------------------------------------------------------------------
 # handle_footfall_event() - bandit selection and habituation avoidance
 # ---------------------------------------------------------------------------
 
@@ -515,12 +708,19 @@ def test_escalation_saturates_at_the_top_tier():
     experience.close()
 
 
-def test_escalated_tier_fires_ir_in_the_documented_position():
-    """Tier 2 fires all three actuators, with pulse_ir after drive_led.
+def test_escalated_tier_fires_ir_concurrently_with_the_capture():
+    """Tier 2 fires all three actuators, with pulse_ir concurrent with the evidence capture.
 
-    The counterpart to the tier-1 ordering test above: the order the module
-    docstring promises is unchanged, IR is simply present again once the
-    tier calls for it.
+    The counterpart to the tier-1 ordering test above. The pre-decision
+    vision-check capture_burst() is synchronous and always lands right after
+    camera.open(), before decide() or tier selection ever run - only the
+    *second* capture_burst() (the post-alert evidence burst) races
+    pulse_ir(), which now starts on its own thread once the tier is known
+    and is joined before drive_horn() (module docstring). So its call_log
+    entry can legally land either just before or just after that second
+    camera.capture_burst()'s - both happen on the main thread's un-joined
+    window - but it is guaranteed to land before drive_horn(), and the first
+    camera.capture_burst() is guaranteed to land before either.
     """
     experience = ExperienceStore(IN_MEMORY_PATH)
     _fire(0.9, experience=experience)
@@ -531,15 +731,43 @@ def test_escalated_tier_fires_ir_in_the_documented_position():
     assert outcome.action is TIER_2
     assert outcome.ir_ack is True
     assert kwargs["pulse_ir"].calls == [(1, TIER_2.ir_duration_ms)]
-    assert log == [
-        "camera.open",
-        "camera.capture_burst",
-        "drive_horn",
-        "drive_led",
-        "pulse_ir",
-        "camera.close",
-        "save_frames",
-    ]
+    assert log[0] == "camera.open"
+    assert log[1] == "camera.capture_burst"  # the pre-decision vision check, deterministic
+    assert set(log[2:4]) == {"camera.capture_burst", "pulse_ir"}
+    assert log[4:] == ["drive_horn", "drive_led", "camera.close", "save_frames"]
+    experience.close()
+
+
+def test_pulse_ir_overlaps_the_capture_window_not_after_it():
+    """pulse_ir() and the camera capture must overlap in wall-clock time.
+
+    The MCU's pulse_ir() blocks for the full requested duration
+    (device/mcu/src/ir.cpp: analogWrite(HIGH) -> delay(duration_ms) ->
+    analogWrite(0)), so firing it strictly after camera.capture_burst() the
+    way every other actuator fires would mean it always returns once the
+    illuminator is already dark - every night frame this system captures
+    would be unilluminated. Proven here with a pulse_ir fake that blocks for
+    a measurable hold_s and records its own on/off timestamps: the
+    capture's frames must land inside that window, not after it.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    _fire(0.9, experience=experience)  # tier 1, escalates the next call to tier 2
+
+    pulse_ir = _FakePulseIr(hold_s=0.2)
+    camera = _FakeCamera()
+    outcome, _, _ = _fire(0.9, experience=experience, pulse_ir=pulse_ir, camera=camera)
+
+    assert outcome.action is TIER_2
+    assert outcome.ir_ack is True
+    assert pulse_ir.on_at is not None
+    assert pulse_ir.off_at is not None
+    assert camera.captured_frames, "capture must have actually produced frames"
+
+    for frame in camera.captured_frames:
+        assert pulse_ir.on_at <= frame.timestamp_s <= pulse_ir.off_at, (
+            "frame captured outside the pulse_ir on/off window - the "
+            "illuminator was not lit when this frame was taken"
+        )
     experience.close()
 
 
@@ -653,6 +881,7 @@ def test_safe_mode_selects_a_tier_but_records_no_attempt(caplog):
             drive_led=_FakeDriveLed(),
             pulse_ir=_FakePulseIr(),
             camera=_FakeCamera(),
+            detect_vision=_FakeVisionDetect(),
             save_frames=_FakeSaveFrames(),
             experience=experience,
             bandit_params=DETERMINISTIC_PARAMS,
@@ -673,6 +902,7 @@ def test_safe_mode_selects_a_tier_but_records_no_attempt(caplog):
         drive_led=_FakeDriveLed(),
         pulse_ir=_FakePulseIr(),
         camera=_FakeCamera(),
+        detect_vision=_FakeVisionDetect(),
         save_frames=_FakeSaveFrames(),
         experience=experience,
         bandit_params=DETERMINISTIC_PARAMS,
@@ -701,6 +931,7 @@ def test_safe_mode_still_records_the_trigger():
             drive_led=_FakeDriveLed(),
             pulse_ir=_FakePulseIr(),
             camera=_FakeCamera(),
+            detect_vision=_FakeVisionDetect(),
             save_frames=_FakeSaveFrames(),
             experience=experience,
             bandit_params=DETERMINISTIC_PARAMS,

@@ -49,6 +49,7 @@ from arduino.app_utils import Bridge
 from bridge.rpc import AcousticClass
 from cognition.experience import ExperienceStore
 from perception.camera import Camera
+from perception.detector import HttpVisionDetector
 from perception.storage import save_burst
 from services import config, reflex_loop
 
@@ -95,6 +96,20 @@ Bridge.provide("debug_stream_raw_seismic_sample", debug_stream_raw_seismic_sampl
 # device, so the camera is never left held open between events.
 _camera = Camera()
 
+# One HTTP vision-detector client per process, reused across events - same
+# module-scope-construction reasoning as _camera above.
+# HttpVisionDetector.__init__ does no I/O either (perception/detector.py):
+# it only stores the base URL and timeout, the actual connection attempt
+# happens per-call inside reflex_loop's pre-decision vision check. Points at
+# the standing edge-impulse-linux-runner --run-http-server process
+# (services/config.py's VISION_INFERENCE_URL) - starting/supervising that
+# process is not this file's job (docs/KNOWN_GAPS.md); if nothing is
+# listening yet, detect_vision() raises DetectionError and reflex_loop
+# degrades VISION to unavailable, the same as a camera failure.
+_vision_detector = HttpVisionDetector(
+    config.VISION_INFERENCE_URL, config.VISION_INFERENCE_TIMEOUT_S
+)
+
 # One experience store per process, held open across events and across the
 # MPU's suspend/resume cycles. Constructed at module scope for the same
 # reason the camera is: ExperienceStore.__init__ does no I/O, so it neither
@@ -133,6 +148,7 @@ def _on_footfall_event(
         ),
         pulse_ir=lambda sv, duration_ms: Bridge.call("pulse_ir", sv, duration_ms),
         camera=_camera,
+        detect_vision=_vision_detector,
         save_frames=save_burst,
         experience=_experience,
     )

@@ -17,15 +17,49 @@ inject recording fakes instead (tests/test_reflex_loop.py, mirroring
 tests/test_fusion.py's pattern of asserting on a returned result, not on log
 output).
 
-Alert-path event order (only when safe_mode is False and decide() returns
-alert=True): camera.open() -> camera.capture_burst() -> drive_horn() ->
-drive_led() -> pulse_ir() (tier 2 and 3 only) -> a short post-fire tail
-sleep -> camera.close() -> save_frames(). The camera opens before any
-actuator call (footage should start as close to trigger as possible) and
-only closes once the full deterrent sequence plus the tail has elapsed. A
-camera or storage failure is logged and never allowed to suppress or delay
-the actuator calls - deterrence is the safety-critical function here,
-footage is important but secondary. See docs/KNOWN_GAPS.md.
+Event order for a real (non-safe_mode) footfall event: camera.open() ->
+capture_burst(VISION_CHECK_FRAME_COUNT frames) -> detect_vision() -> build
+the VISION reading -> fuse() -> decide(). Camera and vision now run before
+the alert gate, not after it - this is the "seismic wakes vision" ordering
+the field trial requires, and the reason a footfall event now opens the
+camera at all when it does not end up alerting. If decide() says no alert,
+the camera closes immediately and nothing else fires. If it says alert:
+[pulse_ir() started on its own thread, concurrent with a second
+capture_burst() for the illuminated evidence footage, tier 2 and 3 only] ->
+drive_horn() -> drive_led() -> a short post-fire tail sleep -> camera.close()
+-> save_frames() with both bursts combined. The camera, opened once at the
+top of the event, is never reopened for the alert path - only closed, once,
+at whichever of the three exits (no alert / safe_mode / end of alert
+sequence) the event actually takes. A camera or vision-detection failure at
+any point is logged and never allowed to suppress or delay the actuator
+calls that follow it - deterrence is the safety-critical function here,
+vision and footage are both important but neither may block it. See
+docs/KNOWN_GAPS.md.
+
+safe_mode=True is the one exception to "camera opens on every footfall
+event": it suppresses the vision check too, not just the actuators, so a
+dry run touches the camera not at all (matching this module's existing
+"SAFE_MODE suppresses ... the camera" contract, and the earlier discipline
+of never giving a real HTTP inference server real traffic during a dry
+run). The honest cost of that choice: a SAFE_MODE log's decision can
+under-state what a live run of the same event would have decided, since
+vision stays reported unavailable rather than corroborating or
+contradicting seismic. Operators using SAFE_MODE to preview deterrence
+policy should read it as "what fires, given seismic alone" rather than a
+literal preview of the fused decision a live run would reach. See
+docs/KNOWN_GAPS.md.
+
+pulse_ir() runs concurrently with the capture, not after it, because the
+MCU's own pulse_ir() blocks for the full requested duration
+(device/mcu/src/ir.cpp: analogWrite(HIGH) -> delay(duration_ms) ->
+analogWrite(0)) - the RPC only returns once the illuminator is already
+dark. Calling it after capture_burst() the way every other actuator fires
+here would mean every night frame this system captures is unilluminated.
+Starting it on a short-lived thread right after camera.open() and joining
+it before drive_horn() is what actually lands the exposure window inside
+the pulse (see docs/KNOWN_GAPS.md, 27 Aug entry, for the correct long-term
+fix - making pulse_ir() non-blocking on the MCU side - and why it is not
+done here, six days from the field trial).
 
 What fires is chosen per event rather than fixed. decide() remains the
 alert gate on the fused probability and is unchanged; once it says alert,
@@ -49,12 +83,38 @@ Two ordering rules in that path are load-bearing rather than incidental:
   neither case did a deterrence happen, so in neither case may the bandit
   be credited for one.
 
-Two of the three fusion modalities are not wired in yet, by design, not
-oversight:
+One of the three fusion modalities is still not wired in, and one now is,
+by design, not oversight:
 
-- **Vision**: no detector exists (perception/camera.py is capture-only, no
-  pixel -> log-odds model - cognition/fusion.py's own module docstring
-  names this a future build call). Always passed to fuse() as unavailable.
+- **Vision** is wired into handle_footfall_event(), the seismic-wake path,
+  per the field directive that seismic waking vision (not the other way
+  round) is what the trial needs: perception/detector.py's HttpVisionDetector
+  posts a captured frame to the standing edge-impulse-linux-runner HTTP
+  server and _vision_reading() below converts its detections into a
+  ModalityReading. Only detections labeled "Elephant" (VISION_TARGET_LABEL)
+  count as evidence toward "elephant present" - a Boar detection from the
+  same two-class model is not folded into this modality; see
+  _vision_reading()'s own docstring for the no-qualifying-detection case and
+  docs/KNOWN_GAPS.md for whether a Boar detection should ever suppress an
+  alert (an open question, not decided here). Vision is not wired into
+  handle_acoustic_event() - that path has no camera open at the moment an
+  acoustic notify arrives, and the field directive is specifically about the
+  seismic-wake ordering; see that function's own docstring, unchanged.
+
+  One real limitation worth naming plainly: the pre-decision vision check
+  runs *before* any deterrence tier is chosen, so it never gets the IR
+  illuminator (pulse_ir only fires once decide()+select_tier() have already
+  run, and only for tiers 2/3). At night this vision check will usually see
+  a dark, unilluminated frame and report no qualifying detection - which
+  _vision_reading() scores as neutral (BASELINE_VISION, zero net
+  contribution), not as evidence against an elephant. This means fusion
+  degrades gracefully at night (seismic still carries the decision, vision
+  simply adds nothing) rather than actively working against a real
+  nighttime event - but it also means vision's corroboration only reliably
+  helps in daylight or moonlit conditions until a proactive-illumination
+  design (firing IR before knowing whether this is an elephant, a real
+  animal-welfare/battery tradeoff ADR 0003 has not signed off on) is built.
+  See docs/KNOWN_GAPS.md.
 - **Acoustic**: handle_acoustic_event() now implements ADR 0007 5's
   routing split, so acoustic does reach fuse() - but never on the footfall
   path above, which still passes it as unavailable because no acoustic
@@ -73,11 +133,16 @@ oversight:
   why handle_acoustic_event() stops at fuse() and never calls decide().
   See docs/KNOWN_GAPS.md.
 
-Only seismic is wired end-to-end into the alert-and-actuate path: the MCU's
-own on-board footfall model already reports a probability (schema.md's
-report_footfall_event), and converting that into fusion's log-odds input via
-cognition.fusion.logit() is a direct, non-invented transformation - not a new
-detector this module had to build.
+Seismic and vision are both wired end-to-end into the alert-and-actuate
+path now: the MCU's own on-board footfall model already reports a
+probability (schema.md's report_footfall_event), and converting that into
+fusion's log-odds input via cognition.fusion.logit() is a direct,
+non-invented transformation - not a new detector this module had to build.
+Vision's own log-odds transformation is the same logit() call on a real
+detector's reported confidence (perception/detector.py), not invented
+either - what is a genuine judgment call, not a measured figure, is
+_vision_reading()'s choice of what to feed fuse() when the burst produced no
+qualifying detection at all (see that function's own docstring).
 
 SAFE_MODE (default on) is the dry-run gate: when true, an alert decision and
 the tier the bandit selected for it are logged, but drive_horn is never
@@ -94,6 +159,7 @@ from __future__ import annotations
 import logging
 import os
 import random
+import threading
 import time
 from dataclasses import dataclass
 from typing import Protocol
@@ -112,6 +178,7 @@ from cognition.decision import Decision, decide
 from cognition.experience import SettledAttempt
 from cognition.fusion import FusionResult, Modality, ModalityReading, fuse, logit
 from perception.camera import CameraError, Frame
+from perception.detector import Detection, DetectionError, VisionDetectFn
 from perception.storage import CaptureEventTag
 from services import config as services_config
 
@@ -146,6 +213,14 @@ SAFE_MODE = os.environ.get("ELETECT_SAFE_MODE", "1") != "0"
 # per-modality weights/baselines already encode. Logged as an open gap, not
 # closed by adding this constant - see docs/KNOWN_GAPS.md.
 ALERT_PROBABILITY_THRESHOLD = 0.5
+
+# Which of the deployed model's classes counts as elephant-presence
+# evidence for the VISION modality. ETX-V is a two-class detector
+# (["Boar", "Elephant"], perception/detector.py's module docstring) - only
+# an "Elephant" detection feeds fuse(); a "Boar" detection is real signal
+# but for a different question (which deterrent tier is even appropriate),
+# not this one. See module docstring on vision wiring.
+VISION_TARGET_LABEL = "Elephant"
 
 # ---------------------------------------------------------------------------
 # Deterrence action selection
@@ -308,12 +383,18 @@ class FootfallOutcome:
             as horn_ack - and also None on tier 1, which does not fire IR at
             all.
         capture_frame_count: Number of frames actually captured for this
-            event (0 if no alert, SAFE_MODE suppressed it, or the camera
-            failed - see module docstring on camera failures never blocking
-            actuation).
-        trigger_to_first_frame_s: Seconds between entering the alert-actuate
-            path and the first captured frame's own timestamp, or None if
-            no frame was captured. Instrumentation only - see
+            event - the pre-decision vision-check burst alone on a
+            non-alert event, that burst plus the post-alert evidence burst
+            on an alert event, or 0 if SAFE_MODE suppressed the camera
+            entirely or it failed to open (see module docstring on camera
+            failures never blocking actuation). Note this count can be
+            nonzero even when no alert fired - the vision check runs before
+            decide(), not after (module docstring's "seismic wakes vision"
+            ordering) - but those frames are only ever saved via
+            save_frames() on an alert.
+        trigger_to_first_frame_s: Seconds between entering this event
+            handler and the first captured frame's own timestamp, or None
+            if no frame was captured. Instrumentation only - see
             docs/KNOWN_GAPS.md on why this loop measures this instead of
             running a continuous rolling pre-event buffer.
     """
@@ -396,6 +477,75 @@ def _confidence_log_odds(probability: float) -> float:
     return logit(clamped)
 
 
+def _vision_reading(
+    detect_vision: VisionDetectFn,
+    frames: list[Frame],
+    target_label: str = VISION_TARGET_LABEL,
+) -> ModalityReading:
+    """Convert a vision-check burst into one VISION ModalityReading; never raises.
+
+    Three cases:
+
+    - No frames to check (camera never opened, or capture failed/returned
+      empty - _capture_burst() already logged why): available=False. This is
+      the only "vision had nothing to say" case - matching
+      perception.camera.CameraError's own "degrade loudly, don't block"
+      discipline, not a policy choice about the model's evidence.
+    - detect_vision() itself fails (network/timeout/bad response,
+      perception.detector.DetectionError): logged and treated identically -
+      available=False. A detector outage must not block or bias the alert
+      decision any more than a dark lens would.
+    - detect_vision() succeeds: only detections labeled target_label count.
+      If at least one qualifies, log-odds is logit() of the *strongest*
+      match's own reported confidence (the same direct, non-invented
+      transformation _confidence_log_odds() already uses for
+      seismic/acoustic). If none qualify - including the case where
+      detect_vision() found real boxes, just none labeled target_label -
+      the reading is still available=True, scored at
+      cognition.config.BASELINE_VISION.
+
+      That baseline choice is deliberate, not a default: Edge Impulse only
+      ever reports a box once it already clears the deployed model's own
+      confidence threshold (perception.detector.Detection's own docstring),
+      so "no qualifying box" cannot be read back into a specific probability
+      the model actually supports - there is no scalar here to convert.
+      Scoring it at BASELINE_VISION - the same log-odds this formula already
+      uses for "a quiescent background frame" - makes an unconfirmed vision
+      check contribute *zero* net evidence to the fused probability
+      (weight * (baseline - baseline) == 0), which is the honest middle
+      ground between "ignore it" (available=False, the camera-failure case)
+      and inventing a specific negative number this detector cannot back up.
+      See cognition/config.py's own BASELINE_VISION comment.
+
+    Args:
+        detect_vision: Callable matching perception.detector.VisionDetectFn.
+        frames: The vision-check burst - Frame objects, not raw images;
+            this function extracts .image itself so callers never have to.
+        target_label: Which class counts as elephant-presence evidence.
+            Defaults to VISION_TARGET_LABEL.
+
+    Returns:
+        A ModalityReading for Modality.VISION.
+    """
+    if not frames:
+        return ModalityReading(Modality.VISION, 0.0, available=False)
+
+    try:
+        detections: list[Detection] = detect_vision([frame.image for frame in frames])
+    except DetectionError as exc:
+        logger.warning("vision detect failed, continuing without vision evidence: %s", exc)
+        return ModalityReading(Modality.VISION, 0.0, available=False)
+
+    matches = [d for d in detections if d.label == target_label]
+    if not matches:
+        return ModalityReading(Modality.VISION, cognition_config.BASELINE_VISION, available=True)
+
+    best_confidence = max(d.confidence for d in matches)
+    return ModalityReading(
+        Modality.VISION, _confidence_log_odds(best_confidence), available=True
+    )
+
+
 def _open_camera(camera: CameraProtocol) -> bool:
     """Open the camera; never raises.
 
@@ -415,20 +565,36 @@ def _open_camera(camera: CameraProtocol) -> bool:
         return False
 
 
-def _capture_burst(camera: CameraProtocol, trigger_monotonic: float) -> list[Frame]:
-    """Grab the pre-fire burst from an already-opened camera; never raises.
+def _capture_burst(
+    camera: CameraProtocol,
+    trigger_monotonic: float,
+    count: int = services_config.CAMERA_BURST_FRAMES,
+) -> list[Frame]:
+    """Grab a burst from an already-opened camera; never raises.
 
     Only called once _open_camera() has already succeeded - a
     capture_burst() failure here is logged the same way an open() failure
     is, and still leaves the caller responsible for closing the camera.
+    Called twice per real alert event with two different counts - the
+    pre-decision vision check (count=VISION_CHECK_FRAME_COUNT) and, only if
+    the event goes on to alert, the illuminated evidence burst
+    (count=CAMERA_BURST_FRAMES, the default) - each call logs its own
+    trigger-to-first-frame latency independently.
+
+    Args:
+        camera: An already-opened CameraProtocol.
+        trigger_monotonic: Reference point for the logged latency - the
+            monotonic time this event's handling began, not the time of
+            this particular call.
+        count: Frames to request. Defaults to CAMERA_BURST_FRAMES (the
+            evidence-burst size); the vision-check call overrides this to
+            services_config.VISION_CHECK_FRAME_COUNT.
 
     Returns:
         The captured frames, or [] if capture_burst() failed.
     """
     try:
-        frames = camera.capture_burst(
-            services_config.CAMERA_BURST_FRAMES, services_config.CAMERA_BURST_INTERVAL_S
-        )
+        frames = camera.capture_burst(count, services_config.CAMERA_BURST_INTERVAL_S)
     except CameraError as exc:
         logger.warning("camera capture failed, continuing without footage: %s", exc)
         return []
@@ -477,6 +643,7 @@ def handle_footfall_event(
     drive_led: DriveLedFn,
     pulse_ir: PulseIrFn,
     camera: CameraProtocol,
+    detect_vision: VisionDetectFn,
     save_frames: SaveFramesFn,
     experience: ExperienceStoreProtocol,
     safe_mode: bool = SAFE_MODE,
@@ -493,18 +660,25 @@ def handle_footfall_event(
     only crash the MPU's own event loop over a field it cannot act on
     anyway. Never blocks past the drive_horn/drive_led/pulse_ir
     Bridge.call()s (services.config.BRIDGE_CALL_TIMEOUT_S each, enforced
-    inside the injected callables, not here) plus one capture burst and a
-    fixed CAPTURE_POST_FIRE_TAIL_S tail, or not at all when safe_mode is
-    true or no alert fires.
+    inside the injected callables, not here) plus two capture bursts, one
+    detect_vision() call and a fixed CAPTURE_POST_FIRE_TAIL_S tail, or not at
+    all when safe_mode is true.
 
-    On a real alert (safe_mode False), the event order is: camera.open() ->
-    camera.capture_burst() -> drive_horn() -> drive_led() -> pulse_ir()
-    (skipped entirely on tier 1) -> sleep(CAPTURE_POST_FIRE_TAIL_S) ->
-    camera.close() -> save_frames(). The camera opens before any actuator
-    call and only closes once the full deterrent sequence plus the tail has
-    elapsed (module docstring). A camera or storage failure at any point is
-    logged and never allowed to suppress or delay the actuator calls that
-    follow it.
+    Outside safe_mode, camera.open() and one capture_burst() +
+    detect_vision() call happen on every footfall event this handler
+    receives, alert or not - vision now runs *before* fuse()/decide(), not
+    only after an alert already fired on other evidence (module docstring's
+    "seismic wakes vision" ordering). If decide() says no alert, the camera
+    closes immediately and nothing else happens. If it says alert: [pulse_ir()
+    on its own thread, concurrent with a second capture_burst() for the
+    illuminated evidence footage, skipped entirely on tier 1] -> drive_horn()
+    -> drive_led() -> sleep(CAPTURE_POST_FIRE_TAIL_S) -> camera.close() ->
+    save_frames() with both bursts combined. The camera opens once at the top
+    of the event and is only ever closed, once, whichever exit the event
+    takes (module docstring). safe_mode=True skips the camera and vision
+    check entirely - see module docstring for the honest cost of that. A
+    camera or vision-detection failure at any point is logged and never
+    allowed to suppress or delay the actuator calls that follow it.
 
     Which tier fires is the bandit's choice, made after decide() and before
     any actuator call. The trigger is recorded and any pending attempt
@@ -525,22 +699,30 @@ def handle_footfall_event(
         drive_led: Callable matching bridge.rpc.drive_led's signature.
         pulse_ir: Callable matching bridge.rpc.pulse_ir's signature.
         camera: Object matching CameraProtocol (open/capture_burst/close).
-            Opened and closed once per alert event, never across events.
+            Opened once and closed once per event (outside safe_mode), never
+            across events.
+        detect_vision: Callable matching perception.detector.VisionDetectFn.
+            Called once per event, against the pre-decision vision-check
+            burst, outside safe_mode only. main.py binds this to a real
+            perception.detector.HttpVisionDetector; tests pass a recording
+            fake.
         save_frames: Callable matching perception.storage.save_burst's
             signature. Called once per alert event with whatever frames
-            were captured (skipped entirely if none were).
+            were captured across both bursts (skipped entirely if none
+            were).
         experience: Object matching ExperienceStoreProtocol. Carries the
             bandit's learned values and trigger history across events and
             across restarts; the only cross-event state this loop has.
-            All six above are injected so this function needs no board,
-            camera or database attached to test - device/mpu/main.py wires
-            the real Bridge.calls, Camera, save_burst and ExperienceStore
-            in; tests pass recording fakes.
+            All seven above are injected so this function needs no board,
+            camera, HTTP inference server or database attached to test -
+            device/mpu/main.py wires the real Bridge.calls, Camera,
+            HttpVisionDetector, save_burst and ExperienceStore in; tests
+            pass recording fakes.
         safe_mode: When true (the default, SAFE_MODE), the decision and the
             selected tier are logged but none of drive_horn/drive_led/
-            pulse_ir/camera/save_frames are ever called, and no attempt is
-            recorded. The trigger itself is still recorded - a dry run
-            observes real events, it just does not respond to them.
+            pulse_ir/camera/detect_vision/save_frames are ever called, and
+            no attempt is recorded. The trigger itself is still recorded - a
+            dry run observes real events, it just does not respond to them.
         threshold: Passed to cognition.decision.decide(). Defaults to
             ALERT_PROBABILITY_THRESHOLD (see that constant's own comment).
         capture_post_fire_tail_s: Seconds to wait after the actuator
@@ -565,15 +747,39 @@ def handle_footfall_event(
             services_config.SCHEMA_VERSION,
         )
 
+    # Shared reference point for both bursts this event may capture (the
+    # pre-decision vision check below, and the post-alert evidence burst
+    # further down) - taken once, up front, so trigger_to_first_frame_s stays
+    # meaningful regardless of which burst actually produced the first frame.
+    trigger_monotonic = time.monotonic()
+
+    # Seismic wakes vision, vision (attempts to) confirm the elephant, and
+    # only then does fuse()/decide() run - this is the ordering the 28 Aug
+    # correction requires (module docstring). Gated behind `not safe_mode`
+    # rather than running unconditionally: SAFE_MODE's existing contract is
+    # that it suppresses the camera entirely, not just the actuators
+    # (test_safe_mode_suppresses_all_actuation_and_camera) - preserved here
+    # at the documented cost that a SAFE_MODE log no longer previews exactly
+    # what a live run would have decided (module docstring).
+    camera_opened = False
+    vision_frames: list[Frame] = []
+    if not safe_mode:
+        camera_opened = _open_camera(camera)
+        if camera_opened:
+            vision_frames = _capture_burst(
+                camera, trigger_monotonic, count=services_config.VISION_CHECK_FRAME_COUNT
+            )
+
+    vision_reading = _vision_reading(detect_vision, vision_frames)
+
     readings = [
         ModalityReading(Modality.SEISMIC, _confidence_log_odds(probability), available=True),
-        # Acoustic/vision: no reading in hand on this path. A footfall notify
-        # carries neither, and nothing correlates an acoustic event with this
+        # Acoustic: no reading in hand on this path. A footfall notify
+        # carries none, and nothing correlates an acoustic event with this
         # one across time yet - acoustic fuses only on its own event, in
-        # handle_acoustic_event(). Vision has no detector at all. See module
-        # docstring.
+        # handle_acoustic_event(). See module docstring.
         ModalityReading(Modality.ACOUSTIC, 0.0, available=False),
-        ModalityReading(Modality.VISION, 0.0, available=False),
+        vision_reading,
     ]
     fusion_result = fuse(readings, cognition_config.DEFAULT_FUSION_PARAMS)
     decision = decide(fusion_result, threshold)
@@ -618,7 +824,11 @@ def handle_footfall_event(
         context: int | None = None,
         action: DeterrenceAction | None = None,
         exploring: bool | None = None,
+        frames: tuple[Frame, ...] = (),
     ) -> FootfallOutcome:
+        trigger_to_first_frame_s = (
+            frames[0].timestamp_s - trigger_monotonic if frames else None
+        )
         return FootfallOutcome(
             fusion=fusion_result,
             decision=decision,
@@ -630,12 +840,19 @@ def handle_footfall_event(
             horn_ack=None,
             led_ack=None,
             ir_ack=None,
-            capture_frame_count=0,
-            trigger_to_first_frame_s=None,
+            capture_frame_count=len(frames),
+            trigger_to_first_frame_s=trigger_to_first_frame_s,
         )
 
     if not decision.alert:
-        return _no_actuation_outcome()
+        # No alert on this evidence: the vision-check burst (if any) is
+        # never saved (storage discipline stays "only on alert" - module
+        # docstring), but it did happen and did feed fusion, so it is
+        # reported through capture_frame_count/trigger_to_first_frame_s the
+        # same as an alert event's frames would be.
+        if camera_opened:
+            _close_camera(camera)
+        return _no_actuation_outcome(frames=tuple(vision_frames))
 
     context = habituation_context(repeat_count, cognition_config.HABITUATION_BUCKET_COUNT)
     floor = escalation_floor(context, bandit_params)
@@ -666,28 +883,51 @@ def handle_footfall_event(
             action.led_duration_ms,
             f", pulse_ir(duration_ms={action.ir_duration_ms})" if action.fire_ir else "",
         )
+        # camera_opened/vision_frames are guaranteed empty here - the
+        # pre-decision block above only runs when not safe_mode.
         return _no_actuation_outcome(context=context, action=action, exploring=exploring)
 
-    trigger_monotonic = time.monotonic()
     trigger_wall_s = event_wall_s
+    # camera_opened already reflects the pre-decision open attempt above -
+    # not reopened here, the same camera session spans the vision check and
+    # this evidence burst.
 
-    camera_opened = _open_camera(camera)
-    frames = _capture_burst(camera, trigger_monotonic) if camera_opened else []
+    # Tier 1 skips pulse_ir entirely rather than requesting a zero duration:
+    # a zero-length request would still consume the IR MOSFET's
+    # IR_MIN_INTERVAL_MS duty budget MCU-side, which is one of the two
+    # reasons the low tier leaves IR alone (cognition/config.py).
+    #
+    # Started on its own thread here, immediately after camera.open(), and
+    # joined below before drive_horn() - never called synchronously after
+    # capture_burst() the way the other actuators fire. pulse_ir() blocks
+    # MCU-side for the full duration (module docstring), so a synchronous
+    # call after the capture would always return with the illuminator
+    # already dark; this is what actually lands the exposure window inside
+    # the pulse.
+    ir_thread: threading.Thread | None = None
+    ir_result: dict[str, bool] = {}
+    if action.fire_ir:
+
+        def _fire_ir() -> None:
+            ir_result["ack"] = pulse_ir(schema_version, action.ir_duration_ms)
+
+        ir_thread = threading.Thread(target=_fire_ir, daemon=True)
+        ir_thread.start()
+
+    evidence_frames = _capture_burst(camera, trigger_monotonic) if camera_opened else []
+    frames = vision_frames + evidence_frames
+
+    ir_ack: bool | None = None
+    if ir_thread is not None:
+        ir_thread.join()
+        ir_ack = ir_result.get("ack")
+        logger.info("pulse_ir ack=%s", ir_ack)
 
     horn_ack = drive_horn(schema_version, action.horn_gain_pct, action.horn_duration_ms)
     logger.info("drive_horn ack=%s", horn_ack)
 
     led_ack = drive_led(schema_version, action.led_pattern_id, action.led_duration_ms)
     logger.info("drive_led ack=%s", led_ack)
-
-    # Tier 1 skips pulse_ir entirely rather than requesting a zero duration:
-    # a zero-length request would still consume the IR MOSFET's
-    # IR_MIN_INTERVAL_MS duty budget MCU-side, which is one of the two
-    # reasons the low tier leaves IR alone (cognition/config.py).
-    ir_ack: bool | None = None
-    if action.fire_ir:
-        ir_ack = pulse_ir(schema_version, action.ir_duration_ms)
-        logger.info("pulse_ir ack=%s", ir_ack)
 
     # The bandit learns only from deterrence that actually happened. A false
     # ack means rule_gate_apply() refused the request inside HORN_COOLDOWN_MS
