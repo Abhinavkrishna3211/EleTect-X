@@ -6,8 +6,12 @@
 ## Context
 
 The power system (§6 of `hardware/bom/procurement-status.md`) was sized 12-13 Aug against a real daily
-energy budget (ADR 0008's measured 0.42-0.45W MPU-suspend draw, ~13Wh/day baseline, plus event-triggered
-deterrence load) and real Kerala monsoon-season solar irradiance. The original plan called for a
+energy budget (ADR 0008's 0.42-0.45W MPU-suspend draw — **a third-party community measurement on
+someone else's board running a different workload, never a reading from this board**, see ADR 0008's
+29 Jul and 2 Sept addenda — giving a **12.77Wh/day** baseline, plus event-triggered deterrence load)
+and real Kerala monsoon-season solar irradiance. *Corrected 2 Sept: this line previously called that
+figure "measured" without qualification and rounded the baseline to "~13Wh/day" — the caveat was lost
+crossing the ADR boundary, which is exactly how an unverified number hardens into a design input.* The original plan called for a
 purpose-built LiFePO4-aware MPPT solar charge controller — the amiciSmart 10A (138×79×38mm, ₹1,949) was the
 lead candidate.
 

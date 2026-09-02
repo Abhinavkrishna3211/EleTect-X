@@ -82,8 +82,10 @@ revision, so the horn's own housing doesn't force the whole enclosure to grow ar
 Comms: a Grove LoRa-E5 module on India's legal IN865 band, talking to a gateway that bridges to
 ChirpStack and then to the backend over MQTT.
 
-Power: a 4S LiFePO4 pack sized against a real measured power budget (not a guess) — continuous MPU
-suspend draw around 0.42-0.45W, sized for 3-day no-sun autonomy at 85% depth of discharge — charged
+Power: a 4S LiFePO4 pack sized against a published power budget — a continuous MPU deep-suspend draw
+of around 0.42-0.45W taken from a third-party bench measurement of the same board (not measured on
+this node, and the design target rather than the as-built figure), sized for 3-day no-sun autonomy at
+85% depth of discharge — charged
 by a 15-20W solar panel through a manually-set CC/CV buck regulator, deliberately simplified after
 every "smart" LiFePO4 charge controller in the affordable price range turned out to have a real,
 verified defect (wrong-chemistry defaults, unconfirmed firmware bugs, or misspecced protection).

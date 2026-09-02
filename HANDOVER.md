@@ -3144,7 +3144,7 @@ picture — read **0003 → 0005 → 0009 → 0011** in that order:
 | 0005 | accepted | Revert to Ahuja SUH-15; solve compactness via enclosure form, not a different part |
 | 0006 | **superseded by 0009**, kept as fallback | Gunshot-dedicated comparator gate + pre-trigger DMA buffer |
 | 0007 | proposed | Unified acoustic architecture, per-class signature table, gunshot bypasses fusion |
-| 0008 | proposed, 2 bench measurements pending | MPU stays in deep suspend (not poweroff) between events, ~0.42-0.45W continuous |
+| 0008 | proposed, **3** bench measurements pending | MPU stays in deep suspend (not poweroff) between events, ~0.42-0.45W continuous — **but suspend is not implemented and that figure is third-party; likely as-built idle ~3.3W, see the ADR's 2 Sept addendum** |
 | 0009 | proposed, gated on one bench test | Continuous on-MCU LPBAM classifier supersedes 0006's gate design |
 | 0011 | proposed (13 Aug) | Horn driver moves to its own small IP66 housing, wired via speaker cable/gland — amends 0003/0005's flush-mount call |
 | 0012 | accepted (20 Aug) | Drop the smart MPPT solar controller for a manually-set XL4015 buck — every checked MPPT unit failed real verification or was over budget |
