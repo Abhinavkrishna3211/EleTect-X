@@ -115,17 +115,23 @@ IRLZ44N gate side taps in at 3.3V, not 5V.
 | Pin | MCU pin | `config.h` name | Drives |
 |---|---|---|---|
 | D2 | PB3 | `AUDIO_TRIGGER_PIN` | DFPlayer IO/ADKEY input (§3) |
-| D4 | PA12 | `HORN_AMP_ENABLE_PIN` | TPA3116D2 `SHUTDOWN` pin, active-low (§3) |
-| D5 | PA11 | `LED_WHITE_PIN` (→ **planned rename `LED_WHITE_LEFT_PIN`**, §4) | IRLZ44N gate, white LED branch, left wing (§4) |
-| D3 | PB0 | **planned `LED_WHITE_RIGHT_PIN`** — not yet in `config.h`, confirmed free/unused, PWM-capable (OPAMP2 output shares this pin but is unused in this design) | IRLZ44N gate, white LED branch, right wing (§4) |
-| D6 | PB1 | `LED_BLUE_PIN` (→ **planned rename `LED_BLUE_LEFT_PIN`**, §4) | IRLZ44N gate, blue LED branch, left wing (§4) |
-| D8 | PB4 | **planned `LED_BLUE_RIGHT_PIN`** — not yet in `config.h`, confirmed free/unused | IRLZ44N gate, blue LED branch, right wing (§4) |
-| D7 | PB2 | `IR_ILLUMINATOR_PIN` | IRLZ44N (or LR7843 module) gate, IR board (§5) |
+| D4 | PA12 | `HORN_AMP_ENABLE_PIN` | TPA3116D2 `SHUTDOWN` pin, active-low (§3) — ⚠ PA12 is USB_OTG_FS D+, claimed by the Arduino core's USB CDC; expect `digitalWrite` here to be a no-op, same as D5 was. Relocate before the horn bring-up (candidates: D9/PB8). |
+| ~~D5~~ | PA11 | *unusable — was `LED_WING_LEFT_PIN`* | **Do not wire.** PA11 is USB_OTG_FS D−, claimed by the Arduino core's USB CDC — `digitalWrite`/`analogWrite` on D5 is a silent no-op. Left wing moved to D3 on 31 Aug 2026. |
+| D3 | PB0 | `LED_WING_LEFT_PIN` (moved here from D5 on 31 Aug 2026) | IRLZ44N gate, left wing — mixed white+blue LEDs, real 2-wing/2-MOSFET build. PWM-capable (TIM3_CH3); OPAMP2 output shares the pin but is unused here. **Bench-confirmed 31 Aug.** |
+| D6 | PB1 | `LED_WING_RIGHT_PIN` (renamed 30 Aug, was `LED_BLUE_PIN`) | IRLZ44N gate, right wing — mixed white+blue LEDs, real 2-wing/2-MOSFET build. **Bench-confirmed 31 Aug.** |
+| D8 | PB4 | **planned `LED_BLUE_RIGHT_PIN`** — not yet in `config.h` | IRLZ44N gate, blue LED branch, right wing (§4). PB4 is also JTAG NJTRST — verify it's actually free before assigning. |
+| D7 | PB2 | `IR_ILLUMINATOR_PIN` | IRLZ44N (or LR7843 module) gate, IR board (§5). **Bench-confirmed 31 Aug** — `pulse_ir` fired, IMX462 camera-diff showed +99.5 % scene luma on a 500 ms pulse. |
 
-**D3/D8 are a planned addition, not yet in firmware — see §4.0.** Don't wire them expecting
-`led.cpp` to already drive them; `config.h`/`led.cpp`/`led.h` need the corresponding update first
-(next VS Code/Sonnet session), same one-at-a-time Bridge-registration discipline as every other
-actuator pin in this repo.
+**Left/right wing (D3/D6) and IR (D7) are wired, flashed, and physically fired as of 31 Aug 2026** —
+see `HANDOVER.md` "RESUME HERE — 31 Aug, ~14:00". **D8 is still a planned addition, not yet in
+firmware — see §4.0.** Don't wire D8 expecting `led.cpp` to drive it; `config.h`/`led.cpp`/`led.h`
+need the update first, same one-at-a-time Bridge-registration discipline as every other actuator pin
+in this repo.
+
+**Pin lesson (31 Aug 2026):** on the UNO Q, **D4 = PA12 and D5 = PA11 are the USB_OTG_FS D+/D− pair**
+and are claimed by the Arduino core's USB CDC — GPIO writes to them do nothing. Clean digital-header
+GPIOs confirmed usable: D3 (PB0), D6 (PB1), D7 (PB2), D9 (PB8). D2 (PB3) and D8 (PB4) are JTAG
+SWO/NJTRST — usable but verify first.
 
 ## 3. Horn: DFPlayer PRO → TPA3116D2 (XH-M543) → Ahuja SUH-15
 
@@ -216,18 +222,21 @@ CAD, which is not fixed):
   depleted pack — if not, it's a cheap fuse-rating bump, not a redesign, but it must be checked,
   not assumed.
 - **Firmware work needed before this is real** (next VS Code/Sonnet session, one-at-a-time Bridge
-  discipline as always): add `LED_WHITE_RIGHT_PIN`/`LED_BLUE_RIGHT_PIN` to `config.h` (D3/D8, both
-  confirmed free), extend `led_channel` in `led.h` from `{kWhite, kBlue}` to 4 values (or a
-  color×side pair), extend `led.cpp`'s `channel_state` array from 2 to 4 instances, and update
-  `bridge_handlers.cpp`/`schema.md`'s `drive_led` channel field to address 4 channels. None of this
-  is wired live yet — same commented-out-`Bridge.provide()` discipline applies to any new
-  registration.
+  discipline as always): the current 2-wing build uses **D3** (`LED_WING_LEFT_PIN`, moved off D5 on
+  31 Aug — D5 is USB D−) and **D6** (`LED_WING_RIGHT_PIN`). A 4-channel expansion would need two
+  more clean GPIOs — **D3 is no longer available**, so pick from D9 (PB8) and one JTAG-shared pin
+  (D2/PB3 SWO or D8/PB4 NJTRST) after verifying it's free — then extend `led_channel` in `led.h`
+  from `{kWingLeft, kWingRight}` to 4 values (or a color×side pair), extend `led.cpp`'s
+  `channel_state` array from 2 to 4 instances, and update `bridge_handlers.cpp`/`schema.md`'s
+  `drive_led` channel field to address 4 channels. None of this is wired live yet — same
+  commented-out-`Bridge.provide()` discipline applies to any new registration.
 
 Everything below (buck sizing, MOSFET gate pattern, wire gauge) is unchanged and still correct —
 only the channel count and per-branch LED count change. Read it per-branch: wherever it says "the
 LED string," that's now "one 2-LED-in-series branch," repeated 3× for white and 2× for blue.
 
-**Per color channel** (repeat for white and blue, using D5/D6 respectively):
+**Per wing** (repeat for the left and right wing, using D3/D6 respectively — D3 replaced D5 on
+31 Aug 2026 because D5/PA11 is USB_OTG_FS D−):
 
 1. **XL4015 buck driver, battery bus → LED string.** Set the buck's output voltage/current to
    match the LED string's forward-voltage/current spec (wire the LEDs in the series/parallel
@@ -243,7 +252,7 @@ LED string," that's now "one 2-LED-in-series branch," repeated 3× for white and
    and will switch cleanly at these LED currents (≤~1.4A per channel across 2 LEDs) — `Rds(on)`
    at 3.3-5V gate drive is in the tens-of-milliohms range per the datasheet, negligible heating at
    this current. ([IRLZ44N datasheet, thierry-lequeu.fr mirror](https://www.thierry-lequeu.fr/data/IRLZ44N.pdf))
-   Wiring: LED string cathode → MOSFET drain; MOSFET source → ground bus; MOSFET gate ← D5 (or D6)
+   Wiring: LED string cathode → MOSFET drain; MOSFET source → ground bus; MOSFET gate ← D3 (or D6)
    through a **220-330Ω series gate resistor** (standard practice, limits inrush into the gate
    capacitance — not in the BOM by name but any resistor from the existing kit in that range
    works) and a **10kΩ pulldown resistor from gate to source** (holds the LED firmly off during
