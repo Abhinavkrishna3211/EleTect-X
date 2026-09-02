@@ -184,15 +184,25 @@ BANDIT_EPSILON = 0.15
 BANDIT_STEP_SIZE = 0.2
 
 # How far back a previous trigger still counts as a "repeat" for context
-# purposes.
+# purposes (ADR 0017 Decision A).
 #
-# 600 s (10 min) is the one constant here with a partly-empirical basis: it
-# is 20x the MCU's longest actuator cooldown (HORN_COOLDOWN_MS, 30 s), so
-# any two triggers that the MCU itself was willing to fire on separately are
-# comfortably inside one window and read as the same visit. Long enough that
-# an animal circling a node reads as one escalating encounter; short enough
-# that this evening's herd is not conflated with last night's.
-HABITUATION_WINDOW_S = 600.0
+# 4500 s (75 min). The order of magnitude is set by real data: "Elephants in
+# the neighborhood" (PeerJ, 2020, https://peerj.com/articles/9399/) measured
+# Asian-elephant crop-raiding duration directly - mean 308 min, range 15 min
+# to 15 h (docs/research/elephant-deterrence-behavioral-science.md 3.1). A
+# raid lasts hours, and an elephant feeding or investigating between the
+# movements that trip a footfall trigger is routinely quiet for longer than
+# the old 600 s window, which then reset the repeat-count bucket to 0 mid-
+# raid and handed the animal the gentlest tier again - the exact failure
+# escalation_floor() exists to prevent.
+#
+# The specific minute value inside the reasoned 60-90 min band (ADR 0017) is
+# an engineering judgement, not a cited figure: long enough to span the
+# within-raid quiet gaps the 2020 data implies, short enough that a given
+# night's herd is not conflated with a separate visit hours later. The old
+# "20x HORN_COOLDOWN_MS" justification is kept alive only as a sanity floor -
+# 75 min clears it by two orders of magnitude - not as the primary basis.
+HABITUATION_WINDOW_S = 4500.0
 
 # How many context buckets habituation_context() maps repeat counts into.
 # Three, matching the tier count, so each bucket can have a distinct floor
@@ -217,13 +227,16 @@ TIER_FLOOR_BY_CONTEXT = (Tier.TIER_1, Tier.TIER_2, Tier.TIER_3)
 
 # Quiet time at which proxy_reward() saturates to a full 1.0.
 #
-# 1800 s (30 min) is three times HABITUATION_WINDOW_S, which is the property
-# that matters: a gap long enough to score full marks is necessarily long
-# enough that the next trigger starts from context 0 again. Anything shorter
-# would let an attempt earn a perfect reward while the animal is still
-# inside the window that calls it a repeat - the reward and the context
-# would then be telling contradictory stories about the same event.
-PROXY_REWARD_HORIZON_S = 1800.0
+# 13500 s (225 min) is three times HABITUATION_WINDOW_S, which is the
+# property that matters: a gap long enough to score full marks is
+# necessarily long enough that the next trigger starts from context 0
+# again. Anything shorter would let an attempt earn a perfect reward while
+# the animal is still inside the window that calls it a repeat - the reward
+# and the context would then be telling contradictory stories about the
+# same event. This value is not independently tuned; it is defined as
+# 3x HABITUATION_WINDOW_S and must be recomputed whenever that changes
+# (ADR 0017 Decision A, "Required companion change").
+PROXY_REWARD_HORIZON_S = 13500.0
 
 # ---------------------------------------------------------------------------
 # Deterrence tier ladder

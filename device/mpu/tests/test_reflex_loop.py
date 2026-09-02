@@ -942,12 +942,12 @@ def test_sub_threshold_events_still_count_toward_habituation():
 def test_a_fired_attempt_is_recorded_and_settled_by_the_next_event():
     """The full learning round trip: fire, come back, score, store the value.
 
-    The gap between the two events here is milliseconds against a 1800s
-    horizon, so the proxy reward is essentially zero - a returning animal is
-    the failure case, and the value that lands in the store must reflect
-    that. Asserting "a value now exists and it is near zero" is the honest
-    assertion; asserting a specific figure would be asserting how long the
-    test itself took to run.
+    The gap between the two events here is milliseconds against the
+    PROXY_REWARD_HORIZON_S, so the proxy reward is essentially zero - a
+    returning animal is the failure case, and the value that lands in the
+    store must reflect that. Asserting "a value now exists and it is near
+    zero" is the honest assertion; asserting a specific figure would be
+    asserting how long the test itself took to run.
     """
     experience = ExperienceStore(IN_MEMORY_PATH)
     _fire(0.9, experience=experience)
@@ -1104,13 +1104,14 @@ def test_a_learned_preference_beats_the_default_tie_break():
     """Once a tier has earned value, greedy selection prefers it over tier 1.
 
     Seeded directly into the store rather than trained through the loop:
-    training a preference in-process would take a real 1800s horizon's worth
-    of wall clock. What is under test is that the loop reads the stored
+    training a preference in-process would take a real PROXY_REWARD_HORIZON_S
+    worth of wall clock. What is under test is that the loop reads the stored
     values and acts on them, not that the update arithmetic works - that is
-    tests/test_experience.py's job.
+    tests/test_experience.py's job. The seeded attempt is dated well past
+    that horizon so it settles at a saturated (full) proxy reward.
     """
     experience = ExperienceStore(IN_MEMORY_PATH)
-    experience.record_attempt(time.time() - 3600.0, 0, Tier.TIER_3)
+    experience.record_attempt(time.time() - 15000.0, 0, Tier.TIER_3)
     experience.settle_pending(time.time(), DETERMINISTIC_PARAMS)
 
     outcome, kwargs, _ = _fire(0.9, experience=experience)
