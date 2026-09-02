@@ -203,6 +203,51 @@ Run with `pio test -e native` from `device/mcu/`, same as the existing suite.
 - No AI/assistant attribution anywhere — commit message, code comments, this spec's own presence
   nowhere referenced in-repo. Standard repo-wide rule, not new to this feature.
 
+## DFPlayer PRO (DFR0768) provisioning + bring-up checklist
+
+The horn fire path (ADR 0015 / 0016) assumes the module has been loaded with the five deterrence
+tracks in a specific order and answers on the D9/D10 software UART. Do this once per module, before
+the harness's `1` command means anything, and re-verify it whenever the flash contents change.
+
+### Load the audio (once per module)
+
+1. Trim/normalise the five ADR 0016 Decision C tracks to short clips (predator growls ~6–7 s, bee
+   swarm trimmed from 2:40 to a representative clip; all well under `HORN_BURST_MAX_MS=3000`). Do
+   not load the raw Freesound downloads.
+2. Connect the DFR0768's USB-C port to a host — it enumerates as a mass-storage volume (128 MB
+   onboard flash, no SD card). If files are already present, delete them all first so directory
+   order starts clean.
+3. Copy the tracks **one at a time, in the order below**, waiting for each copy to finish before
+   starting the next — `AT+PLAYNUM=<n>` indexes by FAT directory (copy) order, not by any number in
+   the filename. This order matches `device/mpu/cognition/config.py`'s `HORN_CONTENT_LIBRARY`:
+   - index 1: bee swarm — "Intense Angry Bee Swarm" (Freesound 788025, CC0)
+   - index 2: tiger roar — "tiger roar" (Freesound 149190, CC-BY 4.0)
+   - index 3: lion roar — "Lion Roar" (Freesound 212764, CC-BY 3.0)
+   - index 4: air horn — "airhorn.wav" (Freesound 64476, CC0)
+   - index 5: firecracker — "Firecracker_01.wav" (Freesound 101130, CC-BY 4.0)
+4. Eject cleanly. Carry the CC-BY attributions for tracks 2, 3, 5 into the project's public
+   materials (ADR 0016 Decision C).
+
+### Verify on the board (bring-up session, module wired, harness flashed)
+
+1. Confirm the software UART works at all: the single highest-priority bring-up check (ADR 0015
+   Decision A). If D9/D10 `SoftwareSerial` does not work on this Zephyr core, nothing below matters
+   and the KEY-pin fallback (`AUDIO_TRIGGER_PIN`) is the contingency.
+2. First `1` after power-on: `horn.cpp` sends `AT+PLAYMODE=3` then `AT+PROMPT=OFF` before the first
+   `AT+PLAYNUM`. Confirm the burst plays once and stops itself (does not loop) and that no
+   confirmation beep plays ahead of the clip. Play mode is re-sent every boot because the DFR0768
+   does not reliably persist it.
+3. Walk `FIRE_TEST_HORN_TRACK_ID` through 1..5 (edit, reflash, or drive it from a temporary harness
+   command) and confirm each index plays the track listed in the load table above. A wrong track for
+   an index means the copy order was not clean — reload.
+4. Confirm `AT+PLAYNUM` on this firmware auto-starts playback rather than only cueing it (ADR 0015
+   open item). If it only cues, `horn.cpp`'s fire sequence needs a follow-up `AT+PLAY` — flag, don't
+   patch silently.
+5. Confirm the `DACL`/`DACR` line-out into the TPA3116D2 is live regardless of `AT+AMP` state — the
+   design bypasses the module's onboard amp and never sends `AT+AMP`.
+6. Use the harness's `1`-twice-within-30 s check to measure `HORN_AMP_ENABLE_DELAY_MS` against real
+   DFPlayer seek latency (existing `KNOWN_GAPS.md` item).
+
 ## Verification checklist before calling this done
 
 1. `pio test -e native` passes, all seven `test_fire_test` cases plus the existing suite green.

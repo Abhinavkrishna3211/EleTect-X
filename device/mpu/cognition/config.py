@@ -291,14 +291,19 @@ TIER_3_GAIN_FRACTION = 1.0
 # in *what* it plays as much as how loud: a bee swarm and a tiger growl are
 # different aversive stimuli, not two volumes of one. Each category name maps
 # to the DFPlayer file indices (AT+PLAYNUM / drive_horn's track_id) that hold
-# that content on the SD card.
+# that content on the DFR0768's 128 MB onboard flash (no SD card - files are
+# copied over its USB-C port).
 HORN_CATEGORY_BEE = "bee_swarm"
 HORN_CATEGORY_PREDATOR = "predator_growl"
 HORN_CATEGORY_AIR_HORN = "air_horn"
 HORN_CATEGORY_FIRECRACKER = "firecracker"
 
-# DFPlayer file index per category. The SD card is provisioned in this exact
-# numeric order so the indices here cannot drift from the files on the card.
+# DFPlayer file index per category. AT+PLAYNUM indexes files by the order they
+# were copied onto the module's onboard flash, not by any number in the
+# filename, so the tracks are loaded one at a time in this exact order at
+# provisioning and the mapping is re-checked at bring-up (the MCU-side
+# docs/specs/mcu-fire-test-harness.md owns that checklist). The indices here
+# then cannot drift from the files on the module.
 # Every track is sourced and license-verified in ADR 0016 Decision C:
 #   1  bee swarm   "Intense Angry Bee Swarm"  (Freesound 788025, CC0)
 #   2  tiger roar  "tiger roar"               (Freesound 149190, CC-BY 4.0)

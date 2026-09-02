@@ -1,7 +1,8 @@
 // Known-answer tests for horn.cpp's pure DFPlayer helpers (ADR 0015
-// Decision F): the gain->AT+VOL mapping and the two AT command formatters.
-// No Serial, no pin state - the host-testable core, mirroring
-// tests/test_rule_gate and footfall_probability_from_ratio()'s precedent.
+// Decision F): the gain->AT+VOL mapping and the four AT command formatters
+// (AT+VOL, AT+PLAYNUM, AT+PLAYMODE, AT+PROMPT). No Serial, no pin state - the
+// host-testable core, mirroring tests/test_rule_gate and
+// footfall_probability_from_ratio()'s precedent.
 //
 // Volume anchors come straight from ADR 0016 Decision C's tier table, after
 // the MCU HORN_GAIN_MAX_PCT (60%) clamp that rule_gate_apply() applies
@@ -96,6 +97,55 @@ static void test_at_playnum_command_rejects_null_or_zero_length(void) {
   TEST_ASSERT_FALSE(horn_at_playnum_command(1, buf, 0));
 }
 
+// --- horn_at_playmode_command ------------------------------------------------
+
+static void test_at_playmode_command_exact_string(void) {
+  char buf[24];
+  TEST_ASSERT_TRUE(
+      horn_at_playmode_command(DFPLAYER_PLAYMODE_SINGLE, buf, sizeof(buf)));
+  TEST_ASSERT_EQUAL_STRING("AT+PLAYMODE=3\r\n", buf);
+
+  TEST_ASSERT_TRUE(horn_at_playmode_command(255, buf, sizeof(buf)));
+  TEST_ASSERT_EQUAL_STRING("AT+PLAYMODE=255\r\n", buf);
+}
+
+static void test_at_playmode_command_rejects_a_buffer_that_cannot_hold_it(void) {
+  char buf[10] = {'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x'};
+  // "AT+PLAYMODE=255\r\n" + NUL needs 18 bytes; 10 is not enough.
+  TEST_ASSERT_FALSE(horn_at_playmode_command(255, buf, sizeof(buf)));
+  TEST_ASSERT_EQUAL_CHAR('\0', buf[0]);
+}
+
+static void test_at_playmode_command_rejects_null_or_zero_length(void) {
+  char buf[24];
+  TEST_ASSERT_FALSE(horn_at_playmode_command(3, nullptr, sizeof(buf)));
+  TEST_ASSERT_FALSE(horn_at_playmode_command(3, buf, 0));
+}
+
+// --- horn_at_prompt_command ------------------------------------------------
+
+static void test_at_prompt_command_exact_string(void) {
+  char buf[24];
+  TEST_ASSERT_TRUE(horn_at_prompt_command(false, buf, sizeof(buf)));
+  TEST_ASSERT_EQUAL_STRING("AT+PROMPT=OFF\r\n", buf);
+
+  TEST_ASSERT_TRUE(horn_at_prompt_command(true, buf, sizeof(buf)));
+  TEST_ASSERT_EQUAL_STRING("AT+PROMPT=ON\r\n", buf);
+}
+
+static void test_at_prompt_command_rejects_a_buffer_that_cannot_hold_it(void) {
+  char buf[8] = {'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x'};
+  // "AT+PROMPT=OFF\r\n" + NUL needs 16 bytes; 8 is not enough.
+  TEST_ASSERT_FALSE(horn_at_prompt_command(false, buf, sizeof(buf)));
+  TEST_ASSERT_EQUAL_CHAR('\0', buf[0]);
+}
+
+static void test_at_prompt_command_rejects_null_or_zero_length(void) {
+  char buf[24];
+  TEST_ASSERT_FALSE(horn_at_prompt_command(false, nullptr, sizeof(buf)));
+  TEST_ASSERT_FALSE(horn_at_prompt_command(false, buf, 0));
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_tier_gain_anchors_map_to_the_adr_0016_volumes);
@@ -107,5 +157,11 @@ int main(int, char **) {
   RUN_TEST(test_at_playnum_command_exact_string);
   RUN_TEST(test_at_playnum_command_rejects_a_buffer_that_cannot_hold_it);
   RUN_TEST(test_at_playnum_command_rejects_null_or_zero_length);
+  RUN_TEST(test_at_playmode_command_exact_string);
+  RUN_TEST(test_at_playmode_command_rejects_a_buffer_that_cannot_hold_it);
+  RUN_TEST(test_at_playmode_command_rejects_null_or_zero_length);
+  RUN_TEST(test_at_prompt_command_exact_string);
+  RUN_TEST(test_at_prompt_command_rejects_a_buffer_that_cannot_hold_it);
+  RUN_TEST(test_at_prompt_command_rejects_null_or_zero_length);
   return UNITY_END();
 }
