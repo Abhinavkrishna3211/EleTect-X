@@ -57,7 +57,13 @@ led_channel led_channel_from_wire(uint8_t channel);
 // is not passed back over Bridge - only logged locally. This mirrors
 // fire_test.cpp's own print_ack(), the only other place these acks are
 // currently surfaced.
-bool bridge_drive_horn(uint8_t schema_version, float gain_pct, uint16_t duration_ms);
+//
+// schema_version 4 (ADR 0015) adds the trailing `track_id` wire field: the
+// DFPlayer content index (AT+PLAYNUM) the MPU tier ladder selected. Unlike
+// gain_pct/duration_ms it is a selector, not a limit, so it is not clamped
+// and horn_ack does not echo it - the return value is unchanged.
+bool bridge_drive_horn(uint8_t schema_version, float gain_pct, uint16_t duration_ms,
+                       uint8_t track_id);
 
 // MPU -> MCU: request an LED deterrence burst (schema.md: drive_led).
 // Same schema_version handling as bridge_drive_horn. Never blocks past

@@ -61,6 +61,14 @@ class DeterrenceAction:
         tier: Which escalation level this action represents.
         horn_gain_pct: drive_horn's gain_pct, 0-100 on the wire.
         horn_duration_ms: drive_horn's duration_ms, uint16 on the wire.
+        horn_track_id: drive_horn's track_id - the DFPlayer content index
+            (AT+PLAYNUM) for this tier's sound category, uint8 on the wire.
+            A real wire field since schema_version 4 (ADR 0015). Which
+            category maps to which tier - and how household proximity gates
+            the tier-3 choice - is cognition/config.py's HORN_CONTENT_LIBRARY
+            and resolve_tier_action(); this field just carries the resolved
+            index. Not a limit, so the MCU never clamps it and horn_ack does
+            not echo it (ADR 0016 Decision B).
         led_channel_id: drive_led's channel - 0 = left wing, 1 = right wing
             (device/mcu/src/led.h's led_channel). Its own wire field since
             schema_version 2 (ADR 0014); before that it was overloaded onto
@@ -84,6 +92,7 @@ class DeterrenceAction:
     tier: Tier
     horn_gain_pct: float
     horn_duration_ms: int
+    horn_track_id: int
     led_channel_id: int
     led_pattern_id: int
     led_gain_pct: float

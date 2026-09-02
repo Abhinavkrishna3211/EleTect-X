@@ -272,13 +272,70 @@ PROTOCOL_DURATION_MS_MAX = 65535
 # the MPU's production code free of the MCU's number while still failing
 # loudly when the assumption behind these fractions expires.
 #
-# The honest reading of the whole gain column: it has no physical effect
-# today. The DFPlayer volume path is unwired (docs/KNOWN_GAPS.md), so gain
-# reaches the MCU and changes nothing audible. The tiers are currently
-# distinguished by actuator count and LED channel, not loudness.
+# The honest reading of the whole gain column as of ADR 0015: the DFPlayer
+# volume path is now wired in firmware (horn.cpp maps gain_pct -> AT+VOL over
+# a software UART), but that UART itself is UNVERIFIED on the Zephyr-based
+# MCU core (docs/KNOWN_GAPS.md, ADR 0015 Decision A) - so until bring-up
+# confirms it, gain still changes nothing audible in practice. What ADR 0015
+# does change is that loudness is no longer the only horn escalation axis:
+# the track_id column below makes *what* the horn plays a tier axis too.
 TIER_1_GAIN_FRACTION = 0.25
 TIER_2_GAIN_FRACTION = 0.45
 TIER_3_GAIN_FRACTION = 1.0
+
+# ---------------------------------------------------------------------------
+# Horn content library (ADR 0016) - which sound category each tier plays
+# ---------------------------------------------------------------------------
+
+# ADR 0016's four deterrence-sound categories. The horn's deterrence value is
+# in *what* it plays as much as how loud: a bee swarm and a tiger growl are
+# different aversive stimuli, not two volumes of one. Each category name maps
+# to the DFPlayer file indices (AT+PLAYNUM / drive_horn's track_id) that hold
+# that content on the SD card.
+HORN_CATEGORY_BEE = "bee_swarm"
+HORN_CATEGORY_PREDATOR = "predator_growl"
+HORN_CATEGORY_AIR_HORN = "air_horn"
+HORN_CATEGORY_FIRECRACKER = "firecracker"
+
+# DFPlayer file index per category. The SD card is provisioned in this exact
+# numeric order so the indices here cannot drift from the files on the card.
+# Every track is sourced and license-verified in ADR 0016 Decision C:
+#   1  bee swarm   "Intense Angry Bee Swarm"  (Freesound 788025, CC0)
+#   2  tiger roar  "tiger roar"               (Freesound 149190, CC-BY 4.0)
+#   3  lion roar   "Lion Roar"                (Freesound 212764, CC-BY 3.0)
+#   4  air horn    "airhorn.wav"              (Freesound 64476,  CC0)
+#   5  firecracker "Firecracker_01.wav"       (Freesound 101130, CC-BY 4.0)
+# Attribution is required on any public / DFO-facing material for
+# the three CC-BY tracks (2, 3, 5) - see ADR 0016 Decision C and
+# docs/research/elephant-deterrence-behavioral-science.md.
+#
+# The evidence is not equal across categories, and the ladder below reflects
+# that: predator growl has the strongest published support (Thuppil & Coss
+# 2016, tiger playback 90-100% retreat), bee swarm the next (King et al.
+# 2007), firecracker/bang rests on live-pyrotechnic precedent (not
+# recordings), and the air horn/siren has a published *null* result (Hedges &
+# Gunaryadi 2010) - it stays in the library only as rotation variety at
+# non-household sites, never as a primary choice.
+HORN_CONTENT_LIBRARY = {
+    HORN_CATEGORY_BEE: (1,),
+    HORN_CATEGORY_PREDATOR: (2, 3),
+    HORN_CATEGORY_AIR_HORN: (4,),
+    HORN_CATEGORY_FIRECRACKER: (5,),
+}
+
+# Tier 3 at a NON-household site rotates the two "loud artificial bang"
+# options so neither becomes predictable, weighted 2:1 toward the
+# firecracker: ADR 0016 Decision B says prefer firecracker over the
+# air horn/siren when both are eligible, because the siren has that null
+# result and the firecracker at least has live-pyrotechnic precedent. The
+# pool is drawn with rng.choice, so listing track 5 twice is the weighting.
+# A household-proximity node NEVER reaches this pool - see
+# resolve_tier_action().
+TIER_3_NON_HOUSEHOLD_TRACK_POOL = (
+    HORN_CONTENT_LIBRARY[HORN_CATEGORY_FIRECRACKER][0],
+    HORN_CONTENT_LIBRARY[HORN_CATEGORY_FIRECRACKER][0],
+    HORN_CONTENT_LIBRARY[HORN_CATEGORY_AIR_HORN][0],
+)
 
 # Durations are identical across all three tiers, which is a real limitation
 # stated plainly rather than a value nobody tuned. Duration is not usable as
@@ -342,11 +399,29 @@ LED_TIER_3_GAIN_FRACTION = 1.0
 #     resolve_tier_action() picks 5 or 6 per fire so the top tier is never a
 #     single fixed "maximum" pattern (ADR 0014 E.2 - a fixed max stimulus is
 #     exactly the habituation failure mode the rotation exists to avoid).
+#
+# Horn content per tier (ADR 0016 Decision B), the axis ADR 0015 added on
+# top of the gain column. Like the Tier 3 LED pattern, the stored track_id
+# is only a default - resolve_tier_action() picks the live one per fire so
+# the horn is never one fixed sound either:
+#
+#   Tier 1 - bee swarm (track 1). The single mildest aversive sound, no
+#     rotation (the category has one track).
+#   Tier 2 - predator growl, rotating tiger (2) / lion (3) each fire. The
+#     strongest-evidence category (Thuppil & Coss 2016); rotation keeps a
+#     persistent animal from learning the exact clip.
+#   Tier 3, household-proximity node - predator growl again, same
+#     tiger/lion rotation at max volume. NEVER a siren or firecracker near
+#     homes (ADR 0016 Decision B): those categories carry a real
+#     resident-nuisance cost and, for the siren, no elephant evidence.
+#   Tier 3, non-household node - rotates the "loud artificial bang" pool
+#     (TIER_3_NON_HOUSEHOLD_TRACK_POOL: firecracker 2:1 over air horn).
 DETERRENCE_TIERS = {
     Tier.TIER_1: DeterrenceAction(
         tier=Tier.TIER_1,
         horn_gain_pct=PROTOCOL_GAIN_PCT_MAX * TIER_1_GAIN_FRACTION,
         horn_duration_ms=TIER_DURATION_MS,
+        horn_track_id=HORN_CONTENT_LIBRARY[HORN_CATEGORY_BEE][0],
         led_channel_id=0,
         led_pattern_id=2,
         led_gain_pct=PROTOCOL_GAIN_PCT_MAX * LED_TIER_1_GAIN_FRACTION,
@@ -358,6 +433,7 @@ DETERRENCE_TIERS = {
         tier=Tier.TIER_2,
         horn_gain_pct=PROTOCOL_GAIN_PCT_MAX * TIER_2_GAIN_FRACTION,
         horn_duration_ms=TIER_DURATION_MS,
+        horn_track_id=HORN_CONTENT_LIBRARY[HORN_CATEGORY_PREDATOR][0],
         led_channel_id=2,
         led_pattern_id=4,
         led_gain_pct=PROTOCOL_GAIN_PCT_MAX * LED_TIER_2_GAIN_FRACTION,
@@ -369,6 +445,10 @@ DETERRENCE_TIERS = {
         tier=Tier.TIER_3,
         horn_gain_pct=PROTOCOL_GAIN_PCT_MAX * TIER_3_GAIN_FRACTION,
         horn_duration_ms=TIER_DURATION_MS,
+        # Stored default = predator primary (the household-safe choice).
+        # resolve_tier_action() always replaces this for Tier 3, household
+        # or not - same as it always replaces led_pattern_id here.
+        horn_track_id=HORN_CONTENT_LIBRARY[HORN_CATEGORY_PREDATOR][0],
         led_channel_id=2,
         led_pattern_id=5,
         led_gain_pct=PROTOCOL_GAIN_PCT_MAX * LED_TIER_3_GAIN_FRACTION,
@@ -389,20 +469,49 @@ DETERRENCE_TIERS = {
 TIER_3_LED_PATTERN_IDS = (5, 6)
 
 
-def resolve_tier_action(tier: Tier, rng: random.Random) -> DeterrenceAction:
+def resolve_tier_action(
+    tier: Tier, rng: random.Random, household_proximity: bool = False
+) -> DeterrenceAction:
     """Return the DeterrenceAction to fire for `tier`.
 
-    Tiers 1 and 2 are fixed - this returns the exact DETERRENCE_TIERS object,
-    so identity checks against it still hold. Tier 3 rotates its LED pattern
-    per fire (ADR 0014 E.2): a fresh action with led_pattern_id drawn from
-    TIER_3_LED_PATTERN_IDS, off the same RNG the bandit's exploration draw
-    already uses, so no new seeding path is introduced. Everything else in
-    the Tier 3 action (wings, gain, durations, IR) is unchanged.
+    Tier 1 is fixed - this returns the exact DETERRENCE_TIERS object, so
+    identity checks against it still hold. Tiers 2 and 3 return a fresh
+    object every call because they rotate content per fire (ADR 0014 E.2 for
+    the Tier 3 LED pattern, ADR 0016 Decision B for the horn track):
+
+      Tier 2 - horn_track_id drawn from the predator-growl category
+        (tiger/lion).
+      Tier 3 - led_pattern_id drawn from TIER_3_LED_PATTERN_IDS, and
+        horn_track_id drawn from the predator-growl category when
+        `household_proximity` is True, or from
+        TIER_3_NON_HOUSEHOLD_TRACK_POOL (firecracker-weighted bang) when it
+        is False.
+
+    Every draw is off the same RNG the bandit's exploration draw already
+    uses, so no new seeding path is introduced. Everything else in each
+    action (wings, gain, durations, IR) is unchanged.
+
+    `household_proximity` defaults to False - the elephant-safe,
+    resident-worst-case default, matching services.config.NODE_HOUSEHOLD_
+    PROXIMITY's own default. The imperative shell (services/reflex_loop.py)
+    passes the real per-node value; only Tier 3 reads it.
     """
     base = DETERRENCE_TIERS[tier]
-    if tier is not Tier.TIER_3:
+    if tier is Tier.TIER_1:
         return base
-    return dataclasses.replace(base, led_pattern_id=rng.choice(TIER_3_LED_PATTERN_IDS))
+    if tier is Tier.TIER_2:
+        predator = HORN_CONTENT_LIBRARY[HORN_CATEGORY_PREDATOR]
+        return dataclasses.replace(base, horn_track_id=rng.choice(predator))
+    horn_pool = (
+        HORN_CONTENT_LIBRARY[HORN_CATEGORY_PREDATOR]
+        if household_proximity
+        else TIER_3_NON_HOUSEHOLD_TRACK_POOL
+    )
+    return dataclasses.replace(
+        base,
+        led_pattern_id=rng.choice(TIER_3_LED_PATTERN_IDS),
+        horn_track_id=rng.choice(horn_pool),
+    )
 
 # Assembled here rather than defaulted inside bandit.py, for the same reason
 # DEFAULT_FUSION_PARAMS is: bandit.py must not import this module (circular),

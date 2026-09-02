@@ -69,7 +69,8 @@ void fire_test_service(uint32_t now_ms) {
   // (FIRE_TEST_HARNESS defaults to 0, config.h).
   switch (target) {
     case fire_test_target::kHorn: {
-      const horn_request req = {FIRE_TEST_HORN_DURATION_MS, FIRE_TEST_HORN_GAIN_PCT};
+      const horn_request req = {FIRE_TEST_HORN_DURATION_MS, FIRE_TEST_HORN_GAIN_PCT,
+                                FIRE_TEST_HORN_TRACK_ID};
       print_ack("horn", drive_horn(req, now_ms));
       break;
     }

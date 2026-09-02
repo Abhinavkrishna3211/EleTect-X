@@ -163,7 +163,9 @@ def report_system_status(
 # ---------------------------------------------------------------------------
 
 
-def drive_horn(schema_version: int, gain_pct: float, duration_ms: int) -> bool:
+def drive_horn(
+    schema_version: int, gain_pct: float, duration_ms: int, track_id: int
+) -> bool:
     """Request a horn deterrence burst.
 
     Bridge target: `call` (synchronous, blocks up to
@@ -181,6 +183,11 @@ def drive_horn(schema_version: int, gain_pct: float, duration_ms: int) -> bool:
         duration_ms: Requested burst duration. Clamped to HORN_BURST_MAX_MS
             on the MCU side if out of bounds; refused outright (ack=False)
             if the horn is still in its cooldown window.
+        track_id: DFPlayer content index (AT+PLAYNUM), uint8, added in
+            schema_version 4 (ADR 0015). Selects which sound the horn
+            plays - bee swarm, predator growl, air horn, firecracker (ADR
+            0016). A content selector, not a limit: the MCU does not clamp
+            it and the returned ack does not echo it.
 
     Returns:
         True if the horn fired (with clamped values applied). False if the

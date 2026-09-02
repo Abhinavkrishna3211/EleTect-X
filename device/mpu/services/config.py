@@ -39,7 +39,33 @@ from pathlib import Path
 # both independent. No field added or removed, but the changed meaning of an
 # in-range value is a breaking change. Mirrors device/mcu/src/config.h's
 # BRIDGE_SCHEMA_VERSION; both sides must bump together.
-SCHEMA_VERSION = 3
+#
+# 3 -> 4 on 2026-09-02 (ADR 0015): drive_horn gains a trailing `track_id`
+# (uint8) field - the DFPlayer content index (AT+PLAYNUM) for this tier's
+# sound category, so the horn escalates on *what* it plays, not only how
+# loud. A real new wire field, so it bumps the version.
+SCHEMA_VERSION = 4
+
+# ---------------------------------------------------------------------------
+# Node site attributes (set at commissioning, not sensed)
+# ---------------------------------------------------------------------------
+
+# True if this node is sited close enough to permanently-occupied homes that
+# the deterrence ladder must never play a siren or firecracker/bang track at
+# it - those categories carry a real nuisance/startle cost to residents and,
+# for the siren, a published null result against elephants anyway (Hedges &
+# Gunaryadi 2010). ADR 0016 Decision A/B: household proximity is orthogonal
+# to habituation context (repeat-count governs *how hard* to escalate; this
+# governs *which* content categories are eligible). A household-proximity
+# node's tier 3 escalates on volume, LED and predator-growl variety, not on
+# a new "louder artificial bang" category.
+#
+# Per-node value: overridden per deployment at commissioning time. False here
+# is the safe-for-elephants, worst-case-for-residents default - a node with
+# this left at False near homes would be allowed to fire the firecracker
+# track, so every real near-home node MUST have this set True during
+# commissioning. Not auto-detected: nothing on the device knows where it is.
+NODE_HOUSEHOLD_PROXIMITY = False
 
 # ---------------------------------------------------------------------------
 # Bridge.call() timeout and retry policy

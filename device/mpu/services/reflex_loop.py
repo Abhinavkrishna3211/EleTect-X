@@ -269,7 +269,9 @@ CAPTURE_POST_FIRE_TAIL_S = 2.0
 class DriveHornFn(Protocol):
     """Callable shape matching bridge.rpc.drive_horn's real signature."""
 
-    def __call__(self, schema_version: int, gain_pct: float, duration_ms: int) -> bool:
+    def __call__(
+        self, schema_version: int, gain_pct: float, duration_ms: int, track_id: int
+    ) -> bool:
         """Request a horn burst; returns the ack drive_horn's own contract defines."""
         ...
 
@@ -684,6 +686,7 @@ def handle_footfall_event(
     capture_post_fire_tail_s: float = CAPTURE_POST_FIRE_TAIL_S,
     bandit_params: BanditParams = cognition_config.DEFAULT_BANDIT_PARAMS,
     rng: random.Random = _DEFAULT_RNG,
+    household_proximity: bool = services_config.NODE_HOUSEHOLD_PROXIMITY,
 ) -> FootfallOutcome:
     """Sense -> fuse -> decide -> actuate for one report_footfall_event notify.
 
@@ -775,7 +778,15 @@ def handle_footfall_event(
             cognition.config.DEFAULT_BANDIT_PARAMS.
         rng: Source of the epsilon-greedy exploration draw. Defaults to a
             module-level random.Random; seed one and pass it for an exact,
-            reproducible selection under test.
+            reproducible selection under test. Also feeds the per-fire horn
+            track and Tier 3 LED pattern rotation (cognition.config.
+            resolve_tier_action).
+        household_proximity: This node's commissioning-time site attribute
+            (services.config.NODE_HOUSEHOLD_PROXIMITY). True on nodes near
+            homes; passed to cognition.config.resolve_tier_action so Tier 3
+            plays a predator growl rather than a siren/firecracker near
+            residents (ADR 0016 Decision B). Not sensed - injected here only
+            so tests can exercise both site types.
 
     Returns:
         A FootfallOutcome carrying the fusion result, the decision, the
@@ -901,27 +912,29 @@ def handle_footfall_event(
     tier, exploring = select_tier(
         context, experience.action_values(), bandit_params, rng, floor
     )
-    action = cognition_config.resolve_tier_action(tier, rng)
+    action = cognition_config.resolve_tier_action(tier, rng, household_proximity)
     logger.info(
         "deterrence tier %d selected: context=%d floor=%d exploring=%s "
-        "gain_pct=%.1f fire_ir=%s",
+        "gain_pct=%.1f horn_track_id=%d fire_ir=%s",
         int(tier),
         context,
         int(floor),
         exploring,
         action.horn_gain_pct,
+        action.horn_track_id,
         action.fire_ir,
     )
 
     if safe_mode:
         logger.info(
             "[SAFE_MODE] would open camera, call drive_horn(schema_version=%d, "
-            "gain_pct=%.1f, duration_ms=%d), drive_led(channel=%d, pattern_id=%d, "
-            "gain_pct=%.1f, duration_ms=%d)%s - not calling (dry run), and "
-            "recording no attempt",
+            "gain_pct=%.1f, duration_ms=%d, track_id=%d), drive_led(channel=%d, "
+            "pattern_id=%d, gain_pct=%.1f, duration_ms=%d)%s - not calling (dry "
+            "run), and recording no attempt",
             schema_version,
             action.horn_gain_pct,
             action.horn_duration_ms,
+            action.horn_track_id,
             action.led_channel_id,
             action.led_pattern_id,
             action.led_gain_pct,
@@ -1006,7 +1019,12 @@ def handle_footfall_event(
         ir_ack = ir_result.get("ack")
         logger.info("pulse_ir ack=%s", ir_ack)
 
-    horn_ack = drive_horn(schema_version, action.horn_gain_pct, action.horn_duration_ms)
+    horn_ack = drive_horn(
+        schema_version,
+        action.horn_gain_pct,
+        action.horn_duration_ms,
+        action.horn_track_id,
+    )
     logger.info("drive_horn ack=%s", horn_ack)
 
     led_ack = drive_led(

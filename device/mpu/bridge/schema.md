@@ -2,7 +2,7 @@
 
 Source of truth for the MCU↔MPU function boundary (`ENGINEERING_CONVENTIONS.md` §6). Both sides are
 hand-written against this table, not against each other's code. Every payload carries `schema_version:
-uint8 = 3` as its first field; bump on any breaking field change, never reuse a version number.
+uint8 = 4` as its first field; bump on any breaking field change, never reuse a version number.
 
 **Version history**
 - `1` — initial boundary.
@@ -17,6 +17,12 @@ uint8 = 3` as its first field; bump on any breaking field change, never reuse a 
   flicker). No wire field added or removed — the payload shape is identical to `2` — but a `2`-era
   sender that sent `channel = 2` expecting the left-wing fallback now fires both wings, so it is a
   breaking change. `drive_horn`, `pulse_ir`, and every MCU→MPU row are unchanged.
+- `4` (2026-09-02, ADR 0015) — `drive_horn` gains a trailing `track_id: uint8`. The DFPlayer PRO is now
+  driven over a real AT-command UART (`AT+PLAYNUM=<track_id>`, then `AT+VOL` from `gain_pct`), so the
+  horn plays a selectable sound — bee swarm, predator growl, air horn, firecracker (ADR 0016) — instead
+  of one fixed clip. `track_id` is a content selector, not a limit: the MCU does not clamp it and the
+  ack does not echo it. A `3`-era sender omitting the field is a breaking mismatch. `drive_led`,
+  `pulse_ir`, and every MCU→MPU row are unchanged.
 
 Two Bridge primitives, both confirmed against Arduino's own reference Bricks this session, not assumed:
 `Bridge.call(name, args) -> return_value` is synchronous request/response — caller blocks until a response
@@ -36,7 +42,7 @@ actuator commands (the MPU needs to know the action actually executed before dec
 
 | Function | Args | Return | MCU-side failure behavior |
 |---|---|---|---|
-| `drive_horn` | `schema_version, gain_pct: float (0–100), duration_ms: uint16` | `ack: bool` | MCU enforces its own burst-duration cap and cooldown (ADR 0003) regardless of what's requested — an out-of-bounds request is clamped, not rejected, and `ack` reports the values actually used. Never blocks past the physical burst duration. |
+| `drive_horn` | `schema_version, gain_pct: float (0–100), duration_ms: uint16, track_id: uint8` | `ack: bool` | MCU enforces its own burst-duration cap and cooldown (ADR 0003) regardless of what's requested — an out-of-bounds request is clamped, not rejected, and `ack` reports the values actually used. Never blocks past the physical burst duration. `gain_pct` maps to the DFPlayer absolute volume `round(gain_pct/100 · 30)` sent as `AT+VOL`; `track_id` (added `schema_version 4`, ADR 0015) is sent as `AT+PLAYNUM` to pick the sound (1 = bee swarm, 2 = tiger, 3 = lion, 4 = air horn, 5 = firecracker — ADR 0016 Decision C). `track_id` is a content selector, not a limit: not clamped, not echoed in `ack`. |
 | `drive_led` | `schema_version, channel: uint8, pattern_id: uint8, gain_pct: float (0–100), duration_ms: uint16` | `ack: bool` | Same cooldown/cap discipline as `drive_horn`, with **per-channel** independent counters — the left wing firing does not gate the right. `channel`: 0 = left wing, 1 = right wing, 2 = both wings (`led_channel_from_wire()`, `device/mcu/src/bridge_handlers.cpp`); unrecognized → left. A `channel = 2` call gates on **both** wings' cooldown counters — refused (`ack=false`) if *either* wing is still cooling — and updates both on a fire; it runs one blocking loop toggling both pins, so it blocks for `duration_ms`, not twice that (ADR 0014 §E). `pattern_id`: 0 = steady, 1 = slow pulse, 2 = fast strobe, 3 = random flicker (single-wing); 4 = sweep (both wings antiphase, fast-strobe rate), 5 = pulse both sync (both wings in phase, fast-strobe rate), 6 = flicker both independent (each wing independently-seeded irregular flicker) (`led_pattern_from_id()`, `device/mcu/src/led.h`); unrecognized → steady. The three dual-wing patterns only make sense with `channel = 2`; addressed to a single wing they fall through to steady on that one wing. Every pattern is a flash sequence whose on/off spans sum to exactly `duration_ms`, so blocking cost is identical to a steady burst regardless of pattern (ADR 0014). `gain_pct` clamps to `LED_GAIN_MAX_PCT`; the clamp is reported in `ack`. |
 | `pulse_ir` | `schema_version, duration_ms: uint16` | `ack: bool` | Gated by the IR MOSFET's own thermal/duty limits (`config.h`); over-duration requests clamp, and the clamp is reported in `ack`, never silently dropped. No `gain_pct` wire field — always driven at `config.h`'s `IR_GAIN_MAX_PCT` internally (see "Actuator gain defaults" below). |
 | `get_system_state` | `schema_version` | `battery_v: float, geophone_ok: bool, acoustic_ok: bool, uptime_s: uint32` | Never blocks past one cached-struct read (same struct `report_system_status` pushes periodically) — not a fresh sensor poll. |
