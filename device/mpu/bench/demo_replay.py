@@ -179,7 +179,8 @@ ILLUSTRATIVE_CAPTURE_REF = 42
 def _never_called(label: str):
     """Build a callable that fails loudly if invoked.
 
-    Passed in place of drive_horn/drive_led/pulse_ir/save_frames: this
+    Passed in place of drive_horn/drive_led/pulse_ir/detect_vision/
+    is_night/save_frames: this
     replay always runs safe_mode=True, so none of these should ever
     actually fire. A raise here means SAFE_MODE itself broke, not that
     this demo script has a cosmetic bug.
@@ -543,6 +544,12 @@ def main() -> int:
             drive_led=_never_called("drive_led"),
             pulse_ir=_never_called("pulse_ir"),
             camera=_NoOpCamera(),
+            # Both required since the pre-decision vision check landed, and
+            # both unreachable here for the same reason every other fake
+            # above is: safe_mode=True opens no camera, so nothing is ever
+            # detected on and nothing is ever asked whether it is night.
+            detect_vision=_never_called("detect_vision"),
+            is_night=_never_called("is_night"),
             save_frames=_never_called("save_frames"),
             experience=experience,
             safe_mode=True,
