@@ -1,20 +1,21 @@
-// Polarity regression test for AUDIO_TRIGGER_PIN (horn.cpp) - covers the bug
-// where the pin idled low and pulsed high, backwards against the DFPlayer
-// PRO's real DF1101S ADKEY/KEY circuit (pull-up to its own IO rail, idle
-// high, pressed by pulling low). See horn.cpp's top comment and config.h's
-// AUDIO_TRIGGER_PIN comment for the datasheet-sourced rationale.
+// horn.cpp sequencing tests.
+//
+// ADR 0015 Decision E retired the AUDIO_TRIGGER_PIN GPIO pulse into the
+// DFPlayer PRO's KEY input: horn control now goes over DFPLAYER_SERIAL as
+// AT+PLAYNUM / AT+VOL commands (see test_horn_dfplayer for the pure
+// command/volume core). AUDIO_TRIGGER_PIN survives only as a documented
+// fallback (config.h), parked idle-high by horn_init() and never touched by
+// a fire again - the "trigger pin untouched by a fire" test below is the
+// regression guard for that retirement.
 //
 // host_shim's delay() only advances a virtual millis counter - it never
-// blocks - so horn_fire_sequence()'s low pulse inside drive_horn() happens
-// and reverts before drive_horn() returns; there is no hook here to observe
-// that transient value mid-call. What is observable, and what actually
-// distinguishes the fixed polarity from the original bug, is the pin's
-// resting (idle) value: after horn_init() and after every completed fire,
-// the pin must be back at its idle level. Under the original bug idle was
-// LOW (both before and after a fire, since the buggy sequence pulsed
-// high-then-low); under the fix idle is HIGH (matching the DFPlayer PRO's
-// pull-up) both before and after a fire, since the fixed sequence pulses
-// low-then-high.
+// blocks - so the whole fire sequence inside drive_horn() runs and settles
+// before drive_horn() returns. What is observable is the resting pin state
+// after init and after a completed fire: HORN_AMP_ENABLE_PIN must end back
+// in shutdown (LOW), and AUDIO_TRIGGER_PIN must sit idle-high the whole
+// time. The AT bytes written to DFPLAYER_SERIAL are deliberately not
+// asserted here (ADR 0015 Decision F: the transport is not host-testable,
+// only the pure string/volume helpers are).
 
 #include <unity.h>
 
@@ -25,47 +26,59 @@
 void setUp() { hostshim::reset(); }
 void tearDown() {}
 
-static void test_horn_init_idles_trigger_pin_high(void) {
+static void test_horn_init_parks_pins_safely(void) {
   horn_init();
 
   TEST_ASSERT_EQUAL_MESSAGE(
       HIGH, hostshim::pin_state(AUDIO_TRIGGER_PIN),
-      "AUDIO_TRIGGER_PIN must idle high at boot to match the DFPlayer PRO's "
-      "pull-up-to-IO-rail ADKEY/KEY circuit - idling low holds K1 pressed "
-      "for as long as the board is powered");
+      "AUDIO_TRIGGER_PIN (retired KEY-pin fallback, ADR 0015 E) must idle "
+      "high so the fallback button reads as unpressed for as long as the "
+      "board is powered");
+  TEST_ASSERT_EQUAL_MESSAGE(
+      LOW, hostshim::pin_state(HORN_AMP_ENABLE_PIN),
+      "HORN_AMP_ENABLE_PIN must boot LOW - the TPA3116D2 held in shutdown "
+      "until a fire brings it out");
 }
 
-static void test_drive_horn_returns_trigger_pin_to_idle_high(void) {
+static void test_drive_horn_first_in_bounds_request_is_allowed(void) {
   horn_init();
 
-  const horn_request req = {/*duration_ms=*/500, /*gain_pct=*/30.0f};
+  const horn_request req = {/*duration_ms=*/500, /*gain_pct=*/30.0f, /*track_id=*/2};
   const horn_ack ack = drive_horn(req, /*now_ms=*/0);
 
   TEST_ASSERT_TRUE_MESSAGE(ack.allowed,
                             "a first-ever, in-bounds request must be allowed");
+}
+
+static void test_drive_horn_does_not_touch_the_retired_trigger_pin(void) {
+  horn_init();
+
+  const horn_request req = {/*duration_ms=*/500, /*gain_pct=*/30.0f, /*track_id=*/2};
+  drive_horn(req, /*now_ms=*/0);
+
   TEST_ASSERT_EQUAL_MESSAGE(
       HIGH, hostshim::pin_state(AUDIO_TRIGGER_PIN),
-      "after a completed fire, AUDIO_TRIGGER_PIN must be released back to "
-      "idle high, not left low - the DFPlayer PRO reads a held-low line as "
-      "a continued button press, not a completed trigger");
+      "ADR 0015 E: the fire path drives the DFPlayer over DFPLAYER_SERIAL, "
+      "not a KEY-pin pulse - AUDIO_TRIGGER_PIN must stay idle-high through a "
+      "whole fire, never pulsed");
 }
 
 static void test_drive_horn_leaves_amp_enable_pin_disabled_after_fire(void) {
   horn_init();
 
-  const horn_request req = {/*duration_ms=*/500, /*gain_pct=*/30.0f};
+  const horn_request req = {/*duration_ms=*/500, /*gain_pct=*/30.0f, /*track_id=*/2};
   drive_horn(req, /*now_ms=*/0);
 
   TEST_ASSERT_EQUAL_MESSAGE(
       LOW, hostshim::pin_state(HORN_AMP_ENABLE_PIN),
-      "HORN_AMP_ENABLE_PIN sequencing is untouched by the AUDIO_TRIGGER_PIN "
-      "polarity fix - the amp must still end back in shutdown");
+      "after a completed fire the amp must end back in shutdown (LOW)");
 }
 
 int main(int, char **) {
   UNITY_BEGIN();
-  RUN_TEST(test_horn_init_idles_trigger_pin_high);
-  RUN_TEST(test_drive_horn_returns_trigger_pin_to_idle_high);
+  RUN_TEST(test_horn_init_parks_pins_safely);
+  RUN_TEST(test_drive_horn_first_in_bounds_request_is_allowed);
+  RUN_TEST(test_drive_horn_does_not_touch_the_retired_trigger_pin);
   RUN_TEST(test_drive_horn_leaves_amp_enable_pin_disabled_after_fire);
   return UNITY_END();
 }

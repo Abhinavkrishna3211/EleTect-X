@@ -36,11 +36,12 @@ led_channel led_channel_from_wire(uint8_t channel) {
   }
 }
 
-bool bridge_drive_horn(uint8_t schema_version, float gain_pct, uint16_t duration_ms) {
+bool bridge_drive_horn(uint8_t schema_version, float gain_pct, uint16_t duration_ms,
+                       uint8_t track_id) {
   if (schema_version != BRIDGE_SCHEMA_VERSION) {
     log_schema_mismatch("drive_horn", schema_version);
   }
-  const horn_request req = {duration_ms, gain_pct};
+  const horn_request req = {duration_ms, gain_pct, track_id};
   return drive_horn(req, millis()).allowed;
 }
 

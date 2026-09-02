@@ -61,7 +61,7 @@ anything else the firmware prints or expects):
 
 | Key | Target | Default request |
 |---|---|---|
-| `1` | Horn | `duration_ms=FIRE_TEST_HORN_DURATION_MS, gain_pct=FIRE_TEST_HORN_GAIN_PCT` |
+| `1` | Horn | `duration_ms=FIRE_TEST_HORN_DURATION_MS, gain_pct=FIRE_TEST_HORN_GAIN_PCT, track_id=FIRE_TEST_HORN_TRACK_ID` |
 | `2` | LED white | `duration_ms=FIRE_TEST_LED_DURATION_MS, gain_pct=FIRE_TEST_LED_GAIN_PCT` |
 | `3` | LED blue | same constants as white, different channel |
 | `4` | IR | `duration_ms=FIRE_TEST_IR_DURATION_MS, gain_pct=FIRE_TEST_IR_GAIN_PCT` |
@@ -124,6 +124,7 @@ that's safe to ship, rationale comment, "confirm before `sync-to-board.sh`"):
 // just sane starting points for a desk-bench test, not a duplicate limit.
 #define FIRE_TEST_HORN_DURATION_MS 500   // well under HORN_BURST_MAX_MS=3000
 #define FIRE_TEST_HORN_GAIN_PCT 30.0f    // under HORN_GAIN_MAX_PCT=60, desk-volume not field-volume
+#define FIRE_TEST_HORN_TRACK_ID 1        // AT+PLAYNUM index 1 (bee, ADR 0016 C) - bench wiring check, content arbitrary
 #define FIRE_TEST_LED_DURATION_MS 1000
 #define FIRE_TEST_LED_GAIN_PCT 50.0f
 #define FIRE_TEST_IR_DURATION_MS 200     // under IR_PULSE_MAX_MS=500
