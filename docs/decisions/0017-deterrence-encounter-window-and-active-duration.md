@@ -1,7 +1,7 @@
 # ADR 0017: How long a deterrence response stays "active" per elephant encounter
 
-- **Status:** proposed
-- **Date:** 2026-09-01
+- **Status:** accepted
+- **Date:** 2026-09-01 (Decision A implemented 2026-09-02; Decision B stays open as future work)
 
 ## Context
 
@@ -61,6 +61,13 @@ about the fact that no citation validates the specific minute value chosen, only
 reward must also be long enough that the next trigger starts a fresh context, or the reward and the
 context bucket tell contradictory stories about the same event. Recompute `PROXY_REWARD_HORIZON_S` as
 3x whatever new `HABITUATION_WINDOW_S` is chosen, don't leave it at 1800s.
+
+**Chosen values (2026-09-02):** `HABITUATION_WINDOW_S = 4500.0` (75 min — the midpoint of the
+reasoned 60-90 min band; only the order of magnitude is backed by the PeerJ 2020 data, the specific
+minute figure is an engineering judgement and is labelled as one in the `config.py` comment).
+`PROXY_REWARD_HORIZON_S = 13500.0` (3 x 4500). `tests/test_cognition_config.py` now asserts the exact
+3x tie rather than a loose `>` so a future retune of one constant cannot silently desync the other.
+No reflash — MPU config + host tests only.
 
 **B. Do not build proactive timer-based re-firing in this pass — real option, real cost, needs its own
 decision, not a default yes.** Two honest reasons, not "no time": (1) there is no presence signal to gate
