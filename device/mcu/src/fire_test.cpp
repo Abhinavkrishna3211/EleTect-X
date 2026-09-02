@@ -9,7 +9,7 @@
 namespace {
 
 void print_menu() {
-  Serial.println("[firetest] commands: 1=horn 2=led_white 3=led_blue 4=ir ?=help");
+  Serial.println("[firetest] commands: 1=horn 2=led_wing_left 3=led_wing_right 4=ir ?=help");
   Serial.println(
       "[firetest] cooldowns are real (horn 30s / led 20s / ir 5s) - a "
       "repeat within that window prints allowed=false, that is the gate "
@@ -41,9 +41,9 @@ fire_test_target fire_test_parse_command(char c) {
     case '1':
       return fire_test_target::kHorn;
     case '2':
-      return fire_test_target::kLedWhite;
+      return fire_test_target::kLedWingLeft;
     case '3':
-      return fire_test_target::kLedBlue;
+      return fire_test_target::kLedWingRight;
     case '4':
       return fire_test_target::kIr;
     case '?':
@@ -73,16 +73,19 @@ void fire_test_service(uint32_t now_ms) {
       print_ack("horn", drive_horn(req, now_ms));
       break;
     }
-    case fire_test_target::kLedWhite: {
-      const led_request req = {led_channel::kWhite, FIRE_TEST_LED_DURATION_MS,
-                                FIRE_TEST_LED_GAIN_PCT};
-      print_ack("led_white", drive_led(req, now_ms));
+    case fire_test_target::kLedWingLeft: {
+      // Bench harness always fires the steady pattern - it verifies wiring
+      // and polarity, not the ADR 0014 pattern shapes (those are exercised
+      // by the host tests, tests/test_led).
+      const led_request req = {led_channel::kWingLeft, led_pattern::kSteady,
+                                FIRE_TEST_LED_DURATION_MS, FIRE_TEST_LED_GAIN_PCT};
+      print_ack("led_wing_left", drive_led(req, now_ms));
       break;
     }
-    case fire_test_target::kLedBlue: {
-      const led_request req = {led_channel::kBlue, FIRE_TEST_LED_DURATION_MS,
-                                FIRE_TEST_LED_GAIN_PCT};
-      print_ack("led_blue", drive_led(req, now_ms));
+    case fire_test_target::kLedWingRight: {
+      const led_request req = {led_channel::kWingRight, led_pattern::kSteady,
+                                FIRE_TEST_LED_DURATION_MS, FIRE_TEST_LED_GAIN_PCT};
+      print_ack("led_wing_right", drive_led(req, now_ms));
       break;
     }
     case fire_test_target::kIr: {

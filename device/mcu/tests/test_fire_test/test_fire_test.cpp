@@ -15,15 +15,15 @@ static void test_digit_1_maps_to_horn(void) {
                             "'1' must map to kHorn");
 }
 
-static void test_digit_2_maps_to_led_white(void) {
+static void test_digit_2_maps_to_led_wing_left(void) {
   TEST_ASSERT_TRUE_MESSAGE(
-      fire_test_parse_command('2') == fire_test_target::kLedWhite,
-      "'2' must map to kLedWhite");
+      fire_test_parse_command('2') == fire_test_target::kLedWingLeft,
+      "'2' must map to kLedWingLeft");
 }
 
-static void test_digit_3_maps_to_led_blue(void) {
-  TEST_ASSERT_TRUE_MESSAGE(fire_test_parse_command('3') == fire_test_target::kLedBlue,
-                            "'3' must map to kLedBlue");
+static void test_digit_3_maps_to_led_wing_right(void) {
+  TEST_ASSERT_TRUE_MESSAGE(fire_test_parse_command('3') == fire_test_target::kLedWingRight,
+                            "'3' must map to kLedWingRight");
 }
 
 static void test_digit_4_maps_to_ir(void) {
@@ -60,8 +60,8 @@ static void test_whitespace_and_newline_bytes_map_to_none(void) {
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_digit_1_maps_to_horn);
-  RUN_TEST(test_digit_2_maps_to_led_white);
-  RUN_TEST(test_digit_3_maps_to_led_blue);
+  RUN_TEST(test_digit_2_maps_to_led_wing_left);
+  RUN_TEST(test_digit_3_maps_to_led_wing_right);
   RUN_TEST(test_digit_4_maps_to_ir);
   RUN_TEST(test_question_mark_maps_to_help);
   RUN_TEST(test_unrecognized_byte_maps_to_none);

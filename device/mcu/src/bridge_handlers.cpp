@@ -20,13 +20,19 @@ void log_schema_mismatch(const char *fn, uint8_t got) {
 
 }  // namespace
 
-led_channel led_channel_for_pattern_id(uint8_t pattern_id) {
-  switch (pattern_id) {
+led_channel led_channel_from_wire(uint8_t channel) {
+  // channel 0 = left wing, 1 = right wing, 2 = both wings (schema_version 3,
+  // ADR 0014 E - value 2 was the left-wing fallback before that). Its own
+  // wire field since ADR 0014 (schema_version 2); before that it was
+  // overloaded onto pattern_id.
+  switch (channel) {
     case 1:
-      return led_channel::kBlue;
+      return led_channel::kWingRight;
+    case 2:
+      return led_channel::kWingBoth;
     case 0:
     default:
-      return led_channel::kWhite;
+      return led_channel::kWingLeft;
   }
 }
 
@@ -38,12 +44,13 @@ bool bridge_drive_horn(uint8_t schema_version, float gain_pct, uint16_t duration
   return drive_horn(req, millis()).allowed;
 }
 
-bool bridge_drive_led(uint8_t schema_version, uint8_t pattern_id, uint16_t duration_ms) {
+bool bridge_drive_led(uint8_t schema_version, uint8_t channel, uint8_t pattern_id,
+                      float gain_pct, uint16_t duration_ms) {
   if (schema_version != BRIDGE_SCHEMA_VERSION) {
     log_schema_mismatch("drive_led", schema_version);
   }
-  const led_request req = {led_channel_for_pattern_id(pattern_id), duration_ms,
-                            LED_GAIN_MAX_PCT};
+  const led_request req = {led_channel_from_wire(channel), led_pattern_from_id(pattern_id),
+                            duration_ms, gain_pct};
   return drive_led(req, millis()).allowed;
 }
 
