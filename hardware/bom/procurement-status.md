@@ -62,8 +62,10 @@ local store only (not worth an online search, per prior sourcing attempts this s
 
 ## 6. Power system — **revised 13 Aug against the Aug 20 deployment deadline**
 
-Sized 12 Aug against a real daily energy budget (baseline-dominated by ADR 0008's measured 0.42-0.45W
-MPU-suspend draw, ~13Wh/day, plus event-triggered deterrence load) and real Kerala monsoon-season solar
+Sized 12 Aug against a daily energy budget (baseline-dominated by ADR 0008's 0.42-0.45W MPU-suspend
+draw — **a third-party community measurement, not a reading from this board, and describing a suspend
+state this codebase does not implement**; see ADR 0008's 2 Sept addendum — for a 12.77Wh/day baseline,
+plus event-triggered deterrence load) and real Kerala monsoon-season solar
 irradiance, not the annual average. Revised same day to the smallest sizing that's still safe (3-day no-sun
 autonomy, 85% DoD). Full calculation, formulas, sensitivity table, and sources:
 `hardware/bom/eletect-x-power-budget.xlsx`.

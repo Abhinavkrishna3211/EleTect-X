@@ -42,7 +42,7 @@ Two specific confirming measurements remain — narrowed down from the original 
 ## Consequences
 
 - **This affects every subsystem that depends on an MPU wake, not just acoustic** — vision/fusion, the contextual bandit, LoRa uplink of decisions. ADR 0007's acoustic-specific wake question is resolved by this decision too: gunshot/chainsaw/vehicle/animal-call classification all wake an already-suspended (not powered-off) MPU, same as the geophone path.
-- CONTEXT.md §4 and §3's power-system BOM (4S LiFePO4 + MPPT + 20W solar) were sized without the ~10.8Wh/day MPU-suspend baseline. Recommend this gets folded into a real monsoon-season-specific budget recomputation rather than checked only against the annual-average solar assumption implicit in the current BOM.
+- ~~CONTEXT.md §4 and §3's power-system BOM (4S LiFePO4 + MPPT + 20W solar) were sized without the ~10.8Wh/day MPU-suspend baseline.~~ **Stale as of 2 Sept — this was true when written on 28 Jul and stopped being true two weeks later.** The 12-13 Aug sizing (`hardware/bom/eletect-x-power-budget.xlsx`, `hardware/bom/procurement-status.md` §6) *does* carry the baseline as an explicit line item — 0.45W × 24h = 10.8Wh/day, dominating a 12.77Wh/day baseline subtotal, and the sheet's own Notes tab says "the power budget is baseline-dominated, not event-dominated." The recommendation below it was therefore actioned. The problem is no longer an omitted number; it is that the included number is almost certainly wrong — see the 2 Sept addendum.
 - Reflex-layer safety net worth considering separately (not decided here, flagged for its own discussion): since even deep suspend has some resume latency, a simple STM32-only fallback deterrence trigger (basic horn/LED burst, no vision confirmation) for the rare case of an unambiguously strong, close geophone signal would remove dependence on MPU wake timing entirely for the worst-case scenario. This would be a genuine addition to CONTEXT.md §4's reflex-layer duties, not something already covered by "actuator timing; safety rule-gates" — worth its own decision, not smuggled in here.
 - Two confirming measurements before this ADR can move to accepted:
   1. Suspend-to-resume latency on our own board (flash a minimal "Immediate" startup-mode sketch, command suspend, measure wake time — needs no new parts, just the board and a multimeter/scope already in hand).
@@ -83,6 +83,63 @@ community sources this time). Findings, none of which overturn the Decision abov
   Allegro `.brd`/`.DSN`, Gerber, NC drill) for the UNO Q board itself — not enclosure STEP/STL files. Not
   useful for `hardware/cad/enclosure-design-concept.md` work; don't reach for it expecting enclosure
   geometry.
+
+## Addendum, 2 Sept 2026 — the suspend state this ADR is built on has never existed on this board
+
+Written while checking a separate question (event-video power cost, ADR 0020). Three findings, in
+order of how much they matter. None of them changes the Decision above; all of them change how much
+weight it can currently carry.
+
+**1. Deep suspend is not implemented anywhere, and cannot be without new hardware.** `device/mpu/main.py`
+ends in `while True: time.sleep(1)`. `MPU_WAKE_HOLD_S = 30.0` (`services/config.py`) is defined and has
+**zero consumers** repo-wide. There is no `/sys/power/state` write, no `systemctl suspend`, no `rtcwake`,
+nothing. The board's kernel does support it (`/sys/power/state` = `freeze mem disk`, `/sys/power/mem_sleep`
+= `s2idle [deep]`, with `gpio-keys` armed as a wake source), but **nothing is wired to `gpio-keys`**, there
+is no MPU wake or power-gate pin in `device/mcu/src/config.h`, and the only MCU→MPU wake path that exists
+is the RouterBridge — a *userspace socket a suspended MPU cannot service*. `device/mpu/bridge/schema.md`
+already says so in writing: "this schema assumes the wake path works, it doesn't." So this is a hardware
+task (an internal wire, decided before the enclosure is sealed), not a software one.
+
+**2. The as-built idle draw is very likely ~7x the design figure — and the number was already in this
+repo.** `docs/research/platform/arduino-uno-q-power-and-ops.md` records a third-party bench review of a
+UNO Q at **~3.3W (0.66A) idle with Linux up**, ~4.5W (0.90A) with all four A53s at 100%. `docs/KNOWN_GAPS.md`
+**quotes those same figures** in the 2 Sept brown-out diagnosis, for an unrelated purpose, and nothing
+connects them back to this ADR. Since the MPU never suspends, **~3.3W is the honest floor for the as-built
+system, not 0.45W.** Note also how close idle sits to full load on this SoC: the floor is set by the QRB2210
+and the OS image, not by what the Python process does.
+
+**3. Nobody has ever put a meter on this node.** Everything measured on the assembled hardware is timing,
+thermal, optical or accuracy — never current or power. `docs/ENGINEERING_CONVENTIONS.md` has required this
+measurement since 3 Aug and it has never been run. It also cannot be taken in software: on this board
+`/sys/class/power_supply/` is empty, all 11 hwmon devices are thermal zones with no `curr*`/`power*`
+inputs, and `/sys/bus/iio/devices/` is empty. An inline meter on VIN is the only route.
+
+### What the budget actually needs
+
+Solving backward from harvest (panel W x 3.22 monsoon-derated PSH x 0.75 system derate) against the
+19.47Wh/day design load structure, the **board baseline must come in under**:
+
+| Panel | Monsoon harvest | Max sustainable board baseline |
+|---|---|---|
+| 20W | 48.3Wh/day | **<= ~1.4W** |
+| 15W | 36.2Wh/day | **<= ~1.0W** |
+
+Against 65.3Wh usable (12.8V x 6Ah at 85% DoD): at the design 0.45W the node has ~3.3 days of reserve
+and a comfortable surplus; at ~3.3W it draws ~105Wh/day against 48.3Wh of harvest and **goes flat in
+under two days of a ten-day unattended trial** — silently, because `battery_v` always returns `0.0f`
+(no battery-monitor driver or ADC pin exists in `config.h`; see `docs/KNOWN_GAPS.md`).
+
+### Status of this ADR after the addendum
+
+Unchanged: still **proposed**, still blocked on the same two bench measurements, and the Decision
+(suspend over poweroff) is still the right architecture *if* it is ever implemented. What has changed
+is that the ~0.42-0.45W figure must be read as **a design target sourced from a third party, not a
+property of this system**, everywhere it appears. A third open item is added to the two above:
+
+3. **Real inline current measurement on this board's VIN**, at idle with the app running, during vision
+   inference, during a horn+LED fire, and MCU-only as the floor. This gates whether the 10-day
+   unattended premise holds at all, and it gates it *before* any decision about implementing suspend —
+   the question is not "suspend or not", it is "does the budget close without suspend."
 
 ## Evidence / sources
 
