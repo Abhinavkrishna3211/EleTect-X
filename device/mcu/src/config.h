@@ -363,6 +363,22 @@
 // HORN_GAIN_MAX_PCT-clamped by rule_gate_apply) onto [0, this].
 #define DFPLAYER_VOL_MAX 30
 
+// AT+PLAYMODE value for "play the selected file once, then pause" (DFR0768
+// modes: 1 single-loop, 2 all-loop, 3 play-once, 4 random, 5 folder-loop). A
+// deterrence burst must not loop - the amp shutdown ends it on schedule, but a
+// looping module would keep driving the DAC behind a muted amp until the next
+// fire. horn.cpp sends this once per boot on the first fire, not in horn_init(),
+// and re-sends it every boot because the DFR0768 does not reliably persist the
+// play mode across a power cycle.
+#define DFPLAYER_PLAYMODE_SINGLE 3
+
+// The DFR0768 has 128 MB of onboard flash and NO SD-card slot: audio files are
+// loaded by plugging its USB-C port into a host and copying them onto the
+// mass-storage volume. AT+PLAYNUM=<n> then indexes files by FAT directory
+// (copy) order, not by any number in the filename, so the tracks must be copied
+// one at a time in the cognition/config.py category order and the mapping
+// verified at bring-up (docs/specs/mcu-fire-test-harness.md).
+
 // TPA3116D2 shutdown pin, active low. ADR 0003 drives a single BTL channel,
 // not PBTL: at the 12.8 V rail one channel already puts the SUH-15 well above
 // the 105 dB/1 m field-validated deterrence reference, while PBTL would exceed

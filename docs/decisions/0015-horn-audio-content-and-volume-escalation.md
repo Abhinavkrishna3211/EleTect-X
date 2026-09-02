@@ -214,6 +214,20 @@ retail listing, product photos, board silkscreen, and now factory packaging all 
 changes Decision A's wiring or either of the two still-open UNVERIFIED items (`SoftwareSerial` support,
 `AT+PLAYNUM` autoplay).
 
+**Implementation note (2026-09-02, code landed) — three DFR0768 behaviours the firmware now handles
+explicitly.** (1) `AT+PLAYNUM=<n>` selects the n-th file in the module's FAT directory order, which is
+the order files were copied onto the 128 MB onboard flash over USB-C — not the numeric prefix in the
+filename. Decision D's "final numbering is whatever the audio-load step assigns" is now a hard
+provisioning constraint: tracks are copied one at a time in the `cognition/config.py` category order and
+the mapping is re-checked at bring-up (`docs/specs/mcu-fire-test-harness.md` owns the checklist). (2) The
+DFR0768 does not reliably persist its play mode across a power cycle (DFRobot forum "DFPlayer Pro
+Playmode Resets"), so `horn.cpp` re-sends `AT+PLAYMODE=3` (play-once-then-pause, `DFPLAYER_PLAYMODE_
+SINGLE`) plus `AT+PROMPT=OFF` once per boot on the first fire rather than trusting a one-time setup. (3)
+That one-time config is done lazily on the first real fire, not in `horn_init()`, because the module
+needs a settle window after its own power-on before it answers AT commands and `horn_init()` runs
+microseconds into `setup()`. None of this changes any Decision below; it is added to
+`docs/KNOWN_GAPS.md`'s DFPlayer bring-up entry.
+
 ## Decision
 
 ### A. New UART link on free pins, not the claimed LoRa pair

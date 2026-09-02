@@ -70,6 +70,24 @@ criteria — see each entry's status.
   Medium severity — until bring-up confirms the UART, an in-range `gain_pct`/`track_id` still
   changes nothing audible. Effort: bench bring-up on the board with the DFPlayer PRO wired, driven
   by the fire-test harness. Status: open.
+- **DFPlayer PRO (DFR0768) module-behaviour assumptions that only bring-up can confirm.** Four
+  items, all specific to the DFR0768 as opposed to the classic DFPlayer Mini: (a) **`AT+PLAYNUM`
+  indexes by FAT copy order, not filename** — the 128 MB onboard flash has no SD slot, files go on
+  over USB-C, and the n-th file played is the n-th copied. The tracks must be loaded one at a time
+  in the `cognition/config.py` category order (1 bee, 2 tiger, 3 lion, 4 air horn, 5 firecracker)
+  and the mapping verified at bring-up — the fire-test harness provisioning checklist owns this. (b)
+  **Play mode is not reliably persistent across a power cycle** (DFRobot forum "DFPlayer Pro
+  Playmode Resets"); `horn.cpp` now re-sends `AT+PLAYMODE=3` (play-once) on the first fire every
+  boot rather than trusting a one-time provisioning step — addressed in code, still unverified on
+  hardware. (c) **First-AT-command settle delay**: the module needs a window after its own power-on
+  before it answers AT commands. `horn.cpp` sidesteps this by doing its one-time `AT+PLAYMODE` /
+  `AT+PROMPT=OFF` config lazily on the first real fire (always many seconds post-boot) instead of in
+  `horn_init()` — but the exact minimum settle time is unmeasured and the first fire's config bytes
+  could still be dropped if the module was only just powered. (d) **`AT+AMP` is never sent**: the
+  design bypasses the DFR0768's small onboard amp entirely and takes the raw `DACL`/`DACR` line-out
+  into the external TPA3116D2 (ADR 0015), so the module's own amp state should not matter — confirm
+  at bring-up that the line-level output is live regardless of `AT+AMP`. Medium severity. Effort:
+  folded into the same DFPlayer bench bring-up as the entry above. Status: open.
 - **`drive_led`/`pulse_ir`'s internal `gain_pct` representation doesn't match the Bridge schema's
   wire args — LED half reopened and resolved differently by ADR 0014; IR half still closed.**
   Original decision (option a): document that both calls always drive at their `config.h` max
