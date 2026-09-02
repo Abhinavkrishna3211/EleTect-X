@@ -75,7 +75,7 @@ class Detection:
             deployed threshold (min_score 0.5 for ETX-V, per its own
             /api/info) - a confidence below that never produces a
             Detection at all. See services/reflex_loop.py's
-            _vision_reading() for what "no Detection at all" means for
+            _vision_check() for what "no Detection at all" means for
             the fused log-odds it feeds.
         x, y, width, height: Bounding box in the *original* uploaded
             image's pixel coordinates, not the model's internal 96x96
@@ -111,7 +111,7 @@ class VisionDetectFn(Protocol):
         Returns:
             Every Detection found across every image, in no particular
             aggregate order - a caller that wants "the strongest match
-            across the burst" (services/reflex_loop.py's _vision_reading())
+            across the burst" (services/reflex_loop.py's _vision_check())
             does its own max over the result. A single image that fails to
             encode/POST/parse is logged and skipped, not fatal to the
             whole burst; DetectionError is raised only when every image in

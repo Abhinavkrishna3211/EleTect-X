@@ -15,7 +15,9 @@ fixture, unlike test_fusion.py) via cognition.fusion.logit/sigmoid directly
 these tests cannot pass by tautology (ENGINEERING_CONVENTIONS.md 4).
 
 capture_post_fire_tail_s is always overridden to 0.0 below so these tests
-don't actually sleep for CAPTURE_POST_FIRE_TAIL_S real seconds each.
+don't actually sleep for CAPTURE_POST_FIRE_TAIL_S real seconds each, and
+video_retreat_tail_s likewise - it defaults to 45s, so a video test that
+forgot to override it would stall the whole suite rather than fail.
 
 Exploration is disabled (epsilon 0.0) in _fire()'s default params. The real
 DEFAULT_BANDIT_PARAMS explores on roughly one event in seven, which would
@@ -28,6 +30,7 @@ turns it back on deliberately.
 import dataclasses
 import math
 import time
+from pathlib import Path
 
 import pytest
 
@@ -186,7 +189,7 @@ class _FakeVisionDetect:
     real case and the one that keeps every pre-existing fusion assertion
     numerically valid (an empty-detection reading still contributes exactly
     zero net evidence, cognition/config.py's BASELINE_VISION - see
-    reflex_loop._vision_reading()'s own docstring). Only affects the
+    reflex_loop._vision_check()'s own docstring). Only affects the
     used/dropped/contributions bookkeeping, not any fused log-odds value.
 
     Args:
@@ -314,6 +317,7 @@ def _fire(probability=0.9, sta_lta_ratio=6.0, schema_version=1, call_log=None, *
         feature_vector=[0.0] * 8,
         safe_mode=False,
         capture_post_fire_tail_s=0.0,
+        video_retreat_tail_s=0.0,
         **kwargs,
     )
     return outcome, kwargs, log
@@ -334,7 +338,7 @@ def test_high_probability_alerts_and_fires_the_selected_tier_outside_safe_mode()
     The default vision-check fake finds nothing (_FakeVisionDetect's own
     docstring), so VISION reads as available at BASELINE_VISION -
     contributing exactly zero to the fused log-odds, but that means it now
-    counts as "used", not "dropped" (reflex_loop._vision_reading()'s own
+    counts as "used", not "dropped" (reflex_loop._vision_check()'s own
     docstring on why an unconfirmed check is still an available reading).
     """
     expected_log_odds, expected_p = _expected_seismic_fusion(0.9)
@@ -629,7 +633,7 @@ def test_a_non_target_label_detection_still_contributes_nothing():
 
     ETX-V is a two-class detector; only VISION_TARGET_LABEL ("Elephant")
     counts as elephant-presence evidence here (module docstring, and
-    reflex_loop._vision_reading()'s own docstring) - a Boar match must not
+    reflex_loop._vision_check()'s own docstring) - a Boar match must not
     move the fused probability at all, the same as finding nothing.
     """
     boar = Detection(label="Boar", confidence=0.99, x=0.0, y=0.0, width=20.0, height=20.0)
@@ -647,7 +651,7 @@ def test_vision_detect_failure_is_logged_and_reported_unavailable(caplog):
 
     Treated identically to a camera failure - see
     perception.detector.DetectionError's own docstring and
-    reflex_loop._vision_reading()'s. The alert path itself must still run to
+    reflex_loop._vision_check()'s. The alert path itself must still run to
     completion on seismic alone.
     """
     expected_log_odds, expected_p = _expected_seismic_fusion(0.9)
@@ -1349,3 +1353,353 @@ def test_acoustic_schema_version_mismatch_is_logged_not_raised(caplog):
         "schema_version mismatch" in record.message and record.levelname == "WARNING"
         for record in caplog.records
     )
+
+
+# ---------------------------------------------------------------------------
+# Trigger-gated event video (ADR 0020)
+# ---------------------------------------------------------------------------
+
+
+ELEPHANT = Detection(label="Elephant", confidence=0.9, x=0.0, y=0.0, width=40.0, height=30.0)
+BOAR = Detection(label="Boar", confidence=0.99, x=0.0, y=0.0, width=20.0, height=20.0)
+# A low-confidence sighting: enough to confirm for the keep-gate, not enough
+# to carry a weak seismic trigger past the alert threshold. That combination
+# is the only way to reach the "confirmed but not alerted" branch, and it is
+# a real one - a distant or partly-occluded animal on a soft trigger.
+FAINT_ELEPHANT = Detection(
+    label="Elephant", confidence=0.55, x=0.0, y=0.0, width=8.0, height=6.0
+)
+
+
+class _FakeEventVideo:
+    """Recording stand-in for perception.video.EventVideoRecorder's decision half.
+
+    Only commit()/discard() - the reflex loop never starts or stops a
+    recording, because the recorder is the same object already injected as
+    `camera`. Tests that care about the ordering between the camera and the
+    decision pass the shared call_log.
+
+    Args:
+        raises: If set, both commit() and discard() raise it - exercises
+            "evidence housekeeping must never crash the handler".
+        call_log: Shared cross-fake call-order log, see _FakeDriveHorn.
+    """
+
+    def __init__(self, raises: Exception | None = None, call_log: list | None = None):
+        self._raises = raises
+        self.call_log = call_log if call_log is not None else []
+        self.committed: list[CaptureEventTag] = []
+        self.discarded = 0
+        self.path = Path("committed.mkv")
+
+    def commit(self, tag):
+        self.call_log.append("video.commit")
+        if self._raises is not None:
+            raise self._raises
+        self.committed.append(tag)
+        return self.path
+
+    def discard(self):
+        self.call_log.append("video.discard")
+        if self._raises is not None:
+            raise self._raises
+        self.discarded += 1
+
+
+def test_event_video_is_committed_when_an_alert_fires():
+    """Half of the keep-gate: a real deterrence event is always worth keeping.
+
+    Whatever the camera resolved. An alert that fired without a vision
+    confirmation is still a horn going off in a forest at night, and the
+    footage is the only record of what it went off at.
+    """
+    video = _FakeEventVideo()
+
+    outcome, _, _ = _fire(probability=0.9, event_video=video)
+
+    assert outcome.decision.alert is True
+    assert outcome.vision_confirmed is False
+    assert video.discarded == 0
+    assert len(video.committed) == 1
+    assert video.committed[0].alert is True
+    assert outcome.video_path == video.path
+
+
+def test_event_video_is_committed_when_vision_confirms_without_an_alert():
+    """The other half, and the one that only exists because of this ADR.
+
+    A weak seismic trigger that the camera nonetheless confirms as an
+    elephant produces no alert and, before ADR 0020, no evidence at all -
+    the JPEG burst is alert-only. That is exactly the event worth
+    reviewing: it is either a threshold that is set too high or a detector
+    that is wrong, and the clip is the only way to tell which.
+    """
+    video = _FakeEventVideo()
+
+    outcome, _, _ = _fire(
+        probability=0.01,
+        sta_lta_ratio=1.2,
+        detect_vision=_FakeVisionDetect([FAINT_ELEPHANT]),
+        event_video=video,
+    )
+
+    assert outcome.decision.alert is False
+    assert outcome.vision_confirmed is True
+    assert video.discarded == 0
+    assert len(video.committed) == 1
+    # Named for what actually happened, not for what a burst would imply.
+    assert video.committed[0].alert is False
+    assert outcome.video_path == video.path
+
+
+def test_event_video_is_discarded_when_neither_gate_is_satisfied():
+    """The common case, and the one that bounds the storage cost.
+
+    Wind, a passing boar, an STA/LTA false positive: no alert, nothing
+    confirmed, nothing kept. The recording never reaches the permanent
+    capture directory at all.
+    """
+    video = _FakeEventVideo()
+
+    outcome, _, _ = _fire(
+        probability=0.05,
+        sta_lta_ratio=1.2,
+        detect_vision=_FakeVisionDetect([BOAR]),
+        event_video=video,
+    )
+
+    assert outcome.decision.alert is False
+    assert outcome.vision_confirmed is False
+    assert video.committed == []
+    assert video.discarded == 1
+    assert outcome.video_path is None
+
+
+def test_a_boar_detection_is_not_a_confirmation():
+    """The two-class model's other label must not keep footage on its own.
+
+    Same discipline the vision ModalityReading already follows: only
+    VISION_TARGET_LABEL counts toward "elephant present". A Boar box is a
+    real detection and still not this system's subject.
+    """
+    outcome, _, _ = _fire(
+        probability=0.05,
+        sta_lta_ratio=1.2,
+        detect_vision=_FakeVisionDetect([BOAR, ELEPHANT]),
+    )
+    assert outcome.vision_confirmed is True
+
+    outcome, _, _ = _fire(
+        probability=0.05, sta_lta_ratio=1.2, detect_vision=_FakeVisionDetect([BOAR])
+    )
+    assert outcome.vision_confirmed is False
+
+
+def test_a_failed_vision_check_is_not_a_confirmation():
+    """A detector that raised saw nothing - it must not keep footage by default.
+
+    DetectionError already degrades VISION to unavailable for fusion. The
+    keep-gate has to degrade the same way, or an inference server that is
+    down turns every trigger into a kept clip.
+    """
+    outcome, _, _ = _fire(
+        probability=0.05,
+        sta_lta_ratio=1.2,
+        detect_vision=_FakeVisionDetect(raises=DetectionError("inference server down")),
+    )
+
+    assert outcome.vision_confirmed is False
+
+
+def test_event_video_is_decided_only_after_every_actuator_has_fired():
+    """The ordering ADR 0020 rests on: footage never delays deterrence.
+
+    The whole reason this design records on trigger instead of maintaining
+    a rolling pre-buffer is that neither the recording nor the
+    keep-or-discard decision may sit between the MCU's notify and the
+    horn. This asserts the call order directly rather than trusting the
+    code to have kept it.
+    """
+    log = []
+    video = _FakeEventVideo(call_log=log)
+
+    _fire(probability=0.9, call_log=log, event_video=video)
+
+    assert "drive_horn" in log
+    assert log.index("drive_horn") < log.index("video.commit")
+    assert log.index("camera.close") < log.index("video.commit")
+
+
+def test_safe_mode_never_touches_the_event_video():
+    """A dry run observes; it does not record, keep or delete anything.
+
+    SAFE_MODE already gates the camera, so nothing was ever recorded -
+    calling discard() here would be harmless but dishonest, implying a
+    decision about a recording that does not exist.
+    """
+    video = _FakeEventVideo()
+
+    outcome = reflex_loop.handle_footfall_event(
+        1,
+        0.9,
+        sta_lta_ratio=6.0,
+        feature_vector=[0.0] * 8,
+        safe_mode=True,
+        drive_horn=_FakeDriveHorn(),
+        drive_led=_FakeDriveLed(),
+        pulse_ir=_FakePulseIr(),
+        is_night=lambda frames: True,
+        camera=_FakeCamera(),
+        detect_vision=_FakeVisionDetect(),
+        save_frames=_FakeSaveFrames(),
+        experience=ExperienceStore(IN_MEMORY_PATH),
+        event_video=video,
+    )
+
+    assert video.committed == []
+    assert video.discarded == 0
+    assert outcome.video_path is None
+    assert outcome.vision_confirmed is False
+
+
+def test_an_alert_still_commits_when_the_camera_never_opened():
+    """A camera failure must not leave the decision unmade.
+
+    The recorder discards its own scratch file on a failed open(), so this
+    commit is a no-op in production - but the loop must still reach a
+    decision on every exit, because an exit that silently skips it is
+    exactly how a scratch file leaks.
+    """
+    video = _FakeEventVideo()
+
+    outcome, _, log = _fire(
+        probability=0.9, camera=_FakeCamera(fail_open=True), event_video=video
+    )
+
+    assert outcome.decision.alert is True
+    assert "drive_horn" in log
+    assert len(video.committed) == 1
+
+
+def test_a_commit_failure_never_crashes_the_handler():
+    """Storage housekeeping must not cost the next event.
+
+    perception/video.py's commit() is documented as never raising, so
+    anything arriving here is unanticipated - and this node is in a forest
+    where an unhandled exception in the event handler is not recoverable
+    until someone walks to it.
+    """
+    outcome, _, _ = _fire(probability=0.9, event_video=_FakeEventVideo(raises=OSError("no disk")))
+
+    assert outcome.decision.alert is True
+    assert outcome.video_path is None
+
+
+def test_a_discard_failure_never_crashes_the_handler():
+    """Same contract on the branch that runs far more often than the alert one."""
+    outcome, _, _ = _fire(
+        probability=0.05,
+        sta_lta_ratio=1.2,
+        event_video=_FakeEventVideo(raises=OSError("read-only filesystem")),
+    )
+
+    assert outcome.decision.alert is False
+    assert outcome.video_path is None
+
+
+def test_the_retreat_tail_replaces_the_post_fire_tail_when_video_is_recording():
+    """45s of retreat, not 2s of the horn firing - and one tail, never both.
+
+    The tails are alternatives, not cumulative: EVENT_VIDEO_RETREAT_TAIL_S
+    was chosen to cover the whole retreat, so adding the 2s burst tail on
+    top would just be an unexplained 47s. Which tail the loop reaches for
+    is a branch, and constants cannot catch a branch taken the wrong way,
+    so the sleep itself is recorded - with two distinct sub-millisecond
+    values standing in for 45s and 2s so the suite stays fast.
+    """
+    slept = []
+    original_sleep = time.sleep
+
+    def _record_sleep(seconds):
+        slept.append(seconds)
+        original_sleep(0)
+
+    def _run(**extra):
+        reflex_loop.time.sleep = _record_sleep
+        try:
+            reflex_loop.handle_footfall_event(
+                1,
+                0.9,
+                sta_lta_ratio=6.0,
+                feature_vector=[0.0] * 8,
+                safe_mode=False,
+                capture_post_fire_tail_s=0.001,
+                video_retreat_tail_s=0.002,
+                drive_horn=_FakeDriveHorn(),
+                drive_led=_FakeDriveLed(),
+                pulse_ir=_FakePulseIr(),
+                is_night=lambda frames: True,
+                camera=_FakeCamera(),
+                detect_vision=_FakeVisionDetect(),
+                save_frames=_FakeSaveFrames(),
+                experience=ExperienceStore(IN_MEMORY_PATH),
+                bandit_params=DETERMINISTIC_PARAMS,
+                **extra,
+            )
+        finally:
+            reflex_loop.time.sleep = original_sleep
+        return list(slept)
+
+    with_video = _run(event_video=_FakeEventVideo())
+    slept.clear()
+    without_video = _run()
+
+    assert with_video == [0.002], "recording must use the retreat tail, not the burst tail"
+    assert without_video == [0.001], "the burst tail must be unchanged when video is off"
+
+
+def test_the_jpeg_burst_is_still_saved_alongside_the_video():
+    """Video adds a record; it does not replace the one that has run on hardware.
+
+    The JPEG burst is the evidence path that has actually been exercised on
+    this board. Until the GStreamer chain has been run on the real
+    hardware, dropping the burst in favour of the clip would trade a
+    working path for an unverified one.
+    """
+    save_frames = _FakeSaveFrames()
+    video = _FakeEventVideo()
+
+    outcome, _, _ = _fire(probability=0.9, save_frames=save_frames, event_video=video)
+
+    assert len(save_frames.calls) == 1
+    assert len(video.committed) == 1
+    assert outcome.capture_frame_count > 0
+
+
+def test_the_burst_and_the_clip_carry_the_same_event_tag():
+    """Two records of one event must be findable together in the capture dir.
+
+    Both names come from the same CaptureEventTag, so they sort adjacent -
+    which is how anyone reviewing an incident in the field actually
+    matches a clip to its stills.
+    """
+    save_frames = _FakeSaveFrames()
+    video = _FakeEventVideo()
+
+    _fire(probability=0.9, save_frames=save_frames, event_video=video)
+
+    burst_tag = save_frames.calls[0][1]
+    assert video.committed[0] == burst_tag
+
+
+def test_no_event_video_leaves_the_loop_exactly_as_it_was():
+    """The default path must be untouched by ADR 0020.
+
+    EVENT_VIDEO_ENABLED ships False, so this is what runs in the field
+    today. If the video wiring ever leaked into it, the flag would stop
+    being a real off switch.
+    """
+    outcome, _, log = _fire(probability=0.9)
+
+    assert outcome.video_path is None
+    assert not any(entry.startswith("video.") for entry in log)
