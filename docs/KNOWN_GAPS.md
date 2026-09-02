@@ -160,8 +160,25 @@ criteria — see each entry's status.
 - **Grove E5 join is untested; the SenseCAP gateway still ships EU868 and must be set to IN865
   first.** High severity (868 MHz is illegal to operate in India — CONTEXT.md §8). Status: open,
   tracked from ADR 0002.
-- **ADR 0008's µA-idle / autonomy figures remain unmeasured assumptions**, not bench-verified
-  power draws. Medium severity. Status: open.
+- **MPU deep suspend has no implementation at all, and the entire power budget assumes it does.**
+  Upgraded 2 Sept from the softer wording this entry used to carry ("ADR 0008's µA-idle / autonomy
+  figures remain unmeasured assumptions"), which understated it: the issue is not that a number is
+  unverified, it is that **the power state the number describes has never existed on this board.**
+  `device/mpu/main.py` ends in `while True: time.sleep(1)`; `MPU_WAKE_HOLD_S` is defined and has zero
+  consumers; there is no `/sys/power/state` write anywhere in the repo. It also cannot be added in
+  software alone — no MPU wake or power-gate pin exists in `device/mcu/src/config.h`, nothing is wired
+  to the kernel's armed `gpio-keys` wake source, and the only MCU→MPU wake path is the RouterBridge, a
+  userspace socket a suspended MPU cannot service (`device/mpu/bridge/schema.md` says as much).
+  Meanwhile the budget's 0.42-0.45W baseline is a third-party community measurement, and this file's
+  own 2 Sept brown-out entry already quotes ~0.66A idle / ~0.9A all-cores (≈3.3W / 4.5W) for the same
+  board — roughly **7x** the design figure, never reconciled against the sizing. At ~3.3W the node
+  draws ~105Wh/day against ~48.3Wh/day of monsoon harvest and 65.3Wh of usable pack: **flat in under
+  two days of a ten-day unattended trial.** Break-even is ~1.4W on a 20W panel, ~1.0W on 15W.
+  **High severity — this is a deployment-blocking unknown, not a documentation tidy-up.** Effort: one
+  inline multimeter reading on VIN (no software route exists — `/sys/class/power_supply/` is empty,
+  all hwmon devices are thermal zones, `/sys/bus/iio/devices/` is empty), taken *after* the VIN power
+  fix lands so the brown-out doesn't corrupt it, and *after* the headless-service strip so it measures
+  the field configuration rather than a desktop image. See ADR 0008's 2 Sept addendum. Status: open.
 - **GNSS → Bridge → dashboard forum thread** (`DEVICE_DEVELOPMENT_WORKFLOW.md` §3) — carried
   forward as a reference link, not yet acted on. Low severity. Status: open.
 - **Geophone damping resistor (1 kΩ, ADR 0001 addendum) — physically verified on hardware,
@@ -239,7 +256,8 @@ criteria — see each entry's status.
 - **`MPU_WAKE_HOLD_S = 30.0` (`services/config.py`) is invented — no measured suspend/resume or
   fusion-latency data backs it.** ADR 0008's own open bench items don't cover this either. Medium
   severity. Effort: bench measurement of real MPU wake/suspend timing once ADR 0008's hardware
-  lands. Status: open.
+  lands — noting (2 Sept) that this constant has **zero consumers** anywhere in the repo and that the
+  hardware it waits on does not exist yet; see the suspend entry above. Status: open.
 - **Board Python version is unverified; `pyproject.toml` targets `py311`** (assumed Debian 12
   bookworm, per the QRB2210's documented OS). If the board ships an older Python, `bridge/rpc.py`'s
   use of `enum.StrEnum` (3.11+) would need to fall back to `class AcousticClass(str, Enum)`. Medium
@@ -1163,7 +1181,15 @@ criteria — see each entry's status.
   yet," and `acoustic_ok=false` could misread as "acoustic sensor faulted" rather than "does not
   exist." Do not register `get_system_state` for real use until at minimum `battery_v` is backed by
   an actual ADC read, or the dashboard consumer is taught to treat `0.0`/`false` here as "unknown,"
-  not "measured." Status: open.
+  not "measured." **Escalated 2 Sept — `battery_v` is now a deployment blocker in its own right, not
+  only a dashboard-honesty problem.** With the real idle draw unmeasured and plausibly ~7x the design
+  figure (see the suspend entry above), the realistic failure mode for the field trial is the pack
+  going flat mid-trial. A node that cannot read its own battery voltage **fails silently**: no
+  degraded-mode warning, no LoRa alert, nothing until physical retrieval finds a dead box and an
+  unknown number of missed encounters. The fix is small and self-contained — a resistor divider from
+  the pack onto a spare STM32 ADC pin, a `config.h` entry, a real read in `get_system_state`, and the
+  value carried in the existing LoRa uplink. This turns a silent death into an alert and should be
+  scoped into whichever branch the VIN power measurement selects. Status: open.
 
 ## Build-call 7 (`device/mcu` automated geophone excitation self-test)
 
