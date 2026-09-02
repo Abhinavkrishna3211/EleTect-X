@@ -51,7 +51,8 @@ from cognition.experience import ExperienceStore
 from perception.camera import Camera
 from perception.detector import HttpVisionDetector
 from perception.night import frames_are_night
-from perception.storage import save_burst
+from perception.storage import clear_orphaned_scratch, save_burst
+from perception.video import EventVideoRecorder
 from services import config, reflex_loop
 
 logging.basicConfig(level=getattr(logging, config.LOG_LEVEL))
@@ -90,12 +91,37 @@ def debug_stream_raw_seismic_sample(volts: float) -> None:
 
 Bridge.provide("debug_stream_raw_seismic_sample", debug_stream_raw_seismic_sample)
 
-# One Camera per process, reused across events - not opened here.
-# Camera.__init__ does no I/O (perception/camera.py), so constructing this
-# at module scope is safe even before Bridge/hardware are confirmed ready;
-# only reflex_loop's own open()/close() calls around each alert touch the
-# device, so the camera is never left held open between events.
-_camera = Camera()
+# Clear any scratch recording left behind by a previous run that died
+# between "started recording" and "committed or discarded" - on this board
+# the likeliest cause is the 5V brown-out in docs/KNOWN_GAPS.md. Run
+# unconditionally rather than behind EVENT_VIDEO_ENABLED, because the case
+# that most needs cleaning up is precisely a run that recorded and was then
+# restarted with the flag off: nothing else would ever remove those files.
+# It only ever touches the scratch directory (perception/storage.py); a
+# committed capture is not reachable from it.
+clear_orphaned_scratch()
+
+# One camera per process, reused across events - not opened here. Both
+# constructors below do no I/O (perception/camera.py, perception/video.py),
+# so constructing at module scope is safe even before Bridge/hardware are
+# confirmed ready; only reflex_loop's own open()/close() calls around each
+# alert touch the device, so the camera is never left held open between
+# events.
+#
+# With ADR 0020's event video enabled, the recorder *is* the camera - one
+# USB device cannot be held by cv2.VideoCapture and GStreamer's v4l2src at
+# the same time, so the same object is passed as both `camera` and
+# `event_video` below and serves the vision-check and evidence bursts off
+# the frames its own recording pipeline is already producing. With the flag
+# off (the default, services/config.py) this is the plain Camera and
+# reflex_loop behaves exactly as it did before that ADR.
+if config.EVENT_VIDEO_ENABLED:
+    logger.info("event video enabled (ADR 0020) - camera frames served from the GStreamer pipeline")
+    _event_video: EventVideoRecorder | None = EventVideoRecorder()
+    _camera: reflex_loop.CameraProtocol = _event_video
+else:
+    _event_video = None
+    _camera = Camera()
 
 # One HTTP vision-detector client per process, reused across events - same
 # module-scope-construction reasoning as _camera above.
@@ -132,9 +158,11 @@ def _on_footfall_event(
     Thin wrapper: the real logic is reflex_loop.handle_footfall_event(),
     tested independently in tests/test_reflex_loop.py. This function exists
     only to bind the real Bridge.call-backed drive_horn/drive_led/pulse_ir,
-    the real Camera, the real save_burst, and the real SQLite-backed
+    the real camera, the real save_burst, and the real SQLite-backed
     experience store in as the injected dependencies reflex_loop's signature
-    requires.
+    requires. `event_video` is None unless config.EVENT_VIDEO_ENABLED is
+    set, in which case it is the same object as `camera` - see the
+    construction block above.
     """
     reflex_loop.handle_footfall_event(
         schema_version,
@@ -168,6 +196,7 @@ def _on_footfall_event(
         detect_vision=_vision_detector,
         save_frames=save_burst,
         experience=_experience,
+        event_video=_event_video,
     )
 
 

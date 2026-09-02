@@ -276,6 +276,113 @@ CAPTURE_DIR = _MODULE_DIR / "data" / "captures"
 CAPTURE_LOW_DISK_HEADROOM_BYTES = 500 * 1024 * 1024  # 500 MB
 
 # ---------------------------------------------------------------------------
+# Trigger-gated event video (ADR 0020, perception/video.py)
+# ---------------------------------------------------------------------------
+# ADR 0020 records a real video per event to a scratch path, runs the vision
+# check against that same live stream, and keeps the file only if the event
+# is confirmed - discarded triggers never reach the permanent capture
+# directory at all. Everything below sizes that one lifecycle.
+#
+# What this section deliberately does NOT configure: a continuous rolling
+# pre-event buffer. ADR 0020 rejects one outright on power grounds (a
+# permanently-running camera and encoder against a solar/battery budget that
+# is already baseline-dominated), and that rejection got *stronger*, not
+# weaker, when the board's real idle draw turned out to be far above the
+# figure the budget was sized on (ADR 0008's 2 Sept addendum). There is no
+# constant here to turn one on, by design.
+
+# Master switch, default OFF. The GStreamer pipeline in perception/video.py
+# has never been run against the real camera - no live-camera work has been
+# done since this was written, and the field power topology it would run
+# under (VIN rather than USB-C) has its own unresolved camera-enumeration
+# question in docs/KNOWN_GAPS.md. Off means device/mpu/main.py wires the
+# existing perception.camera.Camera and the JPEG-burst path exactly as
+# before and nothing in perception/video.py is ever constructed, so this
+# whole feature is inert until someone flips it with the board in front of
+# them.
+EVENT_VIDEO_ENABLED = False
+
+# Scratch directory for in-progress recordings, deliberately a subdirectory
+# of CAPTURE_DIR rather than /tmp or the container's own root overlay: the
+# commit step is an os.replace() of the finished file into CAPTURE_DIR, and
+# os.replace is only atomic within a single filesystem. On the board those
+# are genuinely different filesystems (CAPTURE_DIR lives on the 18G
+# /home/arduino mmcblk0p69; the container's /tmp is the ~1G root overlay),
+# so a scratch path outside CAPTURE_DIR would silently degrade the commit
+# into a copy-then-delete with a window where a brown-out leaves a
+# half-written file in the permanent directory. Leading dot so a directory
+# listing of captures shows finished footage only.
+EVENT_VIDEO_SCRATCH_DIR = CAPTURE_DIR / ".scratch"
+
+# Matroska, not MP4. An MP4's moov atom is written when the file is closed,
+# so a recording cut short - which on this board means a 5V brown-out, a
+# documented and observed failure (docs/KNOWN_GAPS.md, 2 Sept) - leaves a
+# file no player will open. Matroska is written incrementally and a
+# truncated .mkv still plays up to the point it was cut. Given that the
+# whole point of this feature is footage of a rare event, "playable up to
+# the crash" beats "nothing at all" decisively.
+EVENT_VIDEO_SUFFIX = ".mkv"
+
+# Upper bound on how long a recording may run before the keep-or-discard
+# decision has to have been made (ADR 0020 Decision B3's "~15-20s"). The
+# as-built reflex loop is synchronous and reaches that decision far sooner
+# than this - camera open, one VISION_CHECK_FRAME_COUNT burst, one
+# detect_vision() call bounded by VISION_INFERENCE_TIMEOUT_S, then fuse()
+# and decide(), which are pure functions - so this is not a timer the loop
+# waits on. It is the budget those stages must stay inside, checked as an
+# invariant in tests/test_config.py rather than enforced by a watchdog
+# thread this loop does not need and would have to get right.
+EVENT_VIDEO_CONFIRM_WINDOW_S = 20.0
+
+# How long to keep recording after the actuator sequence completes on a
+# confirmed event - the retreat tail, ADR 0020 Decision B4's "30-60s from
+# confirmation". Replaces (does not add to) CAPTURE_POST_FIRE_TAIL_S's 2.0s
+# when video recording is active: that 2s tail was sized for a JPEG burst,
+# and 2s of video would show the horn firing and nothing after it.
+#
+# The honest cost, stated plainly because it is a real behaviour change:
+# the reflex loop blocks for this whole tail, so a second footfall notify
+# arriving during it is queued behind it rather than handled. That is
+# already true of the 2s tail; 45s makes it matter. It is one of the
+# reasons EVENT_VIDEO_ENABLED defaults to False. INVENTED - no footage
+# review backs 45s over 30s or 60s, same as CAPTURE_POST_FIRE_TAIL_S.
+EVENT_VIDEO_RETREAT_TAIL_S = 45.0
+
+# Recording resolution and frame rate, deliberately below the camera's
+# CAMERA_FRAME_WIDTH/HEIGHT stills resolution. The recorder decodes MJPEG
+# in software before encoding H.264, and 1080p30 decode-plus-encode on four
+# A53 cores would compete with the vision inference running off the same
+# pipeline; 720p15 is a large reduction in that cost for footage whose job
+# is to show an elephant approaching and leaving, not to resolve detail.
+# The camera is free to negotiate the nearest mode it actually supports,
+# exactly as perception/camera.py's own CameraInfo readback documents.
+# INVENTED - no encode-load measurement on this board backs these numbers.
+EVENT_VIDEO_WIDTH = 1280
+EVENT_VIDEO_HEIGHT = 720
+EVENT_VIDEO_FRAMERATE = 15
+
+# H.264 target bitrate. ADR 0020 sizes a 60-90s event clip at 10-20MB;
+# 2 Mbps lands a 60s clip at ~15MB, inside that range. Kept as an explicit
+# constant rather than left to the encoder's default so the storage
+# arithmetic in ADR 0020 stays traceable to a number in the code.
+EVENT_VIDEO_BITRATE_BPS = 2_000_000
+
+# How long to wait for the pipeline to flush and finish the file after
+# end-of-stream is sent. A Matroska file that never gets its EOS is still
+# playable (see EVENT_VIDEO_SUFFIX above), so this timeout bounds the wait
+# rather than risking the loop hanging on a stuck encoder - a stuck
+# pipeline must not hold the reflex loop open indefinitely. INVENTED.
+EVENT_VIDEO_STOP_TIMEOUT_S = 5.0
+
+# How long a single frame pull off the recording pipeline may block. Sized
+# generously against EVENT_VIDEO_FRAMERATE's ~67ms frame interval so a
+# momentary encoder stall does not read as a dead camera, and bounded so a
+# genuinely dead pipeline degrades to "no frames" (which the reflex loop
+# already handles as vision-unavailable) instead of blocking the event.
+# INVENTED.
+EVENT_VIDEO_FRAME_TIMEOUT_S = 2.0
+
+# ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
 
