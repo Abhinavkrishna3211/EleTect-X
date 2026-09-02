@@ -191,23 +191,48 @@ def drive_horn(schema_version: int, gain_pct: float, duration_ms: int) -> bool:
     raise NotImplementedError
 
 
-def drive_led(schema_version: int, pattern_id: int, duration_ms: int) -> bool:
+def drive_led(
+    schema_version: int,
+    channel: int,
+    pattern_id: int,
+    gain_pct: float,
+    duration_ms: int,
+) -> bool:
     """Request an LED deterrence burst.
 
     Bridge target: `call`. Same cooldown/cap discipline as drive_horn, with
-    independent counters (schema.md). Not idempotent - never retried on
-    timeout.
+    independent counters *per channel* - the left wing firing does not gate
+    the right (schema.md). Not idempotent - never retried on timeout.
 
     Args:
         schema_version: Wire schema version; must equal SCHEMA_VERSION.
-        pattern_id: Which strobe pattern to run; MCU-side defined.
+        channel: Which LED wing fires - 0 = left, 1 = right, 2 = both wings
+            driven together in one call (schema_version 3, ADR 0014 E). Its
+            own wire field since schema_version 2 (ADR 0014); before that it
+            was overloaded onto pattern_id. An unrecognized value falls back
+            to the left wing on the MCU side. A channel-2 call is refused
+            (ack=False) if *either* wing is still in cooldown, and updates
+            both wings' cooldown counters when it fires.
+        pattern_id: Which flash pattern to run - 0 = steady, 1 = slow pulse,
+            2 = fast strobe, 3 = random flicker (single-wing); 4 = sweep,
+            5 = pulse both sync, 6 = flicker both independent (dual-wing,
+            schema_version 3, only meaningful with channel = 2) (led_pattern,
+            device/mcu/src/led.h). An unrecognized value falls back to
+            steady. Restored to meaning "which pattern" (its original intent)
+            in schema_version 2, now that `channel` carries the wing selector.
+        gain_pct: Requested LED output level, 0-100. Clamped to
+            LED_GAIN_MAX_PCT on the MCU side if out of bounds. A real wire
+            field since schema_version 2 (ADR 0014); before that the LEDs
+            always ran at config.h's LED_GAIN_MAX_PCT.
         duration_ms: Requested burst duration. Clamped to LED_BURST_MAX_MS
             on the MCU side if out of bounds; refused outright (ack=False)
-            if the LED actuator is still in its cooldown window.
+            if that channel is still in its cooldown window. A dual-wing
+            (channel = 2) call blocks for duration_ms, not twice it - one
+            MCU-side loop toggles both pins in the same window.
 
     Returns:
         True if the LEDs fired (with clamped values applied). False if the
-        request was refused because the actuator is in cooldown.
+        request was refused because the channel is in cooldown.
     """
     raise NotImplementedError
 

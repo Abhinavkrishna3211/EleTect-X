@@ -61,11 +61,17 @@ class DeterrenceAction:
         tier: Which escalation level this action represents.
         horn_gain_pct: drive_horn's gain_pct, 0-100 on the wire.
         horn_duration_ms: drive_horn's duration_ms, uint16 on the wire.
-        led_pattern_id: drive_led's pattern_id. 0 and 1 are the only values
-            the MCU maps to distinct channels today (white/blue,
-            device/mcu/src/bridge_handlers.cpp's
-            led_channel_for_pattern_id), and that mapping is itself flagged
-            INVENTED there.
+        led_channel_id: drive_led's channel - 0 = left wing, 1 = right wing
+            (device/mcu/src/led.h's led_channel). Its own wire field since
+            schema_version 2 (ADR 0014); before that it was overloaded onto
+            led_pattern_id.
+        led_pattern_id: drive_led's pattern_id - 0 = steady, 1 = slow pulse,
+            2 = fast strobe, 3 = random flicker (device/mcu/src/led.h's
+            led_pattern). Means "which flash pattern" again as of
+            schema_version 2, now that led_channel_id carries the wing.
+        led_gain_pct: drive_led's gain_pct, 0-100 on the wire. A real field
+            since schema_version 2 (ADR 0014); the tier ladder now varies it
+            the way it always has for the horn.
         led_duration_ms: drive_led's duration_ms.
         fire_ir: Whether to call pulse_ir at all for this tier. False on the
             lowest tier - see cognition/config.py's ladder comment for the
@@ -78,7 +84,9 @@ class DeterrenceAction:
     tier: Tier
     horn_gain_pct: float
     horn_duration_ms: int
+    led_channel_id: int
     led_pattern_id: int
+    led_gain_pct: float
     led_duration_ms: int
     fire_ir: bool
     ir_duration_ms: int

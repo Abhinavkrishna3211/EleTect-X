@@ -2,7 +2,21 @@
 
 Source of truth for the MCU↔MPU function boundary (`ENGINEERING_CONVENTIONS.md` §6). Both sides are
 hand-written against this table, not against each other's code. Every payload carries `schema_version:
-uint8 = 1` as its first field; bump on any breaking field change, never reuse a version number.
+uint8 = 3` as its first field; bump on any breaking field change, never reuse a version number.
+
+**Version history**
+- `1` — initial boundary.
+- `2` (2026-09-01, ADR 0014) — `drive_led` args changed from `pattern_id, duration_ms` to
+  `channel, pattern_id, gain_pct, duration_ms`. `channel` (which wing) split out of `pattern_id` into
+  its own field; `pattern_id` goes back to meaning "which flash pattern"; `gain_pct` added so the tier
+  ladder can vary LED brightness. `drive_horn`, `pulse_ir`, and every MCU→MPU row are unchanged.
+- `3` (2026-09-01, ADR 0014 §E) — `drive_led` gains dual-wing addressing. `channel` value `2` changes
+  meaning from "unrecognized → left wing" to "**both wings**, driven together inside one blocking
+  call"; `pattern_id` gains `4 = sweep` (wings antiphase at fast-strobe rate), `5 = pulse both sync`
+  (wings in phase at fast-strobe rate), `6 = flicker both independent` (each wing its own irregular
+  flicker). No wire field added or removed — the payload shape is identical to `2` — but a `2`-era
+  sender that sent `channel = 2` expecting the left-wing fallback now fires both wings, so it is a
+  breaking change. `drive_horn`, `pulse_ir`, and every MCU→MPU row are unchanged.
 
 Two Bridge primitives, both confirmed against Arduino's own reference Bricks this session, not assumed:
 `Bridge.call(name, args) -> return_value` is synchronous request/response — caller blocks until a response
@@ -23,26 +37,24 @@ actuator commands (the MPU needs to know the action actually executed before dec
 | Function | Args | Return | MCU-side failure behavior |
 |---|---|---|---|
 | `drive_horn` | `schema_version, gain_pct: float (0–100), duration_ms: uint16` | `ack: bool` | MCU enforces its own burst-duration cap and cooldown (ADR 0003) regardless of what's requested — an out-of-bounds request is clamped, not rejected, and `ack` reports the values actually used. Never blocks past the physical burst duration. |
-| `drive_led` | `schema_version, pattern_id: uint8, duration_ms: uint16` | `ack: bool` | Same cooldown/cap discipline as `drive_horn`, independent counters. No `gain_pct` wire field — always driven at `config.h`'s `LED_GAIN_MAX_PCT` internally (see "Actuator gain defaults" below). |
+| `drive_led` | `schema_version, channel: uint8, pattern_id: uint8, gain_pct: float (0–100), duration_ms: uint16` | `ack: bool` | Same cooldown/cap discipline as `drive_horn`, with **per-channel** independent counters — the left wing firing does not gate the right. `channel`: 0 = left wing, 1 = right wing, 2 = both wings (`led_channel_from_wire()`, `device/mcu/src/bridge_handlers.cpp`); unrecognized → left. A `channel = 2` call gates on **both** wings' cooldown counters — refused (`ack=false`) if *either* wing is still cooling — and updates both on a fire; it runs one blocking loop toggling both pins, so it blocks for `duration_ms`, not twice that (ADR 0014 §E). `pattern_id`: 0 = steady, 1 = slow pulse, 2 = fast strobe, 3 = random flicker (single-wing); 4 = sweep (both wings antiphase, fast-strobe rate), 5 = pulse both sync (both wings in phase, fast-strobe rate), 6 = flicker both independent (each wing independently-seeded irregular flicker) (`led_pattern_from_id()`, `device/mcu/src/led.h`); unrecognized → steady. The three dual-wing patterns only make sense with `channel = 2`; addressed to a single wing they fall through to steady on that one wing. Every pattern is a flash sequence whose on/off spans sum to exactly `duration_ms`, so blocking cost is identical to a steady burst regardless of pattern (ADR 0014). `gain_pct` clamps to `LED_GAIN_MAX_PCT`; the clamp is reported in `ack`. |
 | `pulse_ir` | `schema_version, duration_ms: uint16` | `ack: bool` | Gated by the IR MOSFET's own thermal/duty limits (`config.h`); over-duration requests clamp, and the clamp is reported in `ack`, never silently dropped. No `gain_pct` wire field — always driven at `config.h`'s `IR_GAIN_MAX_PCT` internally (see "Actuator gain defaults" below). |
 | `get_system_state` | `schema_version` | `battery_v: float, geophone_ok: bool, acoustic_ok: bool, uptime_s: uint32` | Never blocks past one cached-struct read (same struct `report_system_status` pushes periodically) — not a fresh sensor poll. |
 | `send_lora_alert` | `schema_version, confidence: float, capture_ref: uint32` | `ack: bool` | No real transport exists yet — the Grove E5 is not answering AT probes (`docs/KNOWN_GAPS.md`, 18 Aug entry), so the MCU-side handler only logs the request and always returns `ack=false`. `ack` means "queued/logged on the MCU," never "delivered over the air," until the module joins and a real uplink is wired in. Not idempotent, same as `drive_horn` — never retried on timeout. |
 
 ### Actuator gain defaults
 
-`drive_horn` carries an explicit `gain_pct` wire field because horn deterrence intensity is a real,
-call-to-call tunable the MPU-side policy needs. `drive_led` and `pulse_ir` do not, and this is a
-deliberate contract decision, not an oversight: both are on/off flash-or-illuminate actuators —
-`LED_GAIN_MAX_PCT` and `IR_GAIN_MAX_PCT` (`config.h`) are both `100.0f` today, i.e. full duty is the
-only duty either has ever driven — and unlike the horn, no per-call variation has any established use
-case. `pattern_id` selects *which* LED channel fires (`led_channel_for_pattern_id()`,
-`device/mcu/src/bridge_handlers.h`), a separate axis from brightness; it does not and should not also
-select gain, since `pulse_ir` has no `pattern_id` to map from and would need its own fixed default
-regardless. Both MCU-side adapters (`device/mcu/src/bridge_handlers.cpp`) request their config max
-unconditionally. If a real LED/IR intensity requirement shows up, add `gain_pct` to these rows as a
-breaking schema change (bump `schema_version`) rather than overloading `pattern_id` — see
-`docs/KNOWN_GAPS.md` for the pattern-semantics gap this does *not* resolve (what `pattern_id` values
-should mean beyond channel selection).
+`drive_horn` and `drive_led` each carry an explicit `gain_pct` wire field because deterrence intensity
+is a real, call-to-call tunable the MPU-side tier ladder varies (ADR 0014 added it to `drive_led` in
+`schema_version 2`; before that the LEDs always ran at `LED_GAIN_MAX_PCT`). `drive_led` also carries
+`channel` (which wing, or both since `schema_version 3`) and `pattern_id` (which flash pattern) as
+separate axes — brightness, wing, and pattern are independent and none of them selects another.
+
+`pulse_ir` still has no `gain_pct` field, and that remains a deliberate contract decision: it is a
+pure on/off illuminator, `IR_GAIN_MAX_PCT` (`config.h`) is `100.0f`, full duty is the only duty it has
+ever driven, and no per-pulse variation has an established use case. Its MCU-side adapter
+(`device/mcu/src/bridge_handlers.cpp`) requests the config max unconditionally. If a real IR-intensity
+requirement shows up, add `gain_pct` to that row as a breaking schema change (bump `schema_version`).
 
 ## Same-side function contracts (MCU-internal, not Bridge calls — per `ENGINEERING_CONVENTIONS.md` §1/§2)
 

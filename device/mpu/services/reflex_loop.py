@@ -61,6 +61,16 @@ the pulse (see docs/KNOWN_GAPS.md, 27 Aug entry, for the correct long-term
 fix - making pulse_ir() non-blocking on the MCU side - and why it is not
 done here, six days from the field trial).
 
+pulse_ir() is gated twice: the selected tier must set fire_ir (tiers 2 and
+3 do, tier 1 does not - cognition/config.py), and the pre-decision
+vision-check burst must read as night. The IMX462's IR-cut filter is in
+during daylight, so the illuminator's near-IR never reaches a pixel then -
+firing it would spend MOSFET duty budget and battery for nothing.
+is_night() infers the filter state from the vision-check frames' own colour
+saturation (perception/night.py); in daylight, or when no frame could be
+measured, the pulse is skipped for that event and only that - the horn and
+LED still fire the tier as selected.
+
 What fires is chosen per event rather than fixed. decide() remains the
 alert gate on the fused probability and is unchanged; once it says alert,
 cognition/bandit.py selects one of cognition/config.py's three deterrence
@@ -267,7 +277,14 @@ class DriveHornFn(Protocol):
 class DriveLedFn(Protocol):
     """Callable shape matching bridge.rpc.drive_led's real signature."""
 
-    def __call__(self, schema_version: int, pattern_id: int, duration_ms: int) -> bool:
+    def __call__(
+        self,
+        schema_version: int,
+        channel: int,
+        pattern_id: int,
+        gain_pct: float,
+        duration_ms: int,
+    ) -> bool:
         """Request an LED burst; returns the ack drive_led's own contract defines."""
         ...
 
@@ -277,6 +294,21 @@ class PulseIrFn(Protocol):
 
     def __call__(self, schema_version: int, duration_ms: int) -> bool:
         """Request an IR pulse; returns the ack pulse_ir's own contract defines."""
+        ...
+
+
+class NightDecideFn(Protocol):
+    """Callable that decides night vs day from a burst of BGR frames.
+
+    main.py binds this to perception.night.frames_are_night with the
+    configured saturation threshold; tests pass a stub. Returns True for
+    night (fire IR), False for day (suppress IR), None when no frame in the
+    burst could be measured (treated as "do not fire" - see
+    handle_footfall_event).
+    """
+
+    def __call__(self, frames: list[Frame]) -> bool | None:
+        """Report whether `frames` were captured under night / IR-cut-open conditions."""
         ...
 
 
@@ -642,6 +674,7 @@ def handle_footfall_event(
     drive_horn: DriveHornFn,
     drive_led: DriveLedFn,
     pulse_ir: PulseIrFn,
+    is_night: NightDecideFn,
     camera: CameraProtocol,
     detect_vision: VisionDetectFn,
     save_frames: SaveFramesFn,
@@ -698,6 +731,15 @@ def handle_footfall_event(
         drive_horn: Callable matching bridge.rpc.drive_horn's signature.
         drive_led: Callable matching bridge.rpc.drive_led's signature.
         pulse_ir: Callable matching bridge.rpc.pulse_ir's signature.
+        is_night: Callable matching NightDecideFn. Given the pre-decision
+            vision-check burst, returns True if those frames were captured
+            with the camera's IR-cut filter open (night - the external
+            illuminator will actually land on a sensitive sensor), False in
+            daylight, None if not one frame could be measured. An escalated
+            tier's pulse_ir() fires only on True; False and None both
+            suppress it for the event (logged, nothing else about the tier
+            changes). main.py binds perception.night.frames_are_night;
+            tests pass a stub.
         camera: Object matching CameraProtocol (open/capture_burst/close).
             Opened once and closed once per event (outside safe_mode), never
             across events.
@@ -859,7 +901,7 @@ def handle_footfall_event(
     tier, exploring = select_tier(
         context, experience.action_values(), bandit_params, rng, floor
     )
-    action = cognition_config.DETERRENCE_TIERS[tier]
+    action = cognition_config.resolve_tier_action(tier, rng)
     logger.info(
         "deterrence tier %d selected: context=%d floor=%d exploring=%s "
         "gain_pct=%.1f fire_ir=%s",
@@ -874,14 +916,18 @@ def handle_footfall_event(
     if safe_mode:
         logger.info(
             "[SAFE_MODE] would open camera, call drive_horn(schema_version=%d, "
-            "gain_pct=%.1f, duration_ms=%d), drive_led(pattern_id=%d, duration_ms=%d)"
-            "%s - not calling (dry run), and recording no attempt",
+            "gain_pct=%.1f, duration_ms=%d), drive_led(channel=%d, pattern_id=%d, "
+            "gain_pct=%.1f, duration_ms=%d)%s - not calling (dry run), and "
+            "recording no attempt",
             schema_version,
             action.horn_gain_pct,
             action.horn_duration_ms,
+            action.led_channel_id,
             action.led_pattern_id,
+            action.led_gain_pct,
             action.led_duration_ms,
-            f", pulse_ir(duration_ms={action.ir_duration_ms})" if action.fire_ir else "",
+            f", pulse_ir(duration_ms={action.ir_duration_ms}) [only if the "
+            f"vision-check burst reads as night]" if action.fire_ir else "",
         )
         # camera_opened/vision_frames are guaranteed empty here - the
         # pre-decision block above only runs when not safe_mode.
@@ -904,9 +950,46 @@ def handle_footfall_event(
     # call after the capture would always return with the illuminator
     # already dark; this is what actually lands the exposure window inside
     # the pulse.
+    #
+    # Second gate, on top of the tier's fire_ir flag: the illuminator only
+    # helps once the camera's IR-cut filter is out (night). is_night() reads
+    # that off the vision-check burst already captured above - a mono /
+    # IR-lit frame's colour saturation has collapsed, a daylight frame's has
+    # not (perception/night.py). In daylight (False) or when not one frame
+    # could be measured (None - and then the evidence burst has nothing to
+    # illuminate either) the pulse is skipped for this event; the tier is
+    # otherwise unchanged. An unexpected error inside is_night() itself must
+    # not suppress deterrence - it is logged and the pulse fires, matching
+    # the module's "a perception failure never blocks an actuator" rule.
+    fire_ir_now = action.fire_ir
+    if fire_ir_now:
+        try:
+            night = is_night(vision_frames)
+        except Exception:  # noqa: BLE001 - perception must never block actuation
+            logger.exception("is_night() raised - firing pulse_ir anyway")
+            night = True
+        if night is True:
+            pass
+        elif night is False:
+            logger.info(
+                "pulse_ir suppressed: vision-check frames read as daylight "
+                "(IR-cut filter engaged, illuminator would not reach the sensor) "
+                "- tier %d otherwise unchanged",
+                int(tier),
+            )
+            fire_ir_now = False
+        else:  # None
+            logger.info(
+                "pulse_ir suppressed: day/night undetermined - no vision-check "
+                "frame could be measured, so the evidence burst has nothing to "
+                "illuminate either - tier %d otherwise unchanged",
+                int(tier),
+            )
+            fire_ir_now = False
+
     ir_thread: threading.Thread | None = None
     ir_result: dict[str, bool] = {}
-    if action.fire_ir:
+    if fire_ir_now:
 
         def _fire_ir() -> None:
             ir_result["ack"] = pulse_ir(schema_version, action.ir_duration_ms)
@@ -926,7 +1009,13 @@ def handle_footfall_event(
     horn_ack = drive_horn(schema_version, action.horn_gain_pct, action.horn_duration_ms)
     logger.info("drive_horn ack=%s", horn_ack)
 
-    led_ack = drive_led(schema_version, action.led_pattern_id, action.led_duration_ms)
+    led_ack = drive_led(
+        schema_version,
+        action.led_channel_id,
+        action.led_pattern_id,
+        action.led_gain_pct,
+        action.led_duration_ms,
+    )
     logger.info("drive_led ack=%s", led_ack)
 
     # The bandit learns only from deterrence that actually happened. A false

@@ -6,6 +6,7 @@ tests/test_config.py (services/config.py's own invariant tests).
 """
 
 import math
+import random
 import re
 from pathlib import Path
 
@@ -247,9 +248,10 @@ def test_horn_gain_increases_strictly_with_tier():
 
 
 def test_every_requested_gain_stays_inside_the_wire_protocol_range():
-    """schema.md's drive_horn gain_pct is 0-100; a request outside it is malformed."""
+    """schema.md's drive_horn/drive_led gain_pct is 0-100; a request outside it is malformed."""
     for action in config.DETERRENCE_TIERS.values():
         assert 0.0 <= action.horn_gain_pct <= config.PROTOCOL_GAIN_PCT_MAX
+        assert 0.0 <= action.led_gain_pct <= config.PROTOCOL_GAIN_PCT_MAX
 
 
 def test_every_requested_duration_fits_in_the_wire_uint16():
@@ -272,6 +274,7 @@ def test_the_top_tier_requests_the_protocol_maximum():
     """
     top = config.DETERRENCE_TIERS[Tier.TIER_3]
     assert top.horn_gain_pct == config.PROTOCOL_GAIN_PCT_MAX
+    assert top.led_gain_pct == config.PROTOCOL_GAIN_PCT_MAX
     assert top.horn_duration_ms == config.PROTOCOL_DURATION_MS_MAX
     assert top.led_duration_ms == config.PROTOCOL_DURATION_MS_MAX
     assert top.ir_duration_ms == config.PROTOCOL_DURATION_MS_MAX
@@ -300,11 +303,17 @@ def test_lower_tiers_stay_below_the_mcu_horn_clamp():
 
 
 def test_only_the_lowest_tier_withholds_ir():
-    """Tier 1 fires no IR; both escalated tiers do.
+    """Tier 1 fires no IR; both escalated tiers are allowed to.
 
     This is the axis that actually distinguishes the tiers physically today
     (gain_pct has no audible effect yet - see docs/KNOWN_GAPS.md), so losing
     it would leave tier 1 and tier 2 indistinguishable in the field.
+
+    fire_ir is the tier's *permission* to pulse the illuminator, not a
+    guarantee it will: services/reflex_loop.py adds a runtime day/night gate
+    (perception/night.py) that suppresses the pulse in daylight even on
+    tiers 2/3. That gate is covered in tests/test_reflex_loop.py; here we
+    only assert the per-tier permission flag, which is unchanged.
     """
     assert config.DETERRENCE_TIERS[Tier.TIER_1].fire_ir is False
     assert config.DETERRENCE_TIERS[Tier.TIER_2].fire_ir is True
@@ -312,14 +321,130 @@ def test_only_the_lowest_tier_withholds_ir():
 
 
 def test_led_pattern_ids_are_ones_the_mcu_actually_maps():
-    """0 and 1 are the only pattern_ids with distinct channels MCU-side.
+    """pattern_id 0-6 are the led_pattern values the MCU maps (ADR 0014, E).
 
-    device/mcu/src/bridge_handlers.cpp maps 1 to blue and everything else to
-    white, so requesting 2 would silently be white again and the tier would
-    lose its visual distinction without any error anywhere.
+    device/mcu/src/led.h's led_pattern_from_id() maps 0=steady, 1=slow pulse,
+    2=fast strobe, 3=random flicker (single-wing), 4=sweep, 5=pulse both
+    sync, 6=flicker both independent (dual-wing, ADR 0014 E) and falls back
+    to steady for anything else - so a tier asking for 7+ would silently be
+    steady and lose its intended pattern with no error anywhere.
     """
     for action in config.DETERRENCE_TIERS.values():
-        assert action.led_pattern_id in (0, 1)
+        assert action.led_pattern_id in (0, 1, 2, 3, 4, 5, 6)
+    for pattern_id in config.TIER_3_LED_PATTERN_IDS:
+        assert pattern_id in (0, 1, 2, 3, 4, 5, 6)
+
+
+def test_led_channel_ids_are_ones_the_mcu_actually_maps():
+    """Channels 0 (left), 1 (right), 2 (both) are all the MCU maps (ADR 0014, E).
+
+    device/mcu/src/bridge_handlers.cpp's led_channel_from_wire() maps 1 to
+    the right wing, 2 to both wings (schema_version 3, ADR 0014 E), and
+    everything else to the left, so a tier asking for 3+ would silently
+    drive the left wing and lose its intended channel.
+    """
+    for action in config.DETERRENCE_TIERS.values():
+        assert action.led_channel_id in (0, 1, 2)
+
+
+def test_each_tier_has_a_distinct_led_signature():
+    """Escalation must be visible: no two tiers share pattern, wing, and gain.
+
+    ADR 0014's whole point is that a repeat offender sees a *different* light
+    show each step up the ladder - not just a different actuator count.
+    """
+    signatures = [
+        (a.led_channel_id, a.led_pattern_id, a.led_gain_pct)
+        for a in (config.DETERRENCE_TIERS[t] for t in Tier)
+    ]
+    assert len(set(signatures)) == len(signatures)
+
+
+def test_every_led_tier_fires_at_full_gain():
+    """ADR 0014 E.3: the light is at full output on every tier, no ramp.
+
+    Escalation is carried by wing count, pattern, and top-rung strobe rate -
+    not brightness. A tier that requested less than full gain would be a
+    regression to the pre-E.3 graded ramp.
+    """
+    gains = [config.DETERRENCE_TIERS[tier].led_gain_pct for tier in Tier]
+    assert gains == [config.PROTOCOL_GAIN_PCT_MAX] * len(gains), (
+        f"LED gains {gains} - E.3 requires every tier at "
+        f"PROTOCOL_GAIN_PCT_MAX ({config.PROTOCOL_GAIN_PCT_MAX})."
+    )
+
+
+def test_every_led_tier_requests_exactly_the_mcu_led_clamp():
+    """The drift check cognition/config.py's LED gain-fraction comment defers here.
+
+    ADR 0014 E.3 fires every tier at full gain, so each request must equal
+    LED_GAIN_MAX_PCT exactly - not exceed it (the MCU would clamp, hiding a
+    config error) and not fall under it (that would be a covert brightness
+    ramp). If the firmware cap ever moves, this fails and the intent gets
+    re-stated on both sides of the boundary.
+    """
+    led_gain_max_pct = _read_mcu_define("LED_GAIN_MAX_PCT")
+    for tier in Tier:
+        gain = config.DETERRENCE_TIERS[tier].led_gain_pct
+        assert gain == led_gain_max_pct, (
+            f"{tier.name} requests {gain}% LED gain; ADR 0014 E.3 requires "
+            f"exactly LED_GAIN_MAX_PCT ({led_gain_max_pct}%)."
+        )
+
+
+def test_tier_2_and_3_use_real_dual_wing():
+    """ADR 0014 E.2: escalation adds the second wing, not just a pattern swap.
+
+    Tier 1 stays single-wing; tiers 2 and 3 both address channel 2 (both
+    wings). If this regresses to a single-wing channel the "real dual-wing"
+    the ADR decided to build is gone.
+    """
+    both_wings = 2
+    assert config.DETERRENCE_TIERS[Tier.TIER_1].led_channel_id == 0
+    assert config.DETERRENCE_TIERS[Tier.TIER_2].led_channel_id == both_wings
+    assert config.DETERRENCE_TIERS[Tier.TIER_3].led_channel_id == both_wings
+
+
+def test_tier_1_led_pattern_is_the_strobe_anchor():
+    """ADR 0014 E.2: Tier 1's pattern moved from slow pulse (1) to fast strobe (2).
+
+    Strobe is the pattern DFO practitioner testimony actually backs; slow
+    pulse never had that support. The whole ladder re-anchors on it.
+    """
+    assert config.DETERRENCE_TIERS[Tier.TIER_1].led_pattern_id == 2
+
+
+def test_resolve_tier_action_is_identity_for_the_fixed_tiers():
+    """Tiers 1 and 2 are fixed - resolve_tier_action returns the stored object.
+
+    The reflex loop and several tests rely on `is DETERRENCE_TIERS[t]`
+    identity for these two; only Tier 3 rotates.
+    """
+    rng = random.Random(0)
+    for tier in (Tier.TIER_1, Tier.TIER_2):
+        assert config.resolve_tier_action(tier, rng) is config.DETERRENCE_TIERS[tier]
+
+
+def test_resolve_tier_action_rotates_tier_3_across_both_patterns():
+    """Tier 3 must not fire one fixed 'maximum' pattern every time (ADR 0014 E.2).
+
+    Over enough draws resolve_tier_action must yield every id in
+    TIER_3_LED_PATTERN_IDS and nothing outside it, and must leave every
+    other field of the Tier 3 action untouched.
+    """
+    rng = random.Random(1234)
+    base = config.DETERRENCE_TIERS[Tier.TIER_3]
+    seen = set()
+    for _ in range(200):
+        action = config.resolve_tier_action(Tier.TIER_3, rng)
+        seen.add(action.led_pattern_id)
+        assert action.tier is Tier.TIER_3
+        assert action.led_channel_id == base.led_channel_id
+        assert action.led_gain_pct == base.led_gain_pct
+        assert action.led_duration_ms == base.led_duration_ms
+        assert action.fire_ir == base.fire_ir
+        assert action.ir_duration_ms == base.ir_duration_ms
+    assert seen == set(config.TIER_3_LED_PATTERN_IDS)
 
 
 def test_default_bandit_params_do_not_drift_from_their_constants():

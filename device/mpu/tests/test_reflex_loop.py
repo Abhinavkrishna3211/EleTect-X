@@ -39,6 +39,7 @@ from cognition.fusion import Modality, sigmoid
 from perception.camera import CameraError, Frame
 from perception.detector import Detection, DetectionError
 from perception.storage import CaptureEventTag
+from services import config as services_config
 from services import reflex_loop
 
 # The real tuning, minus the randomness - see the module docstring.
@@ -78,8 +79,8 @@ class _FakeDriveLed:
         self.calls = []
         self.call_log = call_log if call_log is not None else []
 
-    def __call__(self, schema_version, pattern_id, duration_ms):
-        self.calls.append((schema_version, pattern_id, duration_ms))
+    def __call__(self, schema_version, channel, pattern_id, gain_pct, duration_ms):
+        self.calls.append((schema_version, channel, pattern_id, gain_pct, duration_ms))
         self.call_log.append("drive_led")
         return self.ack
 
@@ -278,12 +279,15 @@ def _expected_seismic_vision_fusion(probability: float, vision_confidence: float
 def _fire(probability=0.9, sta_lta_ratio=6.0, schema_version=1, call_log=None, **fakes):
     """Call handle_footfall_event with sensible defaults and a shared call_log.
 
-    Any of drive_horn/drive_led/pulse_ir/camera/detect_vision/save_frames/
-    experience can be overridden via **fakes; unspecified ones get a default
-    fake sharing call_log, so a test only has to construct the fake(s) it
-    cares about. detect_vision defaults to a fake that always finds nothing
-    - see _FakeVisionDetect's own docstring for why that keeps the existing
-    fusion-value assertions valid.
+    Any of drive_horn/drive_led/pulse_ir/is_night/camera/detect_vision/
+    save_frames/experience can be overridden via **fakes; unspecified ones
+    get a default fake sharing call_log, so a test only has to construct the
+    fake(s) it cares about. detect_vision defaults to a fake that always
+    finds nothing - see _FakeVisionDetect's own docstring for why that keeps
+    the existing fusion-value assertions valid. is_night defaults to "always
+    night", so the IR-firing tests below exercise the escalated tiers'
+    pulse_ir the same as before this gate existed; the daylight-suppression
+    path has its own tests that override it.
 
     The default experience store is fresh and in-memory, so an unspecified
     one means a cold store: no repeats, no learned values, and therefore
@@ -295,6 +299,7 @@ def _fire(probability=0.9, sta_lta_ratio=6.0, schema_version=1, call_log=None, *
         "drive_horn": fakes.pop("drive_horn", _FakeDriveHorn(call_log=log)),
         "drive_led": fakes.pop("drive_led", _FakeDriveLed(call_log=log)),
         "pulse_ir": fakes.pop("pulse_ir", _FakePulseIr(call_log=log)),
+        "is_night": fakes.pop("is_night", lambda frames: True),
         "camera": fakes.pop("camera", _FakeCamera(call_log=log)),
         "detect_vision": fakes.pop("detect_vision", _FakeVisionDetect()),
         "save_frames": fakes.pop("save_frames", _FakeSaveFrames(call_log=log)),
@@ -354,7 +359,13 @@ def test_high_probability_alerts_and_fires_the_selected_tier_outside_safe_mode()
         (1, TIER_1.horn_gain_pct, TIER_1.horn_duration_ms)
     ]
     assert kwargs["drive_led"].calls == [
-        (1, TIER_1.led_pattern_id, TIER_1.led_duration_ms)
+        (
+            1,
+            TIER_1.led_channel_id,
+            TIER_1.led_pattern_id,
+            TIER_1.led_gain_pct,
+            TIER_1.led_duration_ms,
+        )
     ]
     assert kwargs["pulse_ir"].calls == []
 
@@ -378,6 +389,7 @@ def test_safe_mode_suppresses_all_actuation_and_camera():
         pulse_ir=pulse_ir,
         camera=camera,
         detect_vision=_FakeVisionDetect(),
+        is_night=lambda frames: True,
         save_frames=save_frames,
         experience=ExperienceStore(IN_MEMORY_PATH),
         bandit_params=DETERMINISTIC_PARAMS,
@@ -771,6 +783,143 @@ def test_pulse_ir_overlaps_the_capture_window_not_after_it():
     experience.close()
 
 
+# ---------------------------------------------------------------------------
+# handle_footfall_event() - the day/night gate on pulse_ir (perception/night.py)
+# ---------------------------------------------------------------------------
+
+
+def _escalate_to_tier_2(experience):
+    """One tier-1 fire so the next _fire() on this store lands on tier 2 (fires IR)."""
+    _fire(0.9, experience=experience)
+
+
+def test_daylight_vision_check_suppresses_pulse_ir_but_still_fires_horn_and_led(caplog):
+    """is_night() False: the illuminator is skipped, the rest of the tier is not.
+
+    In daylight the IMX462's IR-cut filter is in front of the sensor, so a
+    pulse_ir() would spend MOSFET duty budget on light no pixel can see. The
+    tier still escalated and still owes a horn+LED response - only the IR
+    drops out, and the drop is logged, not silent.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    _escalate_to_tier_2(experience)
+
+    log: list = []
+    with caplog.at_level("INFO"):
+        outcome, kwargs, log = _fire(
+            0.9, experience=experience, call_log=log, is_night=lambda frames: False
+        )
+
+    assert outcome.action is TIER_2
+    assert outcome.ir_ack is None
+    assert kwargs["pulse_ir"].calls == []
+    assert "pulse_ir" not in log
+    assert log == [
+        "camera.open",
+        "camera.capture_burst",
+        "camera.capture_burst",
+        "drive_horn",
+        "drive_led",
+        "camera.close",
+        "save_frames",
+    ]
+    assert any(
+        "pulse_ir suppressed" in r.message and "daylight" in r.message
+        for r in caplog.records
+    )
+    experience.close()
+
+
+def test_undetermined_day_night_state_also_suppresses_pulse_ir(caplog):
+    """is_night() None (no measurable frame): skip IR, with its own log line.
+
+    An unmeasurable vision-check burst means the evidence burst has nothing
+    to illuminate either, so firing the pulse would be pointless rather than
+    merely wasteful - suppressed, and distinguishable in the log from the
+    daylight case.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    _escalate_to_tier_2(experience)
+
+    with caplog.at_level("INFO"):
+        outcome, kwargs, _ = _fire(
+            0.9, experience=experience, is_night=lambda frames: None
+        )
+
+    assert outcome.action is TIER_2
+    assert outcome.ir_ack is None
+    assert kwargs["pulse_ir"].calls == []
+    assert any(
+        "pulse_ir suppressed" in r.message and "undetermined" in r.message
+        for r in caplog.records
+    )
+    experience.close()
+
+
+def test_is_night_error_never_blocks_deterrence_and_the_pulse_still_fires(caplog):
+    """A bug in is_night() must not cost the event its illuminator.
+
+    Intentional daylight suppression is one sanctioned skip; an exception is
+    not - it is logged and pulse_ir() fires anyway, the same "a perception
+    failure never blocks an actuator" rule the camera and detector paths
+    already follow.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    _escalate_to_tier_2(experience)
+
+    def _boom(frames):
+        raise RuntimeError("saturation math blew up")
+
+    with caplog.at_level("WARNING"):
+        outcome, kwargs, _ = _fire(0.9, experience=experience, is_night=_boom)
+
+    assert outcome.action is TIER_2
+    assert outcome.ir_ack is True
+    assert kwargs["pulse_ir"].calls == [(1, TIER_2.ir_duration_ms)]
+    assert any("is_night() raised" in r.message for r in caplog.records)
+    experience.close()
+
+
+def test_is_night_is_handed_the_pre_decision_vision_check_frames():
+    """The gate reads the burst captured before decide(), not the evidence burst.
+
+    That burst is the only one that exists at the moment the IR thread would
+    start, and it is the one whose exposure the pulse is meant to land in.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    _escalate_to_tier_2(experience)
+
+    seen: list = []
+
+    def _record(frames):
+        seen.append(list(frames))
+        return True
+
+    outcome, _, _ = _fire(0.9, experience=experience, is_night=_record)
+
+    assert outcome.action is TIER_2
+    assert len(seen) == 1
+    assert len(seen[0]) == services_config.VISION_CHECK_FRAME_COUNT
+    assert all(isinstance(f, Frame) for f in seen[0])
+    experience.close()
+
+
+def test_tier_1_never_consults_the_night_gate():
+    """Tier 1 fires no IR by config, so is_night() is irrelevant and uncalled."""
+    calls: list = []
+
+    def _tracking(frames):
+        calls.append(frames)
+        return True
+
+    outcome, kwargs, _ = _fire(0.9, is_night=_tracking)
+
+    assert outcome.action is TIER_1
+    assert outcome.ir_ack is None
+    assert calls == []
+    assert kwargs["pulse_ir"].calls == []
+
+
 def test_sub_threshold_events_still_count_toward_habituation():
     """A non-alerting trigger must still escalate the next real alert.
 
@@ -882,6 +1031,7 @@ def test_safe_mode_selects_a_tier_but_records_no_attempt(caplog):
             pulse_ir=_FakePulseIr(),
             camera=_FakeCamera(),
             detect_vision=_FakeVisionDetect(),
+            is_night=lambda frames: True,
             save_frames=_FakeSaveFrames(),
             experience=experience,
             bandit_params=DETERMINISTIC_PARAMS,
@@ -903,6 +1053,7 @@ def test_safe_mode_selects_a_tier_but_records_no_attempt(caplog):
         pulse_ir=_FakePulseIr(),
         camera=_FakeCamera(),
         detect_vision=_FakeVisionDetect(),
+        is_night=lambda frames: True,
         save_frames=_FakeSaveFrames(),
         experience=experience,
         bandit_params=DETERMINISTIC_PARAMS,
@@ -932,6 +1083,7 @@ def test_safe_mode_still_records_the_trigger():
             pulse_ir=_FakePulseIr(),
             camera=_FakeCamera(),
             detect_vision=_FakeVisionDetect(),
+            is_night=lambda frames: True,
             save_frames=_FakeSaveFrames(),
             experience=experience,
             bandit_params=DETERMINISTIC_PARAMS,
@@ -940,7 +1092,11 @@ def test_safe_mode_still_records_the_trigger():
 
     third, _, _ = _fire(0.9, experience=experience)
     assert third.repeat_count == 2
-    assert third.action is TIER_3
+    # Tier 3 rotates its LED pattern per fire (ADR 0014 E.2), so the action
+    # is a fresh object, not the DETERRENCE_TIERS[TIER_3] singleton - assert
+    # on the tier, not identity.
+    assert third.action is not None
+    assert third.action.tier is Tier.TIER_3
     experience.close()
 
 
@@ -959,7 +1115,11 @@ def test_a_learned_preference_beats_the_default_tie_break():
 
     outcome, kwargs, _ = _fire(0.9, experience=experience)
 
-    assert outcome.action is TIER_3
+    # Tier 3's action is a fresh object per fire (ADR 0014 E.2 LED-pattern
+    # rotation), so assert on the tier rather than identity. ir_duration_ms
+    # is not touched by the rotation.
+    assert outcome.action is not None
+    assert outcome.action.tier is Tier.TIER_3
     assert outcome.exploring is False
     assert kwargs["pulse_ir"].calls == [(1, TIER_3.ir_duration_ms)]
     experience.close()
