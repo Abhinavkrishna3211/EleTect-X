@@ -14,6 +14,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #define HIGH 1
 #define LOW 0
@@ -41,6 +42,18 @@ namespace hostshim {
 int pin_state(int pin);
 void advance_millis(unsigned long ms);
 void reset();
+
+// Ordered log of every digitalWrite()/analogWrite(), each stamped with the
+// virtual millis() at the moment of the call. Lets a host test assert on the
+// *shape* of a blocking flash sequence (edge count, on/off spans, total
+// elapsed) that pin_state() alone - only the final value - cannot see. Used
+// by tests/test_led for the ADR 0014 pattern timing. reset() clears it.
+struct PinWrite {
+  int pin;
+  int value;
+  unsigned long at_ms;
+};
+const std::vector<PinWrite> &pin_writes();
 }  // namespace hostshim
 
 class Print {

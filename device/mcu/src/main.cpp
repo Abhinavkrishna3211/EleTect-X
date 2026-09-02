@@ -54,8 +54,8 @@ void setup() {
   // top comment), so that is no longer what gates these four - only the
   // one-at-a-time hardware-verification discipline above does.
   // Bridge.provide("drive_horn", bridge_drive_horn);
-  // Bridge.provide("drive_led", bridge_drive_led);
-  // Bridge.provide("pulse_ir", bridge_pulse_ir);
+  Bridge.provide("drive_led", bridge_drive_led);
+  Bridge.provide("pulse_ir", bridge_pulse_ir);
   // Bridge.provide("get_system_state", bridge_get_system_state);
   // Bridge.provide("send_lora_alert", bridge_send_lora_alert);
 
