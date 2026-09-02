@@ -289,8 +289,20 @@ def _print_detected(
             f"    horn   gain={action.horn_gain_pct:.1f}%"
             f"   duration={action.horn_duration_ms}ms"
         )
+        _led_wing = {0: "left", 1: "right", 2: "both"}.get(action.led_channel_id, "left")
+        _led_pattern = {
+            0: "steady",
+            1: "slow-pulse",
+            2: "fast-strobe",
+            3: "flicker",
+            4: "sweep",
+            5: "pulse-both-sync",
+            6: "flicker-both-independent",
+        }.get(action.led_pattern_id, "steady")
+        _wing_label = f"{_led_wing} wings" if _led_wing == "both" else f"{_led_wing} wing"
         print(
-            f"    led    pattern={action.led_pattern_id}"
+            f"    led    {_wing_label}, {_led_pattern}"
+            f"   gain={action.led_gain_pct:.1f}%"
             f"   duration={action.led_duration_ms}ms"
         )
         if action.fire_ir:

@@ -27,6 +27,9 @@ now hold is the policy that runs *after* that threshold: which of three
 deterrence tiers to fire, and how hard repeat triggers escalate it.
 """
 
+import dataclasses
+import random
+
 from cognition.bandit import BanditParams, DeterrenceAction, Tier
 from cognition.fusion import FusionParams, Modality
 
@@ -274,6 +277,29 @@ TIER_3_GAIN_FRACTION = 1.0
 # pre-ladder behaviour and leaves the clamp as the single authority.
 TIER_DURATION_MS = PROTOCOL_DURATION_MS_MAX
 
+# LED gain per tier, as fractions of the protocol range (ADR 0014, revised
+# by ADR 0014 E.3).
+#
+# Every tier fires the light at full output. The deterrence value of the
+# strobe is in the flashing itself, not in a graded brightness ramp, and a
+# dimmed strobe on an unconfirmed-but-real detection just wastes the one
+# unambiguous signal the device has - by the time seismic/acoustic fusion
+# has cleared the alert gate there is an animal there, and the light should
+# be at the level that actually deters it. Escalation is carried entirely by
+# wing count, pattern character, and (top rung only) strobe rate - see
+# DETERRENCE_TIERS. This is the opposite of the horn column above, which
+# keeps a graded ramp because HORN_GAIN_MAX_PCT is a hearing-safety cap and
+# a full-volume horn on every trigger near homes is not defensible; the
+# light has no equivalent bystander-harm ceiling.
+#
+# All three map through gain_to_duty() to full PWM duty on the wing MOSFET.
+# LED_GAIN_MAX_PCT (device/mcu/src/config.h) is 100.0f, so the request is
+# exactly the clamp, not over it - tests/test_cognition_config.py checks
+# that equality holds on both sides.
+LED_TIER_1_GAIN_FRACTION = 1.0
+LED_TIER_2_GAIN_FRACTION = 1.0
+LED_TIER_3_GAIN_FRACTION = 1.0
+
 # Tier 1 fires no IR at all. Defensible on two independent grounds, which is
 # why it is the low tier's distinguishing feature rather than a quieter horn
 # alone: least force first on a single unconfirmed trigger (ADR 0003), and
@@ -281,18 +307,36 @@ TIER_DURATION_MS = PROTOCOL_DURATION_MS_MAX
 # hold it near a 10% duty cycle - not spending that budget on the
 # lowest-confidence event leaves it available for the escalated ones.
 #
-# LED channel: tier 2 switches to blue (pattern_id 1) purely because it is
-# the only other channel the MCU maps today, giving the middle tier a
-# visibly distinct response. Tier 3 returns to white (pattern_id 0) because
-# tier 3 is defined as exactly the pre-ladder behaviour. Both pattern_id
-# values are placeholders - device/mcu/src/bridge_handlers.h flags the
-# whole mapping INVENTED pending real pattern design.
+# LED signature per tier (ADR 0014, revised by ADR 0014 E.2 for real
+# dual-wing, then E.3 for max-gain-always). Gain is full on every tier;
+# escalation runs on wing count, pattern character, and - top rung only -
+# strobe rate. It does NOT run on brightness, and past Tier 2 it does not
+# run on anything DFO testimony validates: practitioner input backs strobe
+# as a technique, not any specific two-light phase relationship or the 7-vs
+# -11 Hz choice (ADR 0014 E.3 "Honest bound"):
+#
+#   Tier 1 - fast strobe (pattern_id 2), single wing (channel 0), full gain,
+#     LED_FAST_STROBE_HZ. One wing, no IR, quietest horn - the mildest
+#     response is "one bright strobe," not "a dim one."
+#   Tier 2 - sweep (pattern_id 4), BOTH wings (channel 2), full gain,
+#     LED_FAST_STROBE_HZ. First real dual-wing: the two wings antiphase at
+#     the base rate, adding an apparent-movement cue and doubling emitters.
+#   Tier 3 - BOTH wings (channel 2), full gain, LED_STROBE_FAST_HZ, rotating
+#     each fire between pulse-both-sync (pattern_id 5, doubled synchronized
+#     strobe at the faster rate) and flicker-both-independent (pattern_id 6,
+#     two independently-seeded erratic sources - the unpredictability lever,
+#     Montgomery et al. 2021). The stored action carries pattern_id 5;
+#     resolve_tier_action() picks 5 or 6 per fire so the top tier is never a
+#     single fixed "maximum" pattern (ADR 0014 E.2 - a fixed max stimulus is
+#     exactly the habituation failure mode the rotation exists to avoid).
 DETERRENCE_TIERS = {
     Tier.TIER_1: DeterrenceAction(
         tier=Tier.TIER_1,
         horn_gain_pct=PROTOCOL_GAIN_PCT_MAX * TIER_1_GAIN_FRACTION,
         horn_duration_ms=TIER_DURATION_MS,
-        led_pattern_id=0,
+        led_channel_id=0,
+        led_pattern_id=2,
+        led_gain_pct=PROTOCOL_GAIN_PCT_MAX * LED_TIER_1_GAIN_FRACTION,
         led_duration_ms=TIER_DURATION_MS,
         fire_ir=False,
         ir_duration_ms=TIER_DURATION_MS,
@@ -301,7 +345,9 @@ DETERRENCE_TIERS = {
         tier=Tier.TIER_2,
         horn_gain_pct=PROTOCOL_GAIN_PCT_MAX * TIER_2_GAIN_FRACTION,
         horn_duration_ms=TIER_DURATION_MS,
-        led_pattern_id=1,
+        led_channel_id=2,
+        led_pattern_id=4,
+        led_gain_pct=PROTOCOL_GAIN_PCT_MAX * LED_TIER_2_GAIN_FRACTION,
         led_duration_ms=TIER_DURATION_MS,
         fire_ir=True,
         ir_duration_ms=TIER_DURATION_MS,
@@ -310,12 +356,40 @@ DETERRENCE_TIERS = {
         tier=Tier.TIER_3,
         horn_gain_pct=PROTOCOL_GAIN_PCT_MAX * TIER_3_GAIN_FRACTION,
         horn_duration_ms=TIER_DURATION_MS,
-        led_pattern_id=0,
+        led_channel_id=2,
+        led_pattern_id=5,
+        led_gain_pct=PROTOCOL_GAIN_PCT_MAX * LED_TIER_3_GAIN_FRACTION,
         led_duration_ms=TIER_DURATION_MS,
         fire_ir=True,
         ir_duration_ms=TIER_DURATION_MS,
     ),
 }
+
+# Tier 3 rotates its LED pattern every fire between these two, both at full
+# gain on both wings (ADR 0014 E.2). 5 = pulse-both-sync (doubled
+# synchronized strobe, the most literal reading of the DFO input); 6 =
+# flicker-both-independent (two independently-seeded erratic sources, maximum
+# unpredictability per Montgomery et al. 2021). The slot's whole purpose is
+# being the least predictable, highest-output rung - firing one fixed pattern
+# here every time is the fast-habituation failure mode Goodyear & Schulte
+# 2015 / Khorozyan & Waltert 2019 describe, so this must not collapse to one.
+TIER_3_LED_PATTERN_IDS = (5, 6)
+
+
+def resolve_tier_action(tier: Tier, rng: random.Random) -> DeterrenceAction:
+    """Return the DeterrenceAction to fire for `tier`.
+
+    Tiers 1 and 2 are fixed - this returns the exact DETERRENCE_TIERS object,
+    so identity checks against it still hold. Tier 3 rotates its LED pattern
+    per fire (ADR 0014 E.2): a fresh action with led_pattern_id drawn from
+    TIER_3_LED_PATTERN_IDS, off the same RNG the bandit's exploration draw
+    already uses, so no new seeding path is introduced. Everything else in
+    the Tier 3 action (wings, gain, durations, IR) is unchanged.
+    """
+    base = DETERRENCE_TIERS[tier]
+    if tier is not Tier.TIER_3:
+        return base
+    return dataclasses.replace(base, led_pattern_id=rng.choice(TIER_3_LED_PATTERN_IDS))
 
 # Assembled here rather than defaulted inside bandit.py, for the same reason
 # DEFAULT_FUSION_PARAMS is: bandit.py must not import this module (circular),

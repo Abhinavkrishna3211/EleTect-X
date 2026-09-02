@@ -27,7 +27,19 @@ from pathlib import Path
 
 # Every Bridge payload's first field (device/mpu/bridge/schema.md). Bump on
 # any breaking field change; never reuse a version number.
-SCHEMA_VERSION = 1
+#
+# 1 -> 2 on 2026-09-01 (ADR 0014): drive_led's wire args changed from
+# (pattern_id, duration_ms) to (channel, pattern_id, gain_pct, duration_ms) -
+# `channel` split out as its own field, `gain_pct` added, `pattern_id`
+# restored to meaning "which flash pattern".
+#
+# 2 -> 3 on 2026-09-01 (ADR 0014 E): drive_led's `channel` value 2 now means
+# "both wings, driven together in one blocking call" (was "unrecognized ->
+# left"), and `pattern_id` gains 4 = sweep, 5 = pulse both sync, 6 = flicker
+# both independent. No field added or removed, but the changed meaning of an
+# in-range value is a breaking change. Mirrors device/mcu/src/config.h's
+# BRIDGE_SCHEMA_VERSION; both sides must bump together.
+SCHEMA_VERSION = 3
 
 # ---------------------------------------------------------------------------
 # Bridge.call() timeout and retry policy
@@ -37,11 +49,26 @@ SCHEMA_VERSION = 1
 # wrappers (drive_horn, drive_led, pulse_ir, get_system_state) - MCU-side
 # notify handlers never block and have no timeout to set.
 
-# The longest MCU-side actuator burst is LED_BURST_MAX_MS (10_000,
-# device/mcu/include/config.h), and drive_* never blocks past the commanded
-# duration. 12s covers a legitimate full-length burst plus transport
-# overhead without misreading a real in-progress burst as a hung call.
-BRIDGE_CALL_TIMEOUT_S = 12.0
+# drive_* holds the caller for the whole commanded burst: the MCU does not
+# ack until the burst finishes, and the deterrence ladder commands the
+# uint16 protocol max on every tier (cognition/config.py TIER_DURATION_MS),
+# which the MCU then clamps to its own per-actuator cap. So each wrapper
+# needs its own timeout set just above *that* actuator's cap plus transport
+# overhead - a single shared ceiling (the LED cap + margin) would make a
+# hung horn or IR call block the reflex loop several seconds longer than
+# that actuator can physically run. The caps are owned by
+# device/mcu/src/config.h (HORN_BURST_MAX_MS 3000, LED_BURST_MAX_MS 10_000,
+# IR_PULSE_MAX_MS 500); tests/test_config.py fails if any value here stops
+# exceeding its cap.
+BRIDGE_HORN_CALL_TIMEOUT_S = 5.0
+BRIDGE_LED_CALL_TIMEOUT_S = 12.0
+BRIDGE_IR_CALL_TIMEOUT_S = 2.0
+
+# Generic ceiling for non-actuator calls (get_system_state), which read a
+# cached struct and return at once. Kept under the historical name, equal to
+# the longest actuator timeout, so bridge/rpc.py's docstrings and
+# tests/test_config.py's drift check still resolve unchanged.
+BRIDGE_CALL_TIMEOUT_S = BRIDGE_LED_CALL_TIMEOUT_S
 
 # drive_horn/drive_led/pulse_ir are not idempotent: a call that times out
 # may have already fired the actuator, so retrying risks doubling a burst
@@ -183,6 +210,25 @@ VISION_INFERENCE_TIMEOUT_S = 2.0
 # latency ahead of decide(); no real-world tuning data backs this count
 # yet. See docs/KNOWN_GAPS.md.
 VISION_CHECK_FRAME_COUNT = 3
+
+# ---------------------------------------------------------------------------
+# External IR illuminator gating (perception/night.py, services/reflex_loop.py)
+# ---------------------------------------------------------------------------
+# pulse_ir() only helps when the IMX462's IR-cut filter is out (night): in
+# daylight the filter blocks the illuminator's near-IR band before it
+# reaches a pixel, so the pulse is spent MOSFET duty budget and battery for
+# no image gain. perception/night.frames_are_night() infers the filter state
+# from the pre-decision vision-check burst's own colour saturation - a
+# mono / IR-cut-open frame reads near-zero mean HSV S, a daylight colour
+# frame reads tens of units. A burst whose median mean-S is below this is
+# treated as night and the IR pulse is allowed; at or above it, pulse_ir()
+# is suppressed for the event (logged, tier otherwise unchanged).
+#
+# Measured on the real rig (Kothamangalam backyard, 1-2 Sep 2026): a
+# genuine night frame read mean S = 0.0; a daylight colour frame read
+# S > 30. 12 sits in that gap with margin on both sides. Not a tuned figure
+# beyond that separation - see docs/KNOWN_GAPS.md.
+NIGHT_SATURATION_THRESHOLD = 12.0
 
 # ---------------------------------------------------------------------------
 # Deterrent-event capture storage (perception/storage.py)

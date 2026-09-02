@@ -33,13 +33,37 @@ def test_schema_version_matches_schema_md():
     assert config.SCHEMA_VERSION == int(match.group(1))
 
 
-def test_bridge_call_timeout_exceeds_longest_actuator_burst():
-    """Assert the timeout still exceeds the longest possible actuator burst.
+def test_actuator_call_timeouts_each_exceed_their_mcu_cap():
+    """Each per-actuator Bridge.call timeout must exceed that actuator's cap.
 
-    BRIDGE_CALL_TIMEOUT_S's own rationale is that it exceeds the longest
-    burst any actuator can be commanded to run (LED_BURST_MAX_MS) plus
-    transport overhead - if config.h's cap ever grows past that, this
-    constant's derivation silently stops holding.
+    drive_horn/drive_led/pulse_ir do not ack until the commanded burst
+    finishes, and the deterrence ladder commands the uint16 protocol max on
+    every tier (cognition/config.py TIER_DURATION_MS), which the MCU clamps
+    to the cap below. If a timeout here ever drops to or below its actuator's
+    cap, a legitimate full-length burst reads as a hung call and the reflex
+    loop raises TimeoutError on every tier fire. Caps are owned by
+    device/mcu/src/config.h.
+    """
+    for timeout_s, define in (
+        (config.BRIDGE_HORN_CALL_TIMEOUT_S, "HORN_BURST_MAX_MS"),
+        (config.BRIDGE_LED_CALL_TIMEOUT_S, "LED_BURST_MAX_MS"),
+        (config.BRIDGE_IR_CALL_TIMEOUT_S, "IR_PULSE_MAX_MS"),
+    ):
+        cap_s = _read_mcu_define(define) / 1000.0
+        assert timeout_s > cap_s, (
+            f"Bridge.call timeout ({timeout_s}s) no longer exceeds {define} "
+            f"({cap_s}s) - a legitimate full burst would read as a timed-out "
+            "call and every tier fire would raise TimeoutError."
+        )
+
+
+def test_generic_bridge_call_timeout_still_covers_longest_burst():
+    """BRIDGE_CALL_TIMEOUT_S (non-actuator calls) must still clear the LED cap.
+
+    bridge/rpc.py's docstrings still route get_system_state and the retry
+    policy through this historical name; it stays equal to the longest
+    per-actuator timeout so those references keep resolving to a value that
+    exceeds the longest burst plus transport overhead.
     """
     led_burst_max_s = _read_mcu_define("LED_BURST_MAX_MS") / 1000.0
     assert config.BRIDGE_CALL_TIMEOUT_S > led_burst_max_s, (
