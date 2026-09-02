@@ -36,7 +36,8 @@ organization API endpoints, unlimited impulse experiments (was 10/project), 120 
 calibration (was 30 min). Correction already on record: custom DSP/ML blocks were never
 Developer-gated — don't re-litigate that.
 
-Deadlines you're building against: field trial with DFO Kothamangalam **complete by 2 Sept 2026**;
+Deadlines you're building against: field trial with DFO Kothamangalam **complete by 5 Sept 2026**
+(moved from 2 Sept — user-confirmed 1 Sept);
 Hackster "Invent the Future with UNO Q" submission **13 Sept 2026**. Vision is explicitly *not* a
 blocker for the field trial under the frozen architecture (fusion degrades gracefully if vision
 underperforms — geophone is primary, vision and acoustic corroborate), so don't let this work
