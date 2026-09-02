@@ -100,11 +100,11 @@ by design, not oversight:
   per the field directive that seismic waking vision (not the other way
   round) is what the trial needs: perception/detector.py's HttpVisionDetector
   posts a captured frame to the standing edge-impulse-linux-runner HTTP
-  server and _vision_reading() below converts its detections into a
+  server and _vision_check() below converts its detections into a
   ModalityReading. Only detections labeled "Elephant" (VISION_TARGET_LABEL)
   count as evidence toward "elephant present" - a Boar detection from the
   same two-class model is not folded into this modality; see
-  _vision_reading()'s own docstring for the no-qualifying-detection case and
+  _vision_check()'s own docstring for the no-qualifying-detection case and
   docs/KNOWN_GAPS.md for whether a Boar detection should ever suppress an
   alert (an open question, not decided here). Vision is not wired into
   handle_acoustic_event() - that path has no camera open at the moment an
@@ -116,7 +116,7 @@ by design, not oversight:
   illuminator (pulse_ir only fires once decide()+select_tier() have already
   run, and only for tiers 2/3). At night this vision check will usually see
   a dark, unilluminated frame and report no qualifying detection - which
-  _vision_reading() scores as neutral (BASELINE_VISION, zero net
+  _vision_check() scores as neutral (BASELINE_VISION, zero net
   contribution), not as evidence against an elephant. This means fusion
   degrades gracefully at night (seismic still carries the decision, vision
   simply adds nothing) rather than actively working against a real
@@ -151,8 +151,42 @@ non-invented transformation - not a new detector this module had to build.
 Vision's own log-odds transformation is the same logit() call on a real
 detector's reported confidence (perception/detector.py), not invented
 either - what is a genuine judgment call, not a measured figure, is
-_vision_reading()'s choice of what to feed fuse() when the burst produced no
+_vision_check()'s choice of what to feed fuse() when the burst produced no
 qualifying detection at all (see that function's own docstring).
+
+Event video (ADR 0020) rides on that same camera session, behind
+services.config.EVENT_VIDEO_ENABLED and off by default. When device/mpu/
+main.py wires an `event_video` object in, the camera it injects is a
+perception.video.EventVideoRecorder, which starts an H.264 recording the
+moment camera.open() succeeds and serves the vision-check and evidence
+bursts off that same running pipeline - this loop cannot tell it apart from
+a perception.camera.Camera and does not try to. What this loop adds is the
+keep-or-discard decision at each of the three exits:
+
+- **Keep-gate: vision confirmed OR an alert fired.** Either alone is
+  enough. A confirmed elephant that fusion did not clear the threshold for
+  is exactly the footage that would explain why it did not, and an alert
+  that fired without a vision confirmation is a real deterrence event
+  whether or not the camera resolved anything in the foliage. Only an
+  event that is neither has its recording thrown away.
+- **Discarded recordings never reach the permanent capture directory at
+  all** - they are written to a scratch path and deleted there
+  (perception/storage.py), which is what bounds the storage and I/O cost of
+  the common non-elephant trigger.
+- **The retreat tail replaces the post-fire tail when video is recording**
+  (services.config.EVENT_VIDEO_RETREAT_TAIL_S, 45s, against
+  CAPTURE_POST_FIRE_TAIL_S's 2s): 2s of video would show the horn firing
+  and nothing after it, and the retreat is the half of the encounter this
+  footage exists to record. The honest cost is that this handler blocks for
+  that whole tail, so a second footfall notify arriving inside it waits -
+  one of the reasons EVENT_VIDEO_ENABLED defaults to False.
+
+The JPEG evidence burst is unchanged and still saved on the alert path,
+alongside the video rather than instead of it - two independent records of
+the same event, and the burst is the one that has actually run on real
+hardware. Nothing here builds a continuous rolling pre-event buffer: ADR
+0020 rejects one on power-budget grounds, and there is no flag in this
+module that would turn one on.
 
 SAFE_MODE (default on) is the dry-run gate: when true, an alert decision and
 the tier the bandit selected for it are logged, but drive_horn is never
@@ -172,6 +206,7 @@ import random
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 from bridge.rpc import AcousticClass
@@ -355,6 +390,28 @@ class SaveFramesFn(Protocol):
         ...
 
 
+class EventVideoProtocol(Protocol):
+    """The keep-or-discard half of perception.video.EventVideoRecorder (ADR 0020).
+
+    Deliberately only two methods: this loop never starts or stops a
+    recording directly. The recorder is the same object injected as
+    `camera`, so camera.open() has already begun recording and
+    camera.close() has already finished the file by the time either method
+    below is called - which is what keeps this module's camera handling
+    identical whether video is enabled or not. Structural, not the concrete
+    class, for the same reason CameraProtocol is: a test fake needs no
+    GStreamer.
+    """
+
+    def commit(self, tag: CaptureEventTag) -> Path | None:
+        """Move this event's finished recording into the permanent capture dir."""
+        ...
+
+    def discard(self) -> None:
+        """Delete this event's recording without ever persisting it."""
+        ...
+
+
 class ExperienceStoreProtocol(Protocol):
     """The subset of cognition.experience.ExperienceStore this loop calls.
 
@@ -431,6 +488,19 @@ class FootfallOutcome:
             if no frame was captured. Instrumentation only - see
             docs/KNOWN_GAPS.md on why this loop measures this instead of
             running a continuous rolling pre-event buffer.
+        vision_confirmed: True only if the pre-decision vision check
+            returned at least one detection labeled VISION_TARGET_LABEL.
+            Distinct from `fusion` reporting VISION as used: a check that
+            found nothing is still "used" (it scores at BASELINE_VISION and
+            contributes zero net evidence) but is not a confirmation. Half
+            of ADR 0020's keep-gate, and always False under safe_mode,
+            which runs no vision check at all.
+        video_path: Where this event's recording was committed, or None -
+            which covers "no event_video was injected" (the default),
+            "recorded but discarded as unconfirmed", and "the commit
+            failed". Never a path to a file that was subsequently deleted:
+            nothing in this loop or in perception/storage.py removes a
+            committed capture (ADR 0020 Decision C).
     """
 
     fusion: FusionResult
@@ -445,6 +515,8 @@ class FootfallOutcome:
     ir_ack: bool | None
     capture_frame_count: int
     trigger_to_first_frame_s: float | None
+    vision_confirmed: bool
+    video_path: Path | None
 
 
 @dataclass(frozen=True)
@@ -511,11 +583,34 @@ def _confidence_log_odds(probability: float) -> float:
     return logit(clamped)
 
 
-def _vision_reading(
+@dataclass(frozen=True)
+class VisionCheck:
+    """What one pre-decision vision pass produced.
+
+    Two values rather than one because ADR 0020 needs a question fuse()
+    never asked: not "how much evidence is this worth" but "did the camera
+    actually see an elephant". The fused log-odds cannot answer that on its
+    own - a no-qualifying-detection reading scores at BASELINE_VISION,
+    which is a real, deliberate value, not a sentinel - so `confirmed` is
+    carried separately instead of being reverse-engineered from `reading`.
+
+    Attributes:
+        reading: The VISION ModalityReading handed to fuse().
+        confirmed: True only when the detector returned at least one
+            detection labeled VISION_TARGET_LABEL. False covers all three
+            of "no frames", "the detector failed", and "boxes found, none
+            of them an elephant" - none of those is a confirmation.
+    """
+
+    reading: ModalityReading
+    confirmed: bool
+
+
+def _vision_check(
     detect_vision: VisionDetectFn,
     frames: list[Frame],
     target_label: str = VISION_TARGET_LABEL,
-) -> ModalityReading:
+) -> VisionCheck:
     """Convert a vision-check burst into one VISION ModalityReading; never raises.
 
     Three cases:
@@ -559,24 +654,31 @@ def _vision_reading(
             Defaults to VISION_TARGET_LABEL.
 
     Returns:
-        A ModalityReading for Modality.VISION.
+        A VisionCheck carrying the ModalityReading for Modality.VISION and
+        whether this pass counts as a confirmation for ADR 0020's
+        keep-gate. The three "no qualifying detection" cases above all
+        report confirmed=False, whatever their reading.
     """
     if not frames:
-        return ModalityReading(Modality.VISION, 0.0, available=False)
+        return VisionCheck(ModalityReading(Modality.VISION, 0.0, available=False), False)
 
     try:
         detections: list[Detection] = detect_vision([frame.image for frame in frames])
     except DetectionError as exc:
         logger.warning("vision detect failed, continuing without vision evidence: %s", exc)
-        return ModalityReading(Modality.VISION, 0.0, available=False)
+        return VisionCheck(ModalityReading(Modality.VISION, 0.0, available=False), False)
 
     matches = [d for d in detections if d.label == target_label]
     if not matches:
-        return ModalityReading(Modality.VISION, cognition_config.BASELINE_VISION, available=True)
+        return VisionCheck(
+            ModalityReading(Modality.VISION, cognition_config.BASELINE_VISION, available=True),
+            False,
+        )
 
     best_confidence = max(d.confidence for d in matches)
-    return ModalityReading(
-        Modality.VISION, _confidence_log_odds(best_confidence), available=True
+    return VisionCheck(
+        ModalityReading(Modality.VISION, _confidence_log_odds(best_confidence), available=True),
+        True,
     )
 
 
@@ -667,6 +769,49 @@ def _save_captured_frames(
         logger.warning("failed to save capture burst for this event: %s", exc)
 
 
+def _finish_event_video(
+    event_video: EventVideoProtocol | None, *, keep: bool, tag: CaptureEventTag
+) -> Path | None:
+    """Commit or discard this event's recording (ADR 0020); never raises.
+
+    One function rather than two call sites per exit so the keep-gate is
+    written once and every exit is forced to state its verdict explicitly -
+    an exit that forgets to call this would silently leak a scratch file,
+    and `keep` being a required keyword makes "I did not think about it"
+    unrepresentable.
+
+    Broad except for the same reason _save_captured_frames has one, and
+    with more force: the deterrents have already fired, the camera is
+    already closed, and perception/video.py's commit/discard are documented
+    as never raising - so anything that arrives here is unanticipated, and
+    crashing the event handler over evidence housekeeping would cost the
+    next real event.
+
+    Args:
+        event_video: The recorder, or None when video is disabled (the
+            default) - in which case this does nothing at all.
+        keep: The already-evaluated keep-gate, "vision confirmed OR alert
+            fired". False deletes the recording from scratch; it never
+            touches anything already committed.
+        tag: Event metadata, used only when keeping, to name the file.
+
+    Returns:
+        The committed path, or None - which covers "no recorder", "kept but
+        the commit failed", and every discard.
+    """
+    if event_video is None:
+        return None
+    try:
+        if keep:
+            return event_video.commit(tag)
+        event_video.discard()
+    except Exception as exc:  # noqa: BLE001 - see docstring
+        logger.warning(
+            "event video %s failed for this event: %s", "commit" if keep else "discard", exc
+        )
+    return None
+
+
 def handle_footfall_event(
     schema_version: int,
     probability: float,
@@ -681,9 +826,11 @@ def handle_footfall_event(
     detect_vision: VisionDetectFn,
     save_frames: SaveFramesFn,
     experience: ExperienceStoreProtocol,
+    event_video: EventVideoProtocol | None = None,
     safe_mode: bool = SAFE_MODE,
     threshold: float = ALERT_PROBABILITY_THRESHOLD,
     capture_post_fire_tail_s: float = CAPTURE_POST_FIRE_TAIL_S,
+    video_retreat_tail_s: float = services_config.EVENT_VIDEO_RETREAT_TAIL_S,
     bandit_params: BanditParams = cognition_config.DEFAULT_BANDIT_PARAMS,
     rng: random.Random = _DEFAULT_RNG,
     household_proximity: bool = services_config.NODE_HOUSEHOLD_PROXIMITY,
@@ -763,17 +910,36 @@ def handle_footfall_event(
             device/mpu/main.py wires the real Bridge.calls, Camera,
             HttpVisionDetector, save_burst and ExperienceStore in; tests
             pass recording fakes.
+        event_video: Optional object matching EventVideoProtocol - in
+            practice the same perception.video.EventVideoRecorder instance
+            passed as `camera`, since one V4L2 device cannot be held twice.
+            None (the default) disables ADR 0020's event video entirely and
+            leaves this function's behaviour byte-for-byte what it was
+            before that ADR; device/mpu/main.py only wires one in when
+            services.config.EVENT_VIDEO_ENABLED is true. Never opened,
+            started or stopped here - only committed or discarded.
         safe_mode: When true (the default, SAFE_MODE), the decision and the
             selected tier are logged but none of drive_horn/drive_led/
             pulse_ir/camera/detect_vision/save_frames are ever called, and
-            no attempt is recorded. The trigger itself is still recorded - a
+            no attempt is recorded. event_video is not touched either:
+            nothing opened the camera, so there is no recording to decide
+            about. The trigger itself is still recorded - a
             dry run observes real events, it just does not respond to them.
         threshold: Passed to cognition.decision.decide(). Defaults to
             ALERT_PROBABILITY_THRESHOLD (see that constant's own comment).
         capture_post_fire_tail_s: Seconds to wait after the actuator
             sequence before closing the camera. Defaults to
             CAPTURE_POST_FIRE_TAIL_S; overridable so tests don't have to
-            sleep for real.
+            sleep for real. Ignored when `event_video` is set - see below.
+        video_retreat_tail_s: Replaces capture_post_fire_tail_s when
+            `event_video` is not None, so the recording runs long enough to
+            show the animal leaving rather than stopping two seconds after
+            the horn (services.config.EVENT_VIDEO_RETREAT_TAIL_S, 45s).
+            Replaces rather than adds: one tail, one meaning. This handler
+            genuinely blocks for the whole of it, which is stated plainly
+            here because it is a real cost, not a footnote - a footfall
+            notify arriving inside the tail waits. Overridable so tests
+            don't have to sleep for real.
         bandit_params: Hyperparameters for selection and reward. Defaults to
             cognition.config.DEFAULT_BANDIT_PARAMS.
         rng: Source of the epsilon-greedy exploration draw. Defaults to a
@@ -823,7 +989,7 @@ def handle_footfall_event(
                 camera, trigger_monotonic, count=services_config.VISION_CHECK_FRAME_COUNT
             )
 
-    vision_reading = _vision_reading(detect_vision, vision_frames)
+    vision_check = _vision_check(detect_vision, vision_frames)
 
     readings = [
         ModalityReading(Modality.SEISMIC, _confidence_log_odds(probability), available=True),
@@ -832,7 +998,7 @@ def handle_footfall_event(
         # one across time yet - acoustic fuses only on its own event, in
         # handle_acoustic_event(). See module docstring.
         ModalityReading(Modality.ACOUSTIC, 0.0, available=False),
-        vision_reading,
+        vision_check.reading,
     ]
     fusion_result = fuse(readings, cognition_config.DEFAULT_FUSION_PARAMS)
     decision = decide(fusion_result, threshold)
@@ -878,6 +1044,7 @@ def handle_footfall_event(
         action: DeterrenceAction | None = None,
         exploring: bool | None = None,
         frames: tuple[Frame, ...] = (),
+        video_path: Path | None = None,
     ) -> FootfallOutcome:
         trigger_to_first_frame_s = (
             frames[0].timestamp_s - trigger_monotonic if frames else None
@@ -895,6 +1062,8 @@ def handle_footfall_event(
             ir_ack=None,
             capture_frame_count=len(frames),
             trigger_to_first_frame_s=trigger_to_first_frame_s,
+            vision_confirmed=vision_check.confirmed,
+            video_path=video_path,
         )
 
     if not decision.alert:
@@ -903,9 +1072,26 @@ def handle_footfall_event(
         # docstring), but it did happen and did feed fusion, so it is
         # reported through capture_frame_count/trigger_to_first_frame_s the
         # same as an alert event's frames would be.
+        # Closed first, deliberately: the recorder only has a finished,
+        # muxed file to commit once close() has run the pipeline's EOS.
         if camera_opened:
             _close_camera(camera)
-        return _no_actuation_outcome(frames=tuple(vision_frames))
+        # ADR 0020's keep-gate, on the branch where only half of it can be
+        # true. No alert fired here by definition, so the recording
+        # survives exactly when the camera actually confirmed an elephant -
+        # a sub-threshold sighting is the footage that explains why fusion
+        # did not clear the bar, which is worth more than the disk it costs.
+        video_path = _finish_event_video(
+            event_video,
+            keep=vision_check.confirmed,
+            tag=CaptureEventTag(
+                event_timestamp_s=event_wall_s,
+                sta_lta_ratio=sta_lta_ratio,
+                fused_probability=fusion_result.probability,
+                alert=decision.alert,
+            ),
+        )
+        return _no_actuation_outcome(frames=tuple(vision_frames), video_path=video_path)
 
     context = habituation_context(repeat_count, cognition_config.HABITUATION_BUCKET_COUNT)
     floor = escalation_floor(context, bandit_params)
@@ -1049,17 +1235,29 @@ def handle_footfall_event(
             int(tier),
         )
 
+    tag = CaptureEventTag(
+        event_timestamp_s=trigger_wall_s,
+        sta_lta_ratio=sta_lta_ratio,
+        fused_probability=fusion_result.probability,
+        alert=decision.alert,
+    )
+
     if camera_opened:
-        time.sleep(capture_post_fire_tail_s)
+        # The tail runs *after* every actuator call above has returned, so
+        # nothing about event video - not the recording, not the longer
+        # retreat tail - can delay the horn. That ordering is the whole
+        # reason ADR 0020 records rather than pre-buffers.
+        time.sleep(video_retreat_tail_s if event_video is not None else capture_post_fire_tail_s)
         _close_camera(camera)
         if frames:
-            tag = CaptureEventTag(
-                event_timestamp_s=trigger_wall_s,
-                sta_lta_ratio=sta_lta_ratio,
-                fused_probability=fusion_result.probability,
-                alert=decision.alert,
-            )
             _save_captured_frames(save_frames, frames, tag)
+
+    # Unconditional keep: reaching here means decision.alert is true, which
+    # satisfies the keep-gate on its own whatever the vision check said.
+    # Called even when the camera never opened, where it is a no-op - a
+    # recorder that failed to open has already discarded its own scratch
+    # file (perception/video.py), and commit() on nothing returns None.
+    video_path = _finish_event_video(event_video, keep=True, tag=tag)
 
     trigger_to_first_frame_s = (
         frames[0].timestamp_s - trigger_monotonic if frames else None
@@ -1078,6 +1276,8 @@ def handle_footfall_event(
         ir_ack=ir_ack,
         capture_frame_count=len(frames),
         trigger_to_first_frame_s=trigger_to_first_frame_s,
+        vision_confirmed=vision_check.confirmed,
+        video_path=video_path,
     )
 
 

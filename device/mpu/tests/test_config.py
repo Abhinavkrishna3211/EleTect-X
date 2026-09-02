@@ -9,7 +9,7 @@ never catch drift.
 import re
 from pathlib import Path
 
-from services import config
+from services import config, reflex_loop
 
 MCU_CONFIG_PATH = (
     Path(__file__).resolve().parent.parent.parent / "mcu" / "src" / "config.h"
@@ -135,3 +135,146 @@ def test_camera_burst_frames_is_at_least_one():
 def test_camera_burst_interval_is_non_negative():
     """CAMERA_BURST_INTERVAL_S is capture_burst()'s default interval, which rejects < 0."""
     assert config.CAMERA_BURST_INTERVAL_S >= 0
+
+
+# ---------------------------------------------------------------------------
+# Trigger-gated event video (ADR 0020)
+# ---------------------------------------------------------------------------
+
+
+def test_event_video_ships_disabled():
+    """EVENT_VIDEO_ENABLED must default False until the pipeline runs on the board.
+
+    Not a style preference: perception/video.py's GStreamer element chain
+    has never been executed on this hardware (its module docstring says so
+    under an explicit UNVERIFIED heading), and the camera itself has never
+    been proven to enumerate under VIN power, which is the field topology
+    (docs/KNOWN_GAPS.md). Flipping this on is a deliberate act with a human
+    present, not something a merge should be able to do quietly.
+    """
+    assert config.EVENT_VIDEO_ENABLED is False
+
+
+def test_confirm_window_covers_every_bounded_stage_before_the_decision():
+    """The keep/discard decision's bounded stages must fit inside the window.
+
+    ADR 0020 B3 wants the decision within ~15-20s of wake, and
+    EVENT_VIDEO_CONFIRM_WINDOW_S records that budget. Nothing enforces it
+    at runtime - the reflex loop is synchronous and has no watchdog - so
+    this test is the enforcement. Worst case is every camera-open retry
+    burning its full backoff, the vision-check burst at its configured
+    spacing, then one detect_vision() call timing out. fuse() and decide()
+    are pure and contribute nothing measurable.
+    """
+    worst_case_s = (
+        config.CAMERA_OPEN_RETRIES * config.CAMERA_OPEN_RETRY_BACKOFF_S
+        + config.VISION_CHECK_FRAME_COUNT * config.CAMERA_BURST_INTERVAL_S
+        + config.VISION_INFERENCE_TIMEOUT_S
+    )
+    assert worst_case_s <= config.EVENT_VIDEO_CONFIRM_WINDOW_S, (
+        f"Worst-case time to the keep/discard decision is now {worst_case_s}s, "
+        f"past the {config.EVENT_VIDEO_CONFIRM_WINDOW_S}s window ADR 0020 B3 "
+        "budgets. Either the window moves and the ADR is revisited, or the "
+        "stage that grew comes back down."
+    )
+
+
+def test_retreat_tail_is_longer_than_the_jpeg_post_fire_tail():
+    """The video tail must exceed the burst tail it replaces, or it buys nothing.
+
+    EVENT_VIDEO_RETREAT_TAIL_S replaces CAPTURE_POST_FIRE_TAIL_S rather
+    than adding to it (services/reflex_loop.py). If it ever dropped to or
+    below 2s, the recording would stop moments after the horn and show
+    none of the retreat - which is the half of the encounter ADR 0020 B4
+    exists to capture.
+    """
+    assert config.EVENT_VIDEO_RETREAT_TAIL_S > reflex_loop.CAPTURE_POST_FIRE_TAIL_S
+
+
+def test_scratch_dir_is_a_real_subdirectory_of_the_capture_dir():
+    """Scratch must sit under CAPTURE_DIR, and must not *be* it.
+
+    Two separate hazards in one relationship. Under: commit_video() ends in
+    os.replace(), which is only atomic within a single filesystem, and on
+    the board CAPTURE_DIR's partition and the container's /tmp are
+    different mounts. Not equal: clear_orphaned_scratch() deletes every
+    file it finds in the scratch directory, so pointing it at CAPTURE_DIR
+    would turn a startup cleanup into a wipe of confirmed captures - the
+    exact thing ADR 0020 Decision C forbids.
+    """
+    assert config.EVENT_VIDEO_SCRATCH_DIR != config.CAPTURE_DIR
+    assert config.CAPTURE_DIR in config.EVENT_VIDEO_SCRATCH_DIR.parents
+
+
+def test_event_video_suffix_is_a_usable_extension():
+    """The suffix is concatenated straight onto the committed filename stem.
+
+    perception/storage.py builds `f"{_event_prefix(tag)}{suffix}"`, so a
+    suffix missing its dot silently produces `..._alert1mkv` - a file no
+    player will open by extension and no glob will match.
+    """
+    assert config.EVENT_VIDEO_SUFFIX.startswith(".")
+    assert len(config.EVENT_VIDEO_SUFFIX) > 1
+
+
+def test_event_video_dimensions_are_even():
+    """H.264 4:2:0 (NV12) chroma is subsampled 2x in both axes - odd sizes fail.
+
+    v4l2h264enc rejects or silently crops an odd width/height rather than
+    telling the caller, and the failure would first appear as an empty
+    scratch file in the field.
+    """
+    assert config.EVENT_VIDEO_WIDTH > 0 and config.EVENT_VIDEO_WIDTH % 2 == 0
+    assert config.EVENT_VIDEO_HEIGHT > 0 and config.EVENT_VIDEO_HEIGHT % 2 == 0
+
+
+def test_event_video_framerate_and_bitrate_are_positive():
+    """Both go straight into the pipeline description as caps/controls values.
+
+    A zero framerate produces `framerate=0/1`, which no source will
+    negotiate; a zero bitrate asks the encoder for no output at all.
+    """
+    assert config.EVENT_VIDEO_FRAMERATE >= 1
+    assert config.EVENT_VIDEO_BITRATE_BPS > 0
+
+
+def test_frame_timeout_covers_at_least_one_frame_interval():
+    """Frame pulls must wait longer than the pipeline takes to make a frame.
+
+    EVENT_VIDEO_FRAME_TIMEOUT_S bounds each try-pull-sample. If it dropped
+    below 1/framerate, every pull would time out on a perfectly healthy
+    pipeline and the vision check would see no frames at all - degrading
+    to "camera failed" on a camera that is working.
+    """
+    frame_interval_s = 1.0 / config.EVENT_VIDEO_FRAMERATE
+    assert config.EVENT_VIDEO_FRAME_TIMEOUT_S > frame_interval_s
+
+
+def test_stop_timeout_is_positive():
+    """Bounds the EOS wait in perception/video.py; 0 would truncate every clip."""
+    assert config.EVENT_VIDEO_STOP_TIMEOUT_S > 0
+
+
+def test_worst_case_clip_stays_well_inside_the_low_disk_headroom():
+    """One event's recording must not by itself threaten the disk headroom.
+
+    Worst case is a clip that runs the full confirm window, the whole
+    actuator sequence (bounded by the per-actuator Bridge.call timeouts)
+    and then the entire retreat tail, all at the configured bitrate. If
+    that ever approached CAPTURE_LOW_DISK_HEADROOM_BYTES, a single night's
+    events could fill the partition between visits - and nothing deletes
+    committed captures to make room (ADR 0020 Decision C).
+    """
+    worst_case_s = (
+        config.EVENT_VIDEO_CONFIRM_WINDOW_S
+        + config.BRIDGE_HORN_CALL_TIMEOUT_S
+        + config.BRIDGE_LED_CALL_TIMEOUT_S
+        + config.BRIDGE_IR_CALL_TIMEOUT_S
+        + config.EVENT_VIDEO_RETREAT_TAIL_S
+    )
+    worst_case_bytes = worst_case_s * config.EVENT_VIDEO_BITRATE_BPS / 8
+    assert worst_case_bytes < config.CAPTURE_LOW_DISK_HEADROOM_BYTES / 10, (
+        f"A single worst-case clip is now ~{worst_case_bytes / 1e6:.0f} MB against a "
+        f"{config.CAPTURE_LOW_DISK_HEADROOM_BYTES / 1e6:.0f} MB headroom - too close to "
+        "let a busy night run unattended."
+    )
