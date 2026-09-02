@@ -25,24 +25,27 @@ the pin *assignments* in the tables below (which are just what `config.h` claims
 discipline as `hardware/bom/procurement-status.md` tracking real-world part status separately from
 `bom.md`'s static spec — **update this table directly as wiring changes; don't let it go stale.**
 
-Snapshot: **18 Aug 2026.**
+Snapshot: **31 Aug 2026.**
 
-Legend: **W** = wired and confirmed on hardware · **P** = wiring in progress today · **U** = unwired
+Legend: **W** = wired and confirmed on hardware · **P** = wiring in progress today · **U** = unwired ·
+**X** = pin unusable, do not assign
 
 | Pin(s) | MCU pin | Function | Status | Note |
 |---|---|---|---|---|
 | D20 / D21 | PB11 / PB10 | Geophone front-end, I2C2 (ADS1115 bench stand-in) | **W** | Confirmed wired. |
 | D0 / D1 | PB7 / PB6 | Grove LoRa-E5, USART1 | **P** | Physically wired 18 Aug (Yellow=module TX→D0, White=module RX→D1, Red=VCC→5V, Black=GND→GND). `LORA_SERIAL` confirmed to be `Serial` (not `Serial1`) via the board's own devicetree overlay + live `journalctl -u arduino-router` cross-check — `config.h` updated. Left at **P**, not **W**: live join test over the correct wire got zero response bytes from the module across 6 AT-probe retries — see `docs/KNOWN_GAPS.md`'s 18 Aug entry for the full capture and candidate causes (logic-level mismatch at 5V power vs 3.3V MCU TX, or module not in AT-command mode). Needs physical follow-up before this flips to **W**. |
 | D2 | PB3 | Audio trigger — DFPlayer IO/ADKEY | **U** | Not wired. Last confirmed unwired 15 Aug (`docs/KNOWN_GAPS.md` fire-test-harness entry, confirmed with Abhinav); re-confirmed still unwired 18 Aug. |
-| D4 | PA12 | Horn amp enable — TPA3116D2 shutdown | **U** | Not wired. Same 15/18 Aug confirmation as D2. |
-| D5 | PA11 | LED white | **U** | Not wired. Same 15/18 Aug confirmation as D2. |
-| D6 | PB1 | LED blue | **U** | Not wired. Same 15/18 Aug confirmation as D2. |
-| D7 | PB2 | IR illuminator | **U** | Not wired. Same 15/18 Aug confirmation as D2. |
+| D4 | PA12 | Horn amp enable — TPA3116D2 shutdown | **U** | Not wired. **PA12 = USB_OTG_FS D+**, claimed by the Arduino core's USB CDC — GPIO writes are a silent no-op (same failure D5 hit). Relocate before the horn bring-up (e.g. D9/PB8). |
+| ~~D5~~ | PA11 | *was: LED white / left wing* | **X** | **Do not wire.** PA11 = USB_OTG_FS D−, claimed by the Arduino core's USB CDC — `digitalWrite`/`analogWrite` is a silent no-op. This latched the left wing on at boot; left wing moved to **D3** on 31 Aug 2026. |
+| D3 | PB0 | LED left wing (`LED_WING_LEFT_PIN`, moved from D5) | **W** | Bench-confirmed 31 Aug 2026 — fired via the fire-test harness (`2`) and `drive_led` pattern 0 over the Bridge; wing physically lit then off. Clean PWM GPIO (TIM3_CH3). |
+| D6 | PB1 | LED right wing (`LED_WING_RIGHT_PIN`) | **W** | Bench-confirmed 31 Aug 2026 — fired via the fire-test harness (`3`) and `drive_led` pattern 1 over the Bridge; wing physically lit then off. |
+| D7 | PB2 | IR illuminator (`IR_ILLUMINATOR_PIN`) | **W** | Bench-confirmed 31 Aug 2026 — `pulse_ir` fired over the Bridge; IMX462 camera-diff showed +99.5 % mean scene luma during a 500 ms pulse. |
 
-The fire-test harness's software path (`docs/specs/mcu-fire-test-harness.md`) is already verified end to
-end on real firmware — see `docs/KNOWN_GAPS.md`'s 15 Aug entry — but physical activation of horn/LED/IR
-cannot be confirmed until D2/D4/D5/D6/D7 above move to **W**. Re-run that checklist, this time
-watching/listening for each fire, once they are.
+The fire-test harness's software path (`docs/specs/mcu-fire-test-harness.md`) is verified end to end on
+real firmware — see `docs/KNOWN_GAPS.md`'s 15 Aug entry. **LED wings (D3/D6) and IR (D7) are now
+physically fired and confirmed (31 Aug 2026)** — see `HANDOVER.md` "RESUME HERE — 31 Aug, ~14:00".
+Still to confirm on hardware: D2 (audio trigger) and D4 (horn amp enable — and D4 needs relocating off
+the USB D+ pin first).
 
 ## Top-level architecture
 
