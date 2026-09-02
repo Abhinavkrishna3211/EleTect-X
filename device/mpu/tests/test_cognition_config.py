@@ -176,14 +176,18 @@ def test_step_size_is_fast_enough_to_track_habituation():
     assert config.BANDIT_STEP_SIZE >= 0.05
 
 
-def test_reward_horizon_exceeds_the_habituation_window():
-    """A full-reward gap must be long enough to leave the repeat window.
+def test_reward_horizon_is_three_times_the_habituation_window():
+    """The horizon is defined as 3x the window, not tuned on its own.
 
-    Otherwise an attempt could score a perfect reward while the animal is
-    still close enough in time to count as a repeat - the reward and the
-    context would be describing the same event contradictorily.
+    ADR 0017 Decision A, "Required companion change": PROXY_REWARD_HORIZON_S
+    has no independent basis - it is 3x HABITUATION_WINDOW_S by construction.
+    A full-reward gap must be long enough to leave the repeat window, or an
+    attempt could score a perfect reward while the animal is still close
+    enough in time to count as a repeat - the reward and the context would
+    describe the same event contradictorily. The exact 3x tie is what keeps
+    a retune of one constant from silently desynchronising the other.
     """
-    assert config.PROXY_REWARD_HORIZON_S > config.HABITUATION_WINDOW_S
+    assert config.PROXY_REWARD_HORIZON_S == pytest.approx(3.0 * config.HABITUATION_WINDOW_S)
 
 
 def test_habituation_window_covers_the_mcu_actuator_cooldowns():
