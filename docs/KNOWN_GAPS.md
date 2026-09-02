@@ -2063,6 +2063,23 @@ deployment, not for further bench work.
 > in reflex firmware, make any passive logger a `Restart=on-failure` systemd unit, and force NTP sync
 > at boot before timestamped logging (RTC is on the unbacked `VCOIN` rail — the clock jump is extra
 > evidence of a deep brown-out).
+>
+> **2 Sept, later — part of that decisive test run, and the brown-out diagnosis is now confirmed on
+> the board rather than inferred from a signature.** With the board on USB-C PD through the hub and
+> the camera attached, `last -x reboot` shows **every** prior boot terminating in `crash` — no
+> orderly shutdown on any of them. `journalctl --list-boots` dates the boot before last at
+> 14:59:35 → 15:01:18 UTC: it survived **103 seconds**, and its final log line is
+> `arduino-router: Accepted connection` with Docker and the `eletect-x-main-1` container still coming
+> up. A grep of that boot for `Stopping|Shutting down|systemd-shutdown|Reached target .*(Shutdown|
+> Power-Off|Reboot)` returns **zero** lines. The board did not reboot; it died with the rail
+> collapsing exactly as startup current peaked. Earlier boots the same day ran 27 min, 2 h 12 min and
+> 8 h 46 min, so this is transient-triggered, not a fixed interval — consistent with a rail that
+> cannot hold under load steps rather than with a timer, a watchdog or memory pressure. Note the
+> asymmetry this creates for measurement: **any current or autonomy figure taken on this topology is
+> invalid**, which is why the ADR 0008 addendum's third bench item is explicitly gated behind the VIN
+> fix. The headless-service strip (`multi-user.target`; `bluetooth`, `ModemManager`, `avahi-daemon`
+> and `arduino-cloud-connector` disabled) was applied the same day and the board absorbed it with no
+> change of `boot_id`, so the strip is not implicated in the fault either way.
 
 **Strobe LED patterns are explicitly post-trial.** The 2 Sept build fires the wings **steady-on only**
 for their burst duration. An irregular / randomised strobe pattern (the deterrence literature's
