@@ -27,17 +27,18 @@
 
 #include "led.h"
 
-// Pure mapping from drive_led's wire pattern_id onto this MCU's real LED
-// channel enum - host-testable in isolation (tests/test_bridge_handlers),
+// Pure mapping from drive_led's wire `channel` field onto this MCU's real
+// LED channel enum - host-testable in isolation (tests/test_bridge_handlers),
 // same functional-core/imperative-shell split fire_test.cpp's
 // fire_test_parse_command() uses (ENGINEERING_CONVENTIONS.md 2).
 //
-// INVENTED: schema.md's drive_led row carries only pattern_id and
-// duration_ms, no gain_pct and no explicit channel selector - neither
-// exists in the schema today, so this mapping (0 -> white, 1 -> blue,
-// anything else -> white) is a placeholder pending real pattern design,
-// not a resolved contract. See docs/KNOWN_GAPS.md.
-led_channel led_channel_for_pattern_id(uint8_t pattern_id);
+// 0 -> left wing, 1 -> right wing, 2 -> both wings (schema_version 3,
+// ADR 0014 E), anything else -> left wing (a stale or garbled request drives
+// the safe default channel rather than nothing). Since ADR 0014
+// (schema_version 2) `channel` is its own wire field - it is no longer
+// overloaded onto pattern_id, which now selects the flash pattern (led.h's
+// led_pattern_from_id).
+led_channel led_channel_from_wire(uint8_t channel);
 
 // MPU -> MCU: request a horn deterrence burst (schema.md: drive_horn).
 // Precondition: none - a schema_version mismatch is logged, not
@@ -60,18 +61,25 @@ bool bridge_drive_horn(uint8_t schema_version, float gain_pct, uint16_t duration
 
 // MPU -> MCU: request an LED deterrence burst (schema.md: drive_led).
 // Same schema_version handling as bridge_drive_horn. Never blocks past
-// drive_led()'s own contract (led.h): the resolved duration_ms.
+// drive_led()'s own contract (led.h): the resolved duration_ms, whatever
+// the pattern.
 //
-// gain_pct is not part of schema.md's drive_led row - this adapter
-// requests LED_GAIN_MAX_PCT (config.h) for every call, the same
-// "request the protocol/config max, let the existing clamp resolve it"
-// placeholder policy device/mpu/services/reflex_loop.py documents for
-// its own horn request, rather than inventing a second unreviewed
-// mid-range figure. See docs/KNOWN_GAPS.md.
+// Since ADR 0014 (schema_version 2) the wire carries four fields, not two:
+// `channel` (led_channel_from_wire), `pattern_id` (led.h's
+// led_pattern_from_id), `gain_pct` (a real per-call intensity, forwarded to
+// rule_gate_apply() which clamps it to LED_GAIN_MAX_PCT), and `duration_ms`.
+// gain_pct is no longer hardcoded to the config max here - the MPU tier
+// ladder now sets it (cognition/config.py).
+//
+// schema_version 3 (ADR 0014 E) adds no wire field: `channel` value 2 now
+// means "both wings, one blocking call" and `pattern_id` gains 4/5/6 (the
+// dual-wing patterns). A channel-2 call is refused if either wing is in
+// cooldown and still blocks for only the resolved duration_ms.
 //
 // Returns: the ack's `allowed` field, same convention as
 // bridge_drive_horn.
-bool bridge_drive_led(uint8_t schema_version, uint8_t pattern_id, uint16_t duration_ms);
+bool bridge_drive_led(uint8_t schema_version, uint8_t channel, uint8_t pattern_id,
+                      float gain_pct, uint16_t duration_ms);
 
 // MPU -> MCU: request an IR illuminator pulse (schema.md: pulse_ir).
 // Same schema_version handling as bridge_drive_horn. Never blocks past

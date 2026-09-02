@@ -375,8 +375,12 @@
 // ---------------------------------------------------------------------------
 // Visual deterrence - cool-white + royal-blue LED pods via IRLZ44N gates
 // ---------------------------------------------------------------------------
-#define LED_WHITE_PIN 5  // PA11, PWM-capable (TIM1_CH4)
-#define LED_BLUE_PIN 6   // PB1, PWM-capable (TIM3_CH4); royal-blue, ~450 nm
+// D5 (PA11) is USB_OTG_FS D- on the UNO Q - the Arduino core claims it for the
+// USB CDC and digitalWrite() on it is a no-op, which latched the left wing on.
+// Left wing moved to D3 (PB0) on 2026-08-31; D3 is a plain PWM GPIO (TIM3_CH3),
+// not shared with any bus. Right wing on D6 (PB1) was always clean.
+#define LED_WING_LEFT_PIN 3  // PB0, PWM-capable (TIM3_CH3); drives left wing (mixed white+blue LEDs, 2-wing build)
+#define LED_WING_RIGHT_PIN 6   // PB1, PWM-capable (TIM3_CH4); drives right wing (mixed white+blue LEDs, 2-wing build)
 
 // Light is far cheaper to run than the horn and less aversive, so it gets a
 // longer cap and a shorter cooldown - independent counters from the horn, per
@@ -384,6 +388,46 @@
 #define LED_BURST_MAX_MS 10000
 #define LED_COOLDOWN_MS 20000
 #define LED_GAIN_MAX_PCT 100.0f
+
+// ADR 0014 pattern-axis timing. The four patterns (led.h's led_pattern) all
+// run inside drive_led()'s existing blocking window and total exactly the
+// resolved duration_ms - they change the shape of the burst, not its length,
+// so they add no blocking cost beyond what every LED fire already has
+// (docs/KNOWN_GAPS.md, 1 Sept). Numbers here are the deterrence-pattern
+// design axis, not safety limits - rule_gate_apply()'s caps above remain the
+// sole authority on duration and gain.
+//
+// SLOW_PULSE: whole on/off cycles spread across the burst, ~50% duty. 2 is
+// the smallest count that still reads as a deliberate pulse rather than a
+// single flash with a gap.
+#define LED_SLOW_PULSE_CYCLES 2
+
+// FAST_STROBE rate. 7 Hz sits in the 6-8 Hz band ADR 0014 specifies: fast
+// enough to look like a strobe rather than a blink, and close to the camera
+// frame rate so it also disrupts a habituating animal's fixation. ~143 ms
+// period at 50% duty. Tiers 1-2 fire at this rate.
+#define LED_FAST_STROBE_HZ 7
+
+// Escalation strobe rate for the top tier (ADR 0014 E.3). 11 Hz is still
+// inside the 4-12 Hz band that reads as discrete aversive flashes rather
+// than fusing toward a steady glow - past ~15 Hz the perceptual effect
+// inverts. ~91 ms period at 50% duty. Only pattern_pulse_both_sync
+// (pattern_id 5, a Tier 3 pattern) uses it; the ladder's top rung escalates
+// on rate as well as wing count and pattern, holding gain at max on every
+// tier. No citation validates 11 specifically over 7 as "more effective" -
+// only the order of magnitude and the fusion ceiling (ADR 0014 E.3
+// "Honest bound").
+#define LED_STROBE_FAST_HZ 11
+
+// RANDOM_FLICKER inter-flash envelope. Each flash is on for a random span in
+// [MIN_ON, MAX_ON] then dark for a random gap in [MIN_GAP, MAX_GAP], seeded
+// from micros() at call time (led.cpp), until the burst budget is spent. The
+// irregular gap is the point - it is the "irregular strobe" CONTEXT.md 3
+// freezes, and the anti-habituation lever WIRING_GUIDE.md 4.0 names.
+#define LED_RANDOM_FLICKER_MIN_ON_MS 20
+#define LED_RANDOM_FLICKER_MAX_ON_MS 80
+#define LED_RANDOM_FLICKER_MIN_GAP_MS 30
+#define LED_RANDOM_FLICKER_MAX_GAP_MS 160
 
 // ---------------------------------------------------------------------------
 // IR illuminator - 940 nm, MOSFET-gated, pulsed only during capture
@@ -539,13 +583,26 @@
 // Bridge RPC - device/mpu/bridge/schema.md
 // ---------------------------------------------------------------------------
 // Every schema.md payload carries schema_version as its first field,
-// currently 1 (schema.md's own header). Mirrors device/mpu/services/
-// config.py's SCHEMA_VERSION = 1 - both sides must bump together on any
+// currently 3 (schema.md's own header). Mirrors device/mpu/services/
+// config.py's SCHEMA_VERSION = 3 - both sides must bump together on any
 // breaking field change, never reuse a version number (schema.md). Used
 // by bridge_handlers.cpp to log (not reject) a mismatched request on an
 // MPU->MCU call, same as services/reflex_loop.py does on an MCU->MPU
 // notify - schema.md defines no MCU-side reject behavior for this, and a
 // synchronous actuator call still owes its caller an ack either way.
-#define BRIDGE_SCHEMA_VERSION 1
+//
+// 1 -> 2 on 2026-09-01 (ADR 0014): drive_led's wire args changed from
+// (pattern_id, duration_ms) to (channel, pattern_id, gain_pct, duration_ms).
+// pattern_id stops meaning "which wing" (that is now `channel`) and starts
+// meaning "which flash pattern" (led.h's led_pattern) - its original intent.
+//
+// 2 -> 3 on 2026-09-01 (ADR 0014 E): drive_led's `channel` value 2 changes
+// meaning from "unrecognized, fall back to left" to "both wings, driven
+// together inside one blocking call"; `pattern_id` gains 4 = sweep, 5 =
+// pulse both sync, 6 = flicker both independent (led.h's led_pattern). No
+// field added or removed - the wire shape is unchanged - but a sender on
+// schema 2 that meant "fall back" by sending channel 2 would now fire both
+// wings, so it is a breaking change and bumps the version.
+#define BRIDGE_SCHEMA_VERSION 3
 
 #endif  // CONFIG_H

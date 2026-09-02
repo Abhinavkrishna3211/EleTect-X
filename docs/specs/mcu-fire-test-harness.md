@@ -44,7 +44,7 @@ sits at the same depth with plain `#include "whatever.h"`. Don't create a subfol
 // no target at all. Pure function, no hardware calls, no side effects -
 // this is the one piece of the harness that's host-testable without a
 // board, same discipline as rule_gate.h's pure core (ENGINEERING_CONVENTIONS.md 4).
-enum class fire_test_target { kNone, kHorn, kLedWhite, kLedBlue, kIr, kHelp };
+enum class fire_test_target { kNone, kHorn, kLedWingLeft, kLedWingRight, kIr, kHelp };  // renamed 30 Aug, was kLedWhite/kLedBlue
 
 fire_test_target fire_test_parse_command(char c);
 
@@ -74,7 +74,7 @@ function `test_fire_test.cpp` exercises directly.
 1. `if (!Serial.available()) return;` — non-blocking poll, same shape as `geophone_service()`'s
    per-loop-iteration style in `main.cpp`.
 2. Read one byte, call `fire_test_parse_command()`.
-3. On `kHorn`/`kLedWhite`/`kLedBlue`/`kIr`: build the request struct from the table above, call the
+3. On `kHorn`/`kLedWingLeft`/`kLedWingRight`/`kIr`: build the request struct from the table above, call the
    real driver function (`drive_horn`, `drive_led`, `pulse_ir` — exact signatures already in
    `horn.h`/`led.h`/`ir.h`, don't redeclare them), then print the **full ack**, not just true/false:
 
@@ -182,8 +182,8 @@ Match `test_rule_gate.cpp`'s exact shape: `#include <unity.h>` first, empty `set
 in `main()`. Minimum coverage:
 
 - `test_digit_1_maps_to_horn`
-- `test_digit_2_maps_to_led_white`
-- `test_digit_3_maps_to_led_blue`
+- `test_digit_2_maps_to_led_wing_left`
+- `test_digit_3_maps_to_led_wing_right`
 - `test_digit_4_maps_to_ir`
 - `test_question_mark_maps_to_help`
 - `test_unrecognized_byte_maps_to_none`

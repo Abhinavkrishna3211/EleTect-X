@@ -14,7 +14,7 @@
 // no target at all. Pure function, no hardware calls, no side effects -
 // this is the one piece of the harness that's host-testable without a
 // board, same discipline as rule_gate.h's pure core (ENGINEERING_CONVENTIONS.md 4).
-enum class fire_test_target { kNone, kHorn, kLedWhite, kLedBlue, kIr, kHelp };
+enum class fire_test_target { kNone, kHorn, kLedWingLeft, kLedWingRight, kIr, kHelp };
 
 // No precondition - total over every char value, including whitespace/
 // newline bytes a Serial Monitor's line terminator sends. Cannot fail: an
@@ -27,7 +27,7 @@ void fire_test_init();
 
 // Call once per loop() iteration; safe to call whether or not a byte is
 // waiting. Non-blocking when Serial has nothing available. When a byte
-// resolves to kHorn/kLedWhite/kLedBlue/kIr, blocks for that actuator's own
+// resolves to kHorn/kLedWingLeft/kLedWingRight/kIr, blocks for that actuator's own
 // resolved fire duration because it calls the real driver function directly
 // (drive_horn/drive_led/pulse_ir - up to ~3.15s in the horn case, see
 // horn.h/led.h/ir.h's own blocking notes); geophone_service()/lora_service()

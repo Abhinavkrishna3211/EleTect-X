@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 #include "Arduino_RouterBridge.h"
 #include "Wire.h"
@@ -14,6 +15,7 @@ namespace {
 constexpr int kMaxPins = 128;
 int g_pin_state[kMaxPins] = {};
 unsigned long g_millis_offset = 0;
+std::vector<hostshim::PinWrite> g_pin_writes;
 
 unsigned long steady_millis() {
   using namespace std::chrono;
@@ -30,6 +32,7 @@ void digitalWrite(int pin, int value) {
   if (pin >= 0 && pin < kMaxPins) {
     g_pin_state[pin] = value;
   }
+  g_pin_writes.push_back({pin, value, millis()});
 }
 
 int digitalRead(int pin) {
@@ -40,6 +43,7 @@ void analogWrite(int pin, int value) {
   if (pin >= 0 && pin < kMaxPins) {
     g_pin_state[pin] = value;
   }
+  g_pin_writes.push_back({pin, value, millis()});
 }
 
 int analogRead(int) { return 0; }
@@ -58,9 +62,12 @@ int pin_state(int pin) { return digitalRead(pin); }
 
 void advance_millis(unsigned long ms) { g_millis_offset += ms; }
 
+const std::vector<PinWrite> &pin_writes() { return g_pin_writes; }
+
 void reset() {
   std::memset(g_pin_state, 0, sizeof(g_pin_state));
   g_millis_offset = 0;
+  g_pin_writes.clear();
 }
 
 }  // namespace hostshim
