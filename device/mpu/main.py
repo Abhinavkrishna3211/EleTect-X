@@ -50,6 +50,7 @@ from bridge.rpc import AcousticClass
 from cognition.experience import ExperienceStore
 from perception.camera import Camera
 from perception.detector import HttpVisionDetector
+from perception.night import frames_are_night
 from perception.storage import save_burst
 from services import config, reflex_loop
 
@@ -141,12 +142,27 @@ def _on_footfall_event(
         sta_lta_ratio,
         feature_vector,
         drive_horn=lambda sv, gain_pct, duration_ms: Bridge.call(
-            "drive_horn", sv, gain_pct, duration_ms
+            "drive_horn",
+            sv,
+            gain_pct,
+            duration_ms,
+            timeout=config.BRIDGE_HORN_CALL_TIMEOUT_S,
         ),
-        drive_led=lambda sv, pattern_id, duration_ms: Bridge.call(
-            "drive_led", sv, pattern_id, duration_ms
+        drive_led=lambda sv, channel, pattern_id, gain_pct, duration_ms: Bridge.call(
+            "drive_led",
+            sv,
+            channel,
+            pattern_id,
+            gain_pct,
+            duration_ms,
+            timeout=config.BRIDGE_LED_CALL_TIMEOUT_S,
         ),
-        pulse_ir=lambda sv, duration_ms: Bridge.call("pulse_ir", sv, duration_ms),
+        pulse_ir=lambda sv, duration_ms: Bridge.call(
+            "pulse_ir", sv, duration_ms, timeout=config.BRIDGE_IR_CALL_TIMEOUT_S
+        ),
+        is_night=lambda frames: frames_are_night(
+            [f.image for f in frames], config.NIGHT_SATURATION_THRESHOLD
+        ),
         camera=_camera,
         detect_vision=_vision_detector,
         save_frames=save_burst,
