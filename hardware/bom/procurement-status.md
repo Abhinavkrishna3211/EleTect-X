@@ -62,6 +62,10 @@ local store only (not worth an online search, per prior sourcing attempts this s
 
 ## 6. Power system — **revised 13 Aug against the Aug 20 deployment deadline**
 
+> **Deadline note, 2 Sept:** the trial date is now **5 Sept** (user-confirmed 1 Sept; see `CONTEXT.md`
+> §10). Anything ordered against this section has to land before that date, not before 20 Aug — the
+> 20 W panel already missed one deadline by arriving 24 Aug.
+
 Sized 12 Aug against a daily energy budget (baseline-dominated by ADR 0008's 0.42-0.45W MPU-suspend
 draw — **a third-party community measurement, not a reading from this board, and describing a suspend
 state this codebase does not implement**; see ADR 0008's 2 Sept addendum — for a 12.77Wh/day baseline,

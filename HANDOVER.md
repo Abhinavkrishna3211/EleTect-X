@@ -2539,7 +2539,10 @@ Hackster "Invent the Future with UNO Q" submission is still open, due 30 Aug —
    directly whether the Enterprise account changes project visibility/sharing settings that need
    configuring before the Hackster submission, since that hasn't been specified yet.
 8. **Priorities updated 26 Aug: field deployment complete by 2 Sept, Hackster submission by
-   13 Sept (moved from 30 Aug — see CONTEXT.md §10, updated same day).** Field deployment is now the
+   13 Sept (moved from 30 Aug — see CONTEXT.md §10, updated same day).** **Superseded 2 Sept: the
+   field-deployment date is now 5 Sept** — user-confirmed 1 Sept, an instruction that never reached
+   the written record until now. Hackster stays 13 Sept. The 26 Aug text above is left as written
+   because it is a dated record; `CONTEXT.md` §10 is the live source of truth for deadlines. Field deployment is now the
    immediate blocker for everything else — it's real evidence for the Hackster write-up and the
    highest-leverage item outstanding per the 23 Aug checkpoint below (physical wiring, live
    fire-test, one real filmed detection→deterrence session still not confirmed done as of that
