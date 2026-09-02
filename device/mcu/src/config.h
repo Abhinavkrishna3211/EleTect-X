@@ -218,6 +218,7 @@
 // limit.
 #define FIRE_TEST_HORN_DURATION_MS 500   // well under HORN_BURST_MAX_MS=3000
 #define FIRE_TEST_HORN_GAIN_PCT 30.0f    // under HORN_GAIN_MAX_PCT=60, desk-volume not field-volume
+#define FIRE_TEST_HORN_TRACK_ID 1        // AT+PLAYNUM index 1 = bee swarm (ADR 0016 C track 1); bench wiring check, content is arbitrary
 #define FIRE_TEST_LED_DURATION_MS 1000
 #define FIRE_TEST_LED_GAIN_PCT 50.0f
 #define FIRE_TEST_IR_DURATION_MS 200     // under IR_PULSE_MAX_MS=500
@@ -321,15 +322,46 @@
 // ---------------------------------------------------------------------------
 // Audio deterrence - DFPlayer -> TPA3116D2 (single BTL) -> Ahuja SUH-15
 // ---------------------------------------------------------------------------
-// Both pins below are owned exclusively by src/actuators/horn.cpp.
+// All pins below are owned exclusively by src/actuators/horn.cpp.
 //
-// The DFPlayer is triggered by a GPIO pulse on its IO/ADKEY input rather than
-// over UART: USART1 on D0/D1 is the only UART broken out to the top headers
-// and the Grove LoRa-E5 has it.
-// PB3, plain GPIO -> DFPlayer PRO (DFR0768) KEY input. Active-low: the
-// DF1101S pulls KEY up to its own IO rail (idle high) and reads a direct
-// short to ground as key K1 (Play & Pause) - see horn.cpp's top comment.
+// AUDIO_TRIGGER_PIN: retained but retired by ADR 0015 Decision E. It was a
+// GPIO pulse into the DFPlayer PRO (DFR0768) KEY input - the only control
+// path available while USART1 on D0/D1 (the sole header UART) was assumed
+// fully claimed by the Grove LoRa-E5. ADR 0015 moves horn control to a
+// dedicated software UART (below) so per-tier volume AND track selection are
+// possible, neither of which the single KEY button can do. Kept #define'd,
+// not deleted, so reverting to the KEY-pin trigger costs nothing if the
+// software-UART path fails bring-up (see DFPLAYER_SERIAL caveat below).
 #define AUDIO_TRIGGER_PIN 2
+
+// DFPlayer PRO (DFR0768) AT-command link, added by ADR 0015 Decision A. Two
+// of PIN_MAP.md's explicitly free pins: D9 (PB8) MCU TX -> DFPlayer RX,
+// D10 (PB9) MCU RX <- DFPlayer TX. 115200 baud is DFR0768's confirmed
+// default and the exact rate DFRobot's own DFRobot_DF1201S SoftwareSerial
+// example uses.
+//
+// UNVERIFIED, same convention as LORA_SERIAL's own caveat below: the UNO Q
+// MCU core runs on Zephyr, a non-AVR target, and whether this Arduino Core
+// ships a working SoftwareSerial equivalent for D9/D10 is NOT confirmed.
+// ADR 0015 Decision A calls this "the single highest-priority thing to
+// confirm at bring-up" - no firmware depending on it is trusted until then.
+#define DFPLAYER_UART_TX_PIN 9   // PB8 -> DFR0768 RX
+#define DFPLAYER_UART_RX_PIN 10  // PB9 <- DFR0768 TX
+#define DFPLAYER_UART_BAUD 115200UL
+
+// The stream horn.cpp writes AT commands to. Aliased to Serial1 for the host
+// build (hostshim provides it) and for the same reason LORA_SERIAL aliases
+// Serial - the pure command-string/volume logic (horn_at_vol_command,
+// horn_at_playnum_command, horn_dfplayer_volume_from_gain_pct) is what the
+// host tests exercise, not the transport. On the real board this must be
+// bound to the D9/D10 software-UART instance once SoftwareSerial support is
+// confirmed; until then the AT writes go nowhere and the horn is silent.
+#define DFPLAYER_SERIAL Serial1
+
+// AT+VOL parameter range on the DFR0768 (protocol reference: 0-30 absolute).
+// horn_dfplayer_volume_from_gain_pct() maps the wire gain_pct (0-100, already
+// HORN_GAIN_MAX_PCT-clamped by rule_gate_apply) onto [0, this].
+#define DFPLAYER_VOL_MAX 30
 
 // TPA3116D2 shutdown pin, active low. ADR 0003 drives a single BTL channel,
 // not PBTL: at the 12.8 V rail one channel already puts the SUH-15 well above
@@ -583,8 +615,8 @@
 // Bridge RPC - device/mpu/bridge/schema.md
 // ---------------------------------------------------------------------------
 // Every schema.md payload carries schema_version as its first field,
-// currently 3 (schema.md's own header). Mirrors device/mpu/services/
-// config.py's SCHEMA_VERSION = 3 - both sides must bump together on any
+// currently 4 (schema.md's own header). Mirrors device/mpu/services/
+// config.py's SCHEMA_VERSION = 4 - both sides must bump together on any
 // breaking field change, never reuse a version number (schema.md). Used
 // by bridge_handlers.cpp to log (not reject) a mismatched request on an
 // MPU->MCU call, same as services/reflex_loop.py does on an MCU->MPU
@@ -603,6 +635,12 @@
 // field added or removed - the wire shape is unchanged - but a sender on
 // schema 2 that meant "fall back" by sending channel 2 would now fire both
 // wings, so it is a breaking change and bumps the version.
-#define BRIDGE_SCHEMA_VERSION 3
+//
+// 3 -> 4 on 2026-09-02 (ADR 0015): drive_horn gains a trailing `track_id:
+// uint8` field so the MPU can select which content the DFPlayer plays per
+// tier (AT+PLAYNUM), not just how loud (AT+VOL). A real new wire field -
+// a schema-3 sender omits it - so it bumps the version. drive_led,
+// pulse_ir, and every MCU->MPU row are unchanged.
+#define BRIDGE_SCHEMA_VERSION 4
 
 #endif  // CONFIG_H

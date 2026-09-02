@@ -65,8 +65,8 @@ class _FakeDriveHorn:
         self.calls = []
         self.call_log = call_log if call_log is not None else []
 
-    def __call__(self, schema_version, gain_pct, duration_ms):
-        self.calls.append((schema_version, gain_pct, duration_ms))
+    def __call__(self, schema_version, gain_pct, duration_ms, track_id):
+        self.calls.append((schema_version, gain_pct, duration_ms, track_id))
         self.call_log.append("drive_horn")
         return self.ack
 
@@ -356,7 +356,7 @@ def test_high_probability_alerts_and_fires_the_selected_tier_outside_safe_mode()
     assert outcome.led_ack is True
     assert outcome.ir_ack is None
     assert kwargs["drive_horn"].calls == [
-        (1, TIER_1.horn_gain_pct, TIER_1.horn_duration_ms)
+        (1, TIER_1.horn_gain_pct, TIER_1.horn_duration_ms, TIER_1.horn_track_id)
     ]
     assert kwargs["drive_led"].calls == [
         (
@@ -740,7 +740,7 @@ def test_escalated_tier_fires_ir_concurrently_with_the_capture():
     log: list = []
     outcome, kwargs, log = _fire(0.9, experience=experience, call_log=log)
 
-    assert outcome.action is TIER_2
+    assert outcome.action.tier is Tier.TIER_2
     assert outcome.ir_ack is True
     assert kwargs["pulse_ir"].calls == [(1, TIER_2.ir_duration_ms)]
     assert log[0] == "camera.open"
@@ -769,7 +769,7 @@ def test_pulse_ir_overlaps_the_capture_window_not_after_it():
     camera = _FakeCamera()
     outcome, _, _ = _fire(0.9, experience=experience, pulse_ir=pulse_ir, camera=camera)
 
-    assert outcome.action is TIER_2
+    assert outcome.action.tier is Tier.TIER_2
     assert outcome.ir_ack is True
     assert pulse_ir.on_at is not None
     assert pulse_ir.off_at is not None
@@ -810,7 +810,7 @@ def test_daylight_vision_check_suppresses_pulse_ir_but_still_fires_horn_and_led(
             0.9, experience=experience, call_log=log, is_night=lambda frames: False
         )
 
-    assert outcome.action is TIER_2
+    assert outcome.action.tier is Tier.TIER_2
     assert outcome.ir_ack is None
     assert kwargs["pulse_ir"].calls == []
     assert "pulse_ir" not in log
@@ -846,7 +846,7 @@ def test_undetermined_day_night_state_also_suppresses_pulse_ir(caplog):
             0.9, experience=experience, is_night=lambda frames: None
         )
 
-    assert outcome.action is TIER_2
+    assert outcome.action.tier is Tier.TIER_2
     assert outcome.ir_ack is None
     assert kwargs["pulse_ir"].calls == []
     assert any(
@@ -873,7 +873,7 @@ def test_is_night_error_never_blocks_deterrence_and_the_pulse_still_fires(caplog
     with caplog.at_level("WARNING"):
         outcome, kwargs, _ = _fire(0.9, experience=experience, is_night=_boom)
 
-    assert outcome.action is TIER_2
+    assert outcome.action.tier is Tier.TIER_2
     assert outcome.ir_ack is True
     assert kwargs["pulse_ir"].calls == [(1, TIER_2.ir_duration_ms)]
     assert any("is_night() raised" in r.message for r in caplog.records)
@@ -897,7 +897,7 @@ def test_is_night_is_handed_the_pre_decision_vision_check_frames():
 
     outcome, _, _ = _fire(0.9, experience=experience, is_night=_record)
 
-    assert outcome.action is TIER_2
+    assert outcome.action.tier is Tier.TIER_2
     assert len(seen) == 1
     assert len(seen[0]) == services_config.VISION_CHECK_FRAME_COUNT
     assert all(isinstance(f, Frame) for f in seen[0])
@@ -935,7 +935,7 @@ def test_sub_threshold_events_still_count_toward_habituation():
 
     loud, _, _ = _fire(0.9, experience=experience)
     assert loud.repeat_count == 1
-    assert loud.action is TIER_2
+    assert loud.action.tier is Tier.TIER_2
     experience.close()
 
 
@@ -986,7 +986,7 @@ def test_learning_survives_a_restart_through_the_real_loop(tmp_path):
     second.close()
 
     assert second_outcome.repeat_count == 1
-    assert second_outcome.action is TIER_2
+    assert second_outcome.action.tier is Tier.TIER_2
     assert second_outcome.settled is not None  # run one's attempt scored here
 
 

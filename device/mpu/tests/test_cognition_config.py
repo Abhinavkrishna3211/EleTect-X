@@ -418,15 +418,23 @@ def test_tier_1_led_pattern_is_the_strobe_anchor():
     assert config.DETERRENCE_TIERS[Tier.TIER_1].led_pattern_id == 2
 
 
-def test_resolve_tier_action_is_identity_for_the_fixed_tiers():
-    """Tiers 1 and 2 are fixed - resolve_tier_action returns the stored object.
+def test_resolve_tier_action_is_identity_for_tier_1_only():
+    """Tier 1 is the only fixed tier - resolve_tier_action returns the stored object.
 
-    The reflex loop and several tests rely on `is DETERRENCE_TIERS[t]`
-    identity for these two; only Tier 3 rotates.
+    The reflex loop and several tests rely on `is DETERRENCE_TIERS[TIER_1]`
+    identity. Tiers 2 and 3 rotate their horn track per fire (ADR 0016
+    Decision B) so they must return a fresh object, never the singleton.
     """
     rng = random.Random(0)
-    for tier in (Tier.TIER_1, Tier.TIER_2):
-        assert config.resolve_tier_action(tier, rng) is config.DETERRENCE_TIERS[tier]
+    assert (
+        config.resolve_tier_action(Tier.TIER_1, rng)
+        is config.DETERRENCE_TIERS[Tier.TIER_1]
+    )
+    for tier in (Tier.TIER_2, Tier.TIER_3):
+        assert (
+            config.resolve_tier_action(tier, rng)
+            is not config.DETERRENCE_TIERS[tier]
+        )
 
 
 def test_resolve_tier_action_rotates_tier_3_across_both_patterns():
@@ -434,13 +442,14 @@ def test_resolve_tier_action_rotates_tier_3_across_both_patterns():
 
     Over enough draws resolve_tier_action must yield every id in
     TIER_3_LED_PATTERN_IDS and nothing outside it, and must leave every
-    other field of the Tier 3 action untouched.
+    other field of the Tier 3 action untouched (bar the rotating
+    horn_track_id, checked separately).
     """
     rng = random.Random(1234)
     base = config.DETERRENCE_TIERS[Tier.TIER_3]
     seen = set()
     for _ in range(200):
-        action = config.resolve_tier_action(Tier.TIER_3, rng)
+        action = config.resolve_tier_action(Tier.TIER_3, rng, household_proximity=True)
         seen.add(action.led_pattern_id)
         assert action.tier is Tier.TIER_3
         assert action.led_channel_id == base.led_channel_id
@@ -448,7 +457,105 @@ def test_resolve_tier_action_rotates_tier_3_across_both_patterns():
         assert action.led_duration_ms == base.led_duration_ms
         assert action.fire_ir == base.fire_ir
         assert action.ir_duration_ms == base.ir_duration_ms
+        assert action.horn_gain_pct == base.horn_gain_pct
+        assert action.horn_duration_ms == base.horn_duration_ms
     assert seen == set(config.TIER_3_LED_PATTERN_IDS)
+
+
+def test_horn_content_library_covers_every_category_with_disjoint_tracks():
+    """Every category maps to at least one track, and no track serves two.
+
+    The SD card is provisioned in one numeric sequence (ADR 0016 Decision
+    C); a track_id landing in two categories would make the tier->sound
+    mapping ambiguous.
+    """
+    lib = config.HORN_CONTENT_LIBRARY
+    categories = {
+        config.HORN_CATEGORY_BEE,
+        config.HORN_CATEGORY_PREDATOR,
+        config.HORN_CATEGORY_AIR_HORN,
+        config.HORN_CATEGORY_FIRECRACKER,
+    }
+    assert set(lib) == categories
+    all_tracks = [t for tracks in lib.values() for t in tracks]
+    assert all_tracks, "the library cannot be empty"
+    assert all(isinstance(t, int) and t >= 1 for t in all_tracks)
+    assert len(all_tracks) == len(set(all_tracks)), "a track_id serves two categories"
+
+
+def test_tier_horn_tracks_match_the_adr_0016_category_mapping():
+    """Stored tier defaults draw from the right category (ADR 0016 Decision B).
+
+    Tier 1 = bee swarm; Tier 2 = predator growl; Tier 3's stored default is
+    the household-safe predator growl (resolve_tier_action swaps it live).
+    """
+    lib = config.HORN_CONTENT_LIBRARY
+    assert (
+        config.DETERRENCE_TIERS[Tier.TIER_1].horn_track_id
+        in lib[config.HORN_CATEGORY_BEE]
+    )
+    assert (
+        config.DETERRENCE_TIERS[Tier.TIER_2].horn_track_id
+        in lib[config.HORN_CATEGORY_PREDATOR]
+    )
+    assert (
+        config.DETERRENCE_TIERS[Tier.TIER_3].horn_track_id
+        in lib[config.HORN_CATEGORY_PREDATOR]
+    )
+
+
+def test_tier_2_horn_track_rotates_only_across_the_predator_growls():
+    """Tier 2 alternates tiger/lion and never leaves the predator category."""
+    rng = random.Random(7)
+    predator = set(config.HORN_CONTENT_LIBRARY[config.HORN_CATEGORY_PREDATOR])
+    assert len(predator) >= 2, "rotation needs at least two clips to be meaningful"
+    seen = set()
+    for _ in range(200):
+        action = config.resolve_tier_action(Tier.TIER_2, rng)
+        seen.add(action.horn_track_id)
+    assert seen == predator
+
+
+def test_tier_3_household_node_only_ever_plays_a_predator_growl():
+    """Near homes, Tier 3 never reaches a siren or firecracker (ADR 0016 B)."""
+    rng = random.Random(99)
+    predator = set(config.HORN_CONTENT_LIBRARY[config.HORN_CATEGORY_PREDATOR])
+    nuisance = set(config.HORN_CONTENT_LIBRARY[config.HORN_CATEGORY_AIR_HORN]) | set(
+        config.HORN_CONTENT_LIBRARY[config.HORN_CATEGORY_FIRECRACKER]
+    )
+    seen = set()
+    for _ in range(300):
+        action = config.resolve_tier_action(
+            Tier.TIER_3, rng, household_proximity=True
+        )
+        seen.add(action.horn_track_id)
+    assert seen <= predator
+    assert not (seen & nuisance)
+
+
+def test_tier_3_non_household_node_prefers_firecracker_two_to_one_over_siren():
+    """Away from homes, Tier 3 rotates the loud-bang pool, firecracker-weighted.
+
+    ADR 0016 Decision B: the air horn / siren has a published null result
+    (Hedges & Gunaryadi 2010) while the firecracker has live-pyrotechnic
+    precedent, so the bang pool lists firecracker twice for a 2:1 draw.
+    """
+    firecracker = config.HORN_CONTENT_LIBRARY[config.HORN_CATEGORY_FIRECRACKER][0]
+    air_horn = config.HORN_CONTENT_LIBRARY[config.HORN_CATEGORY_AIR_HORN][0]
+    pool = config.TIER_3_NON_HOUSEHOLD_TRACK_POOL
+    assert pool.count(firecracker) == 2
+    assert pool.count(air_horn) == 1
+
+    rng = random.Random(2024)
+    counts = {firecracker: 0, air_horn: 0}
+    for _ in range(6000):
+        action = config.resolve_tier_action(
+            Tier.TIER_3, rng, household_proximity=False
+        )
+        counts[action.horn_track_id] += 1
+    assert set(counts) == {firecracker, air_horn}
+    ratio = counts[firecracker] / counts[air_horn]
+    assert 1.7 < ratio < 2.3, counts
 
 
 def test_default_bandit_params_do_not_drift_from_their_constants():

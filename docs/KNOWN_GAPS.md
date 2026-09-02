@@ -59,13 +59,17 @@ criteria — see each entry's status.
   capture across a range of trigger-to-`AMP_ENABLE` delays. Confirmed 15 Aug: the horn is not yet
   wired to the board at all, so this cannot be bench-measured until wiring exists — the fire-test
   harness (see its own entry below) is ready to drive the measurement once it does. Status: open.
-- **`drive_horn`'s `gain_pct` clamp is acknowledged but not yet wired to a physical volume
-  control.** `horn.cpp` clamps and acks `gain_pct` via `rule_gate_apply()`, but nothing today
-  actually varies DFPlayer output volume or amp gain by that percentage — the horn always plays at
-  whatever level the DFPlayer's stored default is. Medium severity (an out-of-range gain is
-  correctly rejected/clamped, but an in-range one has no real effect yet). Effort: needs a
-  DFPlayer serial-command volume-set path (UART, not the GPIO trigger this session wired), or
-  dropped from the contract if hardware can't support it. Status: open.
+- **`drive_horn`'s `gain_pct` and `track_id` are wired in firmware (ADR 0015) but the transport
+  they ride on is unverified.** `horn.cpp` now maps `gain_pct` → `AT+VOL=<0-30>` and `track_id` →
+  `AT+PLAYNUM=<n>` and writes both over `DFPLAYER_SERIAL` before enabling the amp — the volume path
+  and the content-selection path both exist in code and are host-tested (`test_horn_dfplayer`). What
+  is *not* proven: (a) that a software UART on D9/D10 works at all on the Zephyr-based UNO Q core —
+  no `SoftwareSerial`-on-Zephyr example has been run on this board (ADR 0015 Decision A, highest
+  bring-up priority); (b) that the DF1201S accepts the exact byte sequence and timing `horn.cpp`
+  sends; (c) the `AT+VOL` mapping anchors (25 %→8, 45 %→14, 60 %→18) sound right in the field.
+  Medium severity — until bring-up confirms the UART, an in-range `gain_pct`/`track_id` still
+  changes nothing audible. Effort: bench bring-up on the board with the DFPlayer PRO wired, driven
+  by the fire-test harness. Status: open.
 - **`drive_led`/`pulse_ir`'s internal `gain_pct` representation doesn't match the Bridge schema's
   wire args — LED half reopened and resolved differently by ADR 0014; IR half still closed.**
   Original decision (option a): document that both calls always drive at their `config.h` max
@@ -1705,7 +1709,7 @@ day/night IR sensing is real and intact as originally designed; no remediation n
 
 **Survivorship bias in settlement: the best possible outcome earns no credit.** An attempt is settled by the *next* trigger, so an attempt followed by permanent silence — which is exactly the outcome the system is trying to produce — is never scored at all and never updates its action value. Only attempts that were followed by a return get rewarded, and the horizon cap means a long-but-finite gap is the highest score reachable. The store's `settle_pending()` documents this explicitly. A time-based sweep (credit an unsettled attempt once the horizon elapses with no trigger) would fix it and needs a periodic task the MPU does not currently run. Status: **open**.
 
-**`gain_pct` has no physical effect yet** (the DFPlayer volume path is unwired, existing gap) — so today the tiers are physically distinguished only by actuator count and LED channel, not loudness. This is the most important honesty caveat in the change. Tier 1 is horn + white LED and no IR; tier 2 adds IR and switches to the blue LED channel; tier 3 is horn + white LED + IR at the protocol max, i.e. exactly the pre-bandit behavior. The gain column (0.25 / 0.45 / 1.0 of protocol scale) is real on the wire and reaches the MCU, and it changes nothing audible until the DFPlayer volume path is wired. Status: **open** — the ladder becomes a genuine intensity ladder only once that existing gap closes; until then the escalation is real but it is escalation in actuator count and LED channel.
+**`gain_pct` has no physical effect yet** (the DFPlayer volume path is unwired, existing gap) — so today the tiers are physically distinguished only by actuator count and LED channel, not loudness. This is the most important honesty caveat in the change. Tier 1 is horn + white LED and no IR; tier 2 adds IR and switches to the blue LED channel; tier 3 is horn + white LED + IR at the protocol max, i.e. exactly the pre-bandit behavior. The gain column (0.25 / 0.45 / 1.0 of protocol scale) is real on the wire and reaches the MCU, and it changes nothing audible until the DFPlayer volume path is wired. Status: **partly addressed (2026-09-02)** — ADR 0015 wired `gain_pct` → `AT+VOL` and added a `track_id` content axis (ADR 0016) in firmware, so escalation is no longer only actuator count + LED channel: Tier 1 plays a bee swarm, Tier 2 a rotating predator growl, Tier 3 a predator growl (near homes) or a firecracker-weighted bang (elsewhere). The remaining open half is the unverified software UART on the Zephyr core — see the `drive_horn` `gain_pct`/`track_id` entry near the top of this file.
 
 **Duration is not a usable MPU-side escalation axis, and the gain fractions are empirical against an approximate clamp.** All three tiers request `PROTOCOL_DURATION_MS_MAX`, because any fraction of the uint16 ceiling above a few percent clamps to the same physical burst on the MCU and the MPU is not allowed to encode the MCU's real cap — `services/config.py` documents that boundary ("the MPU only ever sees the clamped ack, never a raw limit to duplicate here"), and `HORN_BURST_MAX_MS`/`HORN_COOLDOWN_MS` are ADR 0003's animal-welfare and battery-draw safeguard, exactly the kind of safety limit that must not exist in two files that can silently drift. For the same reason the tier-1/tier-2 gain fractions were picked to land clearly *under* the currently-observed ~60% clamp rather than as naive even splits (33/66/100 would put tiers 2 and 3 both above it and collapse them to identical physical output). Those fractions are therefore empirical and must be re-checked if the clamp changes; `tests/test_cognition_config.py` enforces that by regexing `HORN_GAIN_MAX_PCT` out of `device/mcu/src/config.h` and asserting tiers 1–2 stay strictly below it, so the obligation lives in the test layer rather than as a duplicated constant in production code. The correct long-term fix is exposing the real caps over the Bridge (`get_system_state`) so the MPU can space its tiers against actual limits — that needs an MCU firmware change plus a live reflash. Status: **open**, named future work.
 

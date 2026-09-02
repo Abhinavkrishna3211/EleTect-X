@@ -141,11 +141,12 @@ def _on_footfall_event(
         probability,
         sta_lta_ratio,
         feature_vector,
-        drive_horn=lambda sv, gain_pct, duration_ms: Bridge.call(
+        drive_horn=lambda sv, gain_pct, duration_ms, track_id: Bridge.call(
             "drive_horn",
             sv,
             gain_pct,
             duration_ms,
+            track_id,
             timeout=config.BRIDGE_HORN_CALL_TIMEOUT_S,
         ),
         drive_led=lambda sv, channel, pattern_id, gain_pct, duration_ms: Bridge.call(
