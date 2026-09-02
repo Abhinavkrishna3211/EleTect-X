@@ -60,4 +60,16 @@ bool horn_at_vol_command(uint8_t dfplayer_vol, char *buf, size_t buf_len);
 // Same contract for "AT+PLAYNUM=<n>\r\n".
 bool horn_at_playnum_command(uint8_t track_id, char *buf, size_t buf_len);
 
+// Same contract for "AT+PLAYMODE=<n>\r\n" (DFR0768: 1 single-loop, 2 all-loop,
+// 3 play-once-then-pause, 4 random, 5 folder-loop). The horn wants mode 3 so a
+// burst plays exactly once and stops itself; the module does not reliably keep
+// this across a power cycle (DFRobot forum "DFPlayer Pro Playmode Resets"), so
+// it is re-sent once per boot on the first fire, not assumed.
+bool horn_at_playmode_command(uint8_t mode, char *buf, size_t buf_len);
+
+// Same contract for "AT+PROMPT=ON\r\n" / "AT+PROMPT=OFF\r\n". Sent OFF once per
+// boot to suppress the module's built-in confirmation beep, which would
+// otherwise play through the SUH-15 ahead of the deterrence clip.
+bool horn_at_prompt_command(bool enabled, char *buf, size_t buf_len);
+
 #endif  // ACTUATORS_HORN_H
