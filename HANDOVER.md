@@ -1,6 +1,1291 @@
-# EleTect X — Handover (last updated 30 Aug 2026 — see the new "RESUME HERE — 30 Aug (2-hour live-camera stress test: real 31.5% Boar false-positive rate found on outdoor foliage, correcting the earlier 0/123 claim; local `.eim` copies pulled; training-config tutorial delivered)" checkpoint just below for current state: a 2-hour, 40,422-frame continuous live-camera run on the real board (camera pointed at outdoor trees/leaves, no animals present, IR always-on) found a real 31.53% Boar false-positive rate — zero Elephant false positives — which materially corrects the prior night's "0/123, zero false positives" claim (that sample was only 21 seconds/123 frames, too small to be representative). The finding is currently contained: only an Elephant-label detection feeds the alert-fusion decision, so this does not create false elephant alerts today, but it matters for the still-open question of whether Boar detections should ever influence deterrence tier. Latency held steady at scale (137.25ms mean, 5.52 FPS over the full 2 hours, consistent with the smaller sample). Both `.eim` model files were also pulled locally to `device/mpu/models/vision/` (gitignored, byte-identical to the board), and a step-by-step tutorial on the exact training configuration behind the deployed checkpoint was delivered to the user. See that checkpoint for full detail, then the prior "RESUME HERE — 30 Aug (real on-device benchmark: CPU 138ms/~5.7fps measured, 3.9x faster than Studio's own estimate; GPU delegate builds but confirmed non-functional at runtime; functional correctness verified end-to-end via HttpVisionDetector against known-labeled images; EON Tuner still running, no improvement over champion yet)" checkpoint right below it for the prior round: that overnight autonomous session (user asleep, explicit "do everything autonomously... test in uno q... benchmark and compare in the hardware" instruction) exported the finalized `yolo-pro-medium-no_attn_relu` threshold-0.05 checkpoint as two fresh `.eim` builds (CPU `runner-linux-aarch64` and GPU `runner-linux-aarch64-gpu`) and benchmarked the CPU build against the board's real, live-connected camera (pointed out the window, IR always-on) — 123 real inference cycles, mean classification latency 138ms, ~5.7 FPS end-to-end, zero false positives on all 123 live frames. The GPU build compiles and links real GPU-delegate code in Edge Impulse's cloud but fails to launch on this board with `libtensorflowlite_gpu_delegate.so: cannot open shared object file` — confirmed via exhaustive filesystem search and apt-cache search that the library is genuinely absent and unobtainable here, consistent with and adding new detail to the 29 Aug sudo-backed root-cause finding below. Also drove the real production `HttpVisionDetector` client class (not a synthetic check) against the freshly-exported model over a port-forwarded HTTP server, feeding two known-labeled held-out images — both correctly classified (Elephant 0.557/0.334, Boar 0.520). Fixed two stale/inconsistent claims in `docs/KNOWN_GAPS.md` that said the vision detector "is not exported or wired into anything" — both superseded, following the file's own established convention, with pointers to the fresh evidence. Full writeup in `ml/vision/README.md`'s "29-30 Aug... on-device benchmark" section. EON Tuner job `53262078` checked again at session end: still `running`, 1 completed / 3 running / 1 pending trial, no material progress since the prior check — the one completed candidate (`rgb-fomo-275`, int8 accuracy 0.384) remains far below the champion's per-class recall and has not been allowed to finish. **The ≥92%-per-class recall bar is still not met** (Elephant 0.906 at threshold 0.05, 1.4 points short; Boar 0.852, 6.8 points short) — nothing this window changed the accuracy numbers, only confirmed them for real on hardware and closed out the latency/GPU/wiring caveats. Nothing committed to git this window (no explicit user request to commit). See that checkpoint for full detail, then the still-relevant prior "RESUME HERE — 29 Aug (retrain complete, 92% bar not met; Boar heuristic closed; three-source gap check clean; GPU delegate gap confirmed permanent)" checkpoint right below it for the prior round: the standing plan's dataset-verification precondition ("verify dataset before retraining") was closed out for real — the Boar domestic-pig heuristic sample finished (17 more confirmed-bad filenames, 10 deleted live), and the three sources that had never had even a spot-check (`asian-elephants-dataset-v1`, `swg-eurasian-wild-pig`, `swg-empty`) were sampled and found clean, closing out a false alarm (tree/water categories, already filtered by the real pipeline) and surfacing a real positive finding (this source already has real night/IR frames). Separately, root-caused the GPU delegate question left open since 23 Aug: with real sudo access on the board, confirmed no apt repo (Debian, Arduino, or the Qualcomm artifactory overlay) provides `libtensorflowlite_gpu_delegate.so` — this is now a **confirmed permanent hardware/software gap**, not an access limitation; `mesa-teflon-delegate` and ArmNN's GPU backend exist but are architecturally incompatible drop-in replacements. With the dataset verified, retrained `yolo-pro-nano-attn_silu` against the fully-cleaned 12,808-image corpus (9,775 train / 3,033 test, confirmed matching live) — real held-out numbers: **Elephant recall 0.781** (P 0.974, F1 0.727), **Boar recall 0.706** (P 0.987, F1 0.656), Background false-positive rate 0.028. Both real improvements over the 26 Aug FOMO baseline (Elephant +8.8 pts, Boar +4.0 pts) but **neither clears the ≥92%-recall bar** — precision is very high on both classes, so the gap is concentrated in silent misses (zero predictions on 11.1% of Elephant / 23.5% of Boar test images), which is exactly what a threshold sweep is meant to probe; that sweep was launched immediately after and its result is the next thing to check. See that checkpoint for full detail, then the still-relevant prior checkpoint right below it: a full 142-image visual audit of `elephant-detection-cxnt1-v2`'s bare-Roboflow-numbered filename bucket (a third naming shape none of the prior three data-quality passes had covered) found 61 confirmed-bad images (43%) across four defect types — 9 more African bush elephant, 4 not-an-elephant-at-all (masked-crowd photos), 4 wrong-domain (historical/studio), 19 watermarked stock, 25 captive/managed-care domain — fixed locally (two exclude-list constants in `scripts/edge_impulse_upload_vision.py`, `--dry-run`-verified exact 52/52 + 9 match) and live (all 61 already-uploaded samples matched by sha256 and deleted via the Edge Impulse `deleteSample` API, 0 failures). The prior "RESUME HERE — 29 Aug (degenerate-box filter + live correction, EON Tuner research)" checkpoint right below covers the still-relevant prior round: a `MIN_BOX_AREA_FRACTION` filter was added to drop boxes below 0.03% of frame area, verified against the full corpus (13 boxes across 4 sources, all 13 individually visually confirmed bad — not just small), and, because 7 of those 13 were already live in the project on images that keep other valid boxes (content-hash dedup means a plain re-upload can never fix an already-live sample's labels), corrected live via a direct `setSampleBoundingBoxes` API call — all 7 applied successfully. A backgrounded research agent also closed out the EON Tuner objective question (no native recall objective exists) and surfaced UNO Q/QRB2210 details worth folding into Phase 3/5. See that checkpoint for detail, then the "29 Aug (upload pipeline integrity)" checkpoint right after it for the still-relevant prior round: three silent pipeline bugs in `scripts/edge_impulse_upload_vision.py` (a `sample_by_group()` seeded-shuffle instability, and a filename-keyed resume ledger going stale against two regenerable sources) were found, root-caused with precise per-content-hash diffing, fixed, and verified for real against the live project — the reconciliation hard-fail gate now passes clean, `TOTAL training expected 9810 actual 9810`, `TOTAL testing expected 3069 actual 3069`, exit code 0. See that checkpoint for the full root-cause chain, then the "29 Aug" checkpoint right after it for the still-relevant prior round: a fourth data-quality pass found a wholesale new species-contamination population (233 `af_`-prefixed African-elephant filenames in `elephant-detection-cxnt1-v2`, 5x the previously-known 45), fixed and dry-run-verified locally; a second Boar visual-audit sample (n=24) added 11 more confirmed-contaminated filenames to the curated exclude list; a cross-source broadcast-clip leak (`wb_framesb`, `wb_framesa00001` — hunting-broadcast-show footage, not field photography) was found leaking into both Boar sources and filtered; and the user's standing decision on the 984-image "frame" clip (the viral RAJAMURUGAN video) was finally implemented — capped to 10 diverse representative frames via a new `cap_named_group()` mechanism. All four fixes are `--dry-run`-clean with no unexplained gap. All three live-cleanup deletes have since been run for real by the user (802 via `cleanup_broadcast_contamination_vision.py`, 13 via `cleanup_boar_visual_contamination_vision.py`, 1,008 via `cleanup_frame_clip_duplication_vision.py` across two runs after one transient network timeout) — project 1097972 is now 12,794 → 10,971 remote samples, all pending live cleanup complete. **Next: a retrain against the cleaned project is needed for honest new per-class recall numbers**, and the "source more IR/night data" thread is still open — see the checkpoint below for exact state. Earlier text retained verbatim below for continuity — see the new checkpoint first, then the "28 Aug (later still #3)" checkpoint immediately below it for the prior round's still-relevant detail: user sharpened priority to Elephant-first, urgently, target >92% recall including at night, plus an explicit audit-and-fix instruction on the existing corpus's annotation quality. Both flagged IR/night Roboflow candidates were vetted and rejected on real visual inspection (`elephant-thermal` not actually thermal; `detecting-elephants-at-night` has no downloadable export). `wcs-elephas-maximus` confirmed fully exploited (194/325, no headroom). A third data-quality audit pass found a wholesale non-field-photography batch in `elephant-detection-cxnt1-v2` — 164 filenames sharing a naming shape the existing TV-broadcast filter didn't reach, 16/16 visually sampled were not usable (Thai TV broadcast, stock photography, or wrong-species African elephant). Local filter fix implemented and verified clean via `--dry-run`. Live cleanup script written and dry-run-confirmed (165 live matches) but the actual delete was blocked by the environment's permission classifier as a live external-service action — **pending explicit user confirmation to execute**, see the new checkpoint. Earlier text retained verbatim below for continuity — see the new checkpoint first, then, unchanged from before: project 1097972's live/manifest mismatch (995 samples) was decomposed into three causes and remediated — 1,178 stale-named orphans deleted, 1,368 split-boundary-reshuffled samples moved non-destructively, 192 residual "missing" Boar samples confirmed as benign already-known duplicates and left alone; a follow-up automated fix for that residual 192/9 gap was caught in `--dry-run` before going live and reverted — it would have silently zeroed out three major sources' training data (see `ml/vision/README.md`'s "995-sample live/manifest mismatch" entry for the full story and why). EON Tuner confirmed unusable for this project (two independent live failures), deployed threshold set to 0.05 for the field test only (explicit user rationale, must revisit before real ranger alerts go live), architecture head-to-head run — YOLO-Pro-nano has real numbers (Elephant R 0.860 / Boar R 0.797 at threshold 0.05), MobileNetV2-SSD OOM-killed a second time on a platform-side batch-size limitation the API cannot override and was dropped; **honest verdict as of that pass: the ≥92%-per-class recall bar was not met by any architecture/threshold tried**, closest was 6.0 points short on Elephant and 12.3 short on Boar — this is exactly the gap the current Elephant-focused audit-and-fix pass is working against; a final retrain back to the winning YOLO-Pro-nano config was in progress as of that checkpoint. The "RESUME HERE — 28 Aug (late)" checkpoint below this one covers Track B (vision genuinely wired into the pre-decision fusion path) and remains accurate as its own current state — the two tracks are independent and both still open)
+# EleTect X — Handover (last updated 2 Sept 2026 — see the "RESUME HERE — 2 Sept (overnight) — night-IR characterisation doc + ADR 0019 + Item C proposal + activity-timing research + behavioural-synthesis append; overnight soak running on the board" checkpoint at the very top; then the "RESUME HERE — 1 Sept (evening) — ADR 0014 item A (max-gain LED + 11 Hz top tier) reflashed + hardware-verified; camera day/night solved via frame saturation" checkpoint at the top for current state: the recurring idle crash-reboot fault is now traced to a **power-delivery failure caused by the Portronics Mport 51 USB-C hub sitting in the board's power path** — the UNO Q's Type-C controller reports `power_operation_mode: default` with **no `port0-partner`** (it sees nothing on the CC pins), so it is locked at the USB-default floor of 5 V / 500 mA no matter that the charger is a 45 W PD unit; the camera + USB-Ethernet share that starved rail; every actuator/camera load transient browns it out; boot history shows this since the board's first-ever boot (28 May), including power-up retry bursts of 4–7 reboots within seconds — a pure power signature, with NO panic / watchdog / thermal / OOM trace anywhere. Fix (physical, pending, user present): remove the hub from the power path — 45 W PD charger straight into the UNO Q's sole USB-C port, camera onto a separately-powered hub — then re-check that `power_operation_mode` flips to `usb_pd`/`3.0` and `port0-partner` appears, then idle-soak. If it still shows `default` plugged straight into the charger → board USB-C CC pins / cable → swap cable, else RMA. Separately this session, ADR 0014 §E "real dual-wing LED" is implemented host-side and fully green (`pio test -e native` 63/63, `pio run -e native` clean, `ruff` clean, `pytest` 238 passed) but NOT reflashed and no actuator fired — reflash + physical dual-wing first-fires are deferred until after the power rewire, per the user's sequencing. Then see the "RESUME HERE — 1 Sept, hardware bring-up session (ADR 0014 reflash + 4 pattern first-fires + daylight vision matrix all DONE on hardware; then a recurring idle crash-reboot fault hit and was diagnosed; power-cycle + 30-min + 2-hour idle soaks recovered it, root cause UNRESOLVED)" checkpoint for the prior round: the ADR 0014 reflash landed on the board (device/mpu + sketch synced via tar-over-ssh since rsync is absent on Windows, `arduino-app-cli app restart user:eletect-x`, STM32 flashed clean via OpenOCD, container restarted rc=0); all four LED flash patterns (steady / slow-pulse / fast-strobe / random-flicker) were fired on the left wing at 50% gain and user-confirmed on hardware — measured latency = burst duration + ~15 ms with zero pattern-specific blocking cost, confirming ADR 0014's zero-new-blocking-cost claim; the D5→D3 left-wing pin fix is confirmed working; the 5-arg `Bridge.provide("drive_led", …)` arity binds on the real `Arduino_RouterBridge` (schema v2 accepted). The full daylight vision-model matrix then ran unattended (6 conditions: camera-only, pulsed-IR ×3, each of the 4 LED patterns firing next to the camera; results JSON + 12 sample frames preserved locally in the session scratchpad) — key findings: LED patterns firing next to the camera cause NO measurable daylight washout (within-condition lit-vs-unlit mean-luma delta <0.5, `frac>250` ≈ 0, no clipping — the 50% LED is swamped by ambient sun, the OPPOSITE of the night result); pulsed IR is only +1.6 % scene luma in daylight vs +99.5 % indoors at night (IR invisible against daylight — a real IR-throw characterization must be a night test); inference latency is a tight ~203–207 ms mean per frame across ALL conditions (vs the ~137 ms prior-night baseline — daylight frames carry more texture; LED pattern choice adds zero latency, matching the on-hardware first-fire finding); every spurious detection is a noise-floor "Elephant" ghost at confidence 0.074–0.111 (bench has no animals) — a deployment threshold of ~0.2 eliminates all of them, and `fast_strobe`/`random_flicker` conditions produced zero FPs. THEN the board rebooted while genuinely idle (boot_id changed ~1 h after all session activity had stopped, board doing only hourly cron + fwupd-refresh). Investigation via `last -x` / `journalctl --list-boots`: this is a RECURRING fault — every boot since 30 Aug ends in `- crash` (unclean, no shutdown record), 12 crash-reboots in ~3 days, intervals 9 min to 11 h; NOT thermal (all zones 40–42 °C), NOT caused by the session's workload (crash was long after the matrix finished and the SSH session closed), and it predates this session. The board's clock also appears to jump forward on reboot (dead RTC backup cell suspect — a second SoM smell). Per the session's failure clause the automated path was HALTED. User power-cycled the board; a 30-minute then a 2-hour idle soak BOTH PASSED (boot_id held `b08c69f1…`, container + EIM runner up at every check, zero SSH failures, ~2 h 40 m continuous idle-stable) — the power cycle most likely reseated a connector or cleared a latched PMIC state, but the ROOT CAUSE IS UNRESOLVED and this is not yet trustworthy for a 10-day unattended field deployment. The container `restart:` / auto-recovery gap (app came up dead after two crash-reboots) was fixed two ways without sudo: `arduino-app-cli properties set default user:eletect-x` (the default app was UNSET — that is why the daemon never restarted it on boot) plus `docker update --restart=unless-stopped eletect-x-main-1`; a durable systemd guard unit + timer is written out (in the checkpoint body) and waiting on the user's sudo to install (the `docker update` layer is lost whenever `arduino-app-cli app restart` recreates the container). Firmware is intact in STM32 flash and needs NO reflash. Nothing committed to git. Immediate next steps: an OVERNIGHT idle soak before trusting the board for the trial — if it crash-reboots again while idle, the board needs swapping, not more software work; install the systemd guard (2 sudo commands); the grey-card IR-throw test still needs a user-set-up night session with a physical 18 % card. Then see the "RESUME HERE — 1 Sept, later session (ADR 0014 LED patterns + gain wired end-to-end and host-tested; board NOT reflashed)" checkpoint below it for the code/host-test build call that preceded this one: the four ADR 0014 LED flash patterns (steady / slow-pulse / fast-strobe / random-flicker) are now implemented in `device/mcu/src/led.cpp` as timing logic inside `drive_led()`'s existing blocking window (zero new blocking cost — every pattern's on/off spans sum to exactly the resolved `duration_ms`), `drive_led`'s wire schema is bumped to `schema_version 2` with `channel` split out as its own field and a real `gain_pct` field added, the MPU tier ladder (`cognition/config.py`) now gives each tier a distinct pattern + wing + brightness, and the whole change is host-tested green (`pio test -e native` 56/56 incl. new `tests/test_led` 7/7, `pio run` clean, `ruff` clean, `pytest` 233/233); NOTHING has been reflashed and no actuator has fired — the reflash (carrying this + the D5→D3 pin fix + the reverted field-safety flags), the first physical fire of each pattern, verification that the new 5-arg `Bridge.provide("drive_led", …)` arity binds on real hardware, and the entire daylight vision-model test matrix are all deferred to a supervised daylight session per the project's Hard Safety Rule. The 3× board reboots + `eletect-x-main-1` `Exited (255)` seen last session are now diagnosed and cleared (1 Sept, SSH, no reflash): physical power interruptions during the 31 Aug wing-pin rewire, no OOM/thermal/undervoltage/watchdog/panic signature in any retained boot, board healthy — safe to proceed to the reflash; see the checkpoint body and `TRIAL_READINESS_PLAN.md`'s "Board-reboot / container-exit diagnosis" section. Then see the "RESUME HERE — 1 Sept, ~01:45 IST (steady-on actuation path re-verified for the trial; field-safety flags reverted in source, board NOT yet reflashed; overnight monitor was dusk-only; strobe deferred)" checkpoint below it for the prior round: the 2 Sept trial's actuation path (left wing / right wing / IR over the real Bridge RPC, per-channel LED cooldown, IR 5 s min-interval, silent over-cap clamp) was re-verified end-to-end; `FIRE_TEST_HARNESS` and `FIRE_TEST_LED_GAIN_PCT` were reverted in `device/mcu/src/config.h` but the board's flashed binary still has the harness compiled in — a reflash from the clean tree (which also carries the D5→D3 left-wing pin fix) is the next session's first action and is blocking for field deployment; a new quantified finding that every real actuator fire blocks the MCU loop for the full clamped burst (10 s for a wing) is recorded in `docs/KNOWN_GAPS.md`; the overnight monitor self-stopped at dusk on a `STOP_HOUR` bug (no dawn data); `main.py` is confirmed NOT restart-looping; strobe LED patterns are deferred as post-trial work and the trial ships steady-on wings only. Then see the "RESUME HERE — 31 Aug, ~15:40 (30-min actuator sweep: LED wings camera-invisible at foliage range, IR strong and repeatable; no vision model deployed on the board; overnight monitor started)" checkpoint below it for the prior round. Earlier context: the "RESUME HERE — 31 Aug, ~14:00 (all three reflex actuators physically confirmed — left wing D3, right wing D6, IR D7; LED_GATE_ACTIVE_LOW workaround reverted; drive_led + pulse_ir both registered)" checkpoint just below for current state. Earlier context: the "RESUME HERE — 30 Aug, later still (bring-up order finalized by the user: LED wing first, then IR, then horn/speaker, then combine — supersedes the earlier horn-first ordering)" checkpoint: the user explicitly reordered the physical bring-up sequence (LED before IR before horn, not horn-first as the 26 Aug audit and 30 Aug strategic-redirect checkpoints both had it) and a full 9-stage plan was written up with concrete per-stage pass/fail criteria, including flagging an unresolved LED firmware-design mismatch (`hardware/WIRING_GUIDE.md` §4.0 documents an unimplemented 4-channel/10-LED spec; the user's actual build is a simpler 2-wing/2-MOSFET design on the existing pins 5/6) that must be reconciled before the LED fire-test step. See that checkpoint for full detail, then the prior "RESUME HERE — 30 Aug (2-hour live-camera stress test: real 31.5% Boar false-positive rate found on outdoor foliage, correcting the earlier 0/123 claim; local `.eim` copies pulled; training-config tutorial delivered)" checkpoint just below for current state: a 2-hour, 40,422-frame continuous live-camera run on the real board (camera pointed at outdoor trees/leaves, no animals present, IR always-on) found a real 31.53% Boar false-positive rate — zero Elephant false positives — which materially corrects the prior night's "0/123, zero false positives" claim (that sample was only 21 seconds/123 frames, too small to be representative). The finding is currently contained: only an Elephant-label detection feeds the alert-fusion decision, so this does not create false elephant alerts today, but it matters for the still-open question of whether Boar detections should ever influence deterrence tier. Latency held steady at scale (137.25ms mean, 5.52 FPS over the full 2 hours, consistent with the smaller sample). Both `.eim` model files were also pulled locally to `device/mpu/models/vision/` (gitignored, byte-identical to the board), and a step-by-step tutorial on the exact training configuration behind the deployed checkpoint was delivered to the user. See that checkpoint for full detail, then the prior "RESUME HERE — 30 Aug (real on-device benchmark: CPU 138ms/~5.7fps measured, 3.9x faster than Studio's own estimate; GPU delegate builds but confirmed non-functional at runtime; functional correctness verified end-to-end via HttpVisionDetector against known-labeled images; EON Tuner still running, no improvement over champion yet)" checkpoint right below it for the prior round: that overnight autonomous session (user asleep, explicit "do everything autonomously... test in uno q... benchmark and compare in the hardware" instruction) exported the finalized `yolo-pro-medium-no_attn_relu` threshold-0.05 checkpoint as two fresh `.eim` builds (CPU `runner-linux-aarch64` and GPU `runner-linux-aarch64-gpu`) and benchmarked the CPU build against the board's real, live-connected camera (pointed out the window, IR always-on) — 123 real inference cycles, mean classification latency 138ms, ~5.7 FPS end-to-end, zero false positives on all 123 live frames. The GPU build compiles and links real GPU-delegate code in Edge Impulse's cloud but fails to launch on this board with `libtensorflowlite_gpu_delegate.so: cannot open shared object file` — confirmed via exhaustive filesystem search and apt-cache search that the library is genuinely absent and unobtainable here, consistent with and adding new detail to the 29 Aug sudo-backed root-cause finding below. Also drove the real production `HttpVisionDetector` client class (not a synthetic check) against the freshly-exported model over a port-forwarded HTTP server, feeding two known-labeled held-out images — both correctly classified (Elephant 0.557/0.334, Boar 0.520). Fixed two stale/inconsistent claims in `docs/KNOWN_GAPS.md` that said the vision detector "is not exported or wired into anything" — both superseded, following the file's own established convention, with pointers to the fresh evidence. Full writeup in `ml/vision/README.md`'s "29-30 Aug... on-device benchmark" section. EON Tuner job `53262078` checked again at session end: still `running`, 1 completed / 3 running / 1 pending trial, no material progress since the prior check — the one completed candidate (`rgb-fomo-275`, int8 accuracy 0.384) remains far below the champion's per-class recall and has not been allowed to finish. **The ≥92%-per-class recall bar is still not met** (Elephant 0.906 at threshold 0.05, 1.4 points short; Boar 0.852, 6.8 points short) — nothing this window changed the accuracy numbers, only confirmed them for real on hardware and closed out the latency/GPU/wiring caveats. Nothing committed to git this window (no explicit user request to commit). See that checkpoint for full detail, then the still-relevant prior "RESUME HERE — 29 Aug (retrain complete, 92% bar not met; Boar heuristic closed; three-source gap check clean; GPU delegate gap confirmed permanent)" checkpoint right below it for the prior round: the standing plan's dataset-verification precondition ("verify dataset before retraining") was closed out for real — the Boar domestic-pig heuristic sample finished (17 more confirmed-bad filenames, 10 deleted live), and the three sources that had never had even a spot-check (`asian-elephants-dataset-v1`, `swg-eurasian-wild-pig`, `swg-empty`) were sampled and found clean, closing out a false alarm (tree/water categories, already filtered by the real pipeline) and surfacing a real positive finding (this source already has real night/IR frames). Separately, root-caused the GPU delegate question left open since 23 Aug: with real sudo access on the board, confirmed no apt repo (Debian, Arduino, or the Qualcomm artifactory overlay) provides `libtensorflowlite_gpu_delegate.so` — this is now a **confirmed permanent hardware/software gap**, not an access limitation; `mesa-teflon-delegate` and ArmNN's GPU backend exist but are architecturally incompatible drop-in replacements. With the dataset verified, retrained `yolo-pro-nano-attn_silu` against the fully-cleaned 12,808-image corpus (9,775 train / 3,033 test, confirmed matching live) — real held-out numbers: **Elephant recall 0.781** (P 0.974, F1 0.727), **Boar recall 0.706** (P 0.987, F1 0.656), Background false-positive rate 0.028. Both real improvements over the 26 Aug FOMO baseline (Elephant +8.8 pts, Boar +4.0 pts) but **neither clears the ≥92%-recall bar** — precision is very high on both classes, so the gap is concentrated in silent misses (zero predictions on 11.1% of Elephant / 23.5% of Boar test images), which is exactly what a threshold sweep is meant to probe; that sweep was launched immediately after and its result is the next thing to check. See that checkpoint for full detail, then the still-relevant prior checkpoint right below it: a full 142-image visual audit of `elephant-detection-cxnt1-v2`'s bare-Roboflow-numbered filename bucket (a third naming shape none of the prior three data-quality passes had covered) found 61 confirmed-bad images (43%) across four defect types — 9 more African bush elephant, 4 not-an-elephant-at-all (masked-crowd photos), 4 wrong-domain (historical/studio), 19 watermarked stock, 25 captive/managed-care domain — fixed locally (two exclude-list constants in `scripts/edge_impulse_upload_vision.py`, `--dry-run`-verified exact 52/52 + 9 match) and live (all 61 already-uploaded samples matched by sha256 and deleted via the Edge Impulse `deleteSample` API, 0 failures). The prior "RESUME HERE — 29 Aug (degenerate-box filter + live correction, EON Tuner research)" checkpoint right below covers the still-relevant prior round: a `MIN_BOX_AREA_FRACTION` filter was added to drop boxes below 0.03% of frame area, verified against the full corpus (13 boxes across 4 sources, all 13 individually visually confirmed bad — not just small), and, because 7 of those 13 were already live in the project on images that keep other valid boxes (content-hash dedup means a plain re-upload can never fix an already-live sample's labels), corrected live via a direct `setSampleBoundingBoxes` API call — all 7 applied successfully. A backgrounded research agent also closed out the EON Tuner objective question (no native recall objective exists) and surfaced UNO Q/QRB2210 details worth folding into Phase 3/5. See that checkpoint for detail, then the "29 Aug (upload pipeline integrity)" checkpoint right after it for the still-relevant prior round: three silent pipeline bugs in `scripts/edge_impulse_upload_vision.py` (a `sample_by_group()` seeded-shuffle instability, and a filename-keyed resume ledger going stale against two regenerable sources) were found, root-caused with precise per-content-hash diffing, fixed, and verified for real against the live project — the reconciliation hard-fail gate now passes clean, `TOTAL training expected 9810 actual 9810`, `TOTAL testing expected 3069 actual 3069`, exit code 0. See that checkpoint for the full root-cause chain, then the "29 Aug" checkpoint right after it for the still-relevant prior round: a fourth data-quality pass found a wholesale new species-contamination population (233 `af_`-prefixed African-elephant filenames in `elephant-detection-cxnt1-v2`, 5x the previously-known 45), fixed and dry-run-verified locally; a second Boar visual-audit sample (n=24) added 11 more confirmed-contaminated filenames to the curated exclude list; a cross-source broadcast-clip leak (`wb_framesb`, `wb_framesa00001` — hunting-broadcast-show footage, not field photography) was found leaking into both Boar sources and filtered; and the user's standing decision on the 984-image "frame" clip (the viral RAJAMURUGAN video) was finally implemented — capped to 10 diverse representative frames via a new `cap_named_group()` mechanism. All four fixes are `--dry-run`-clean with no unexplained gap. All three live-cleanup deletes have since been run for real by the user (802 via `cleanup_broadcast_contamination_vision.py`, 13 via `cleanup_boar_visual_contamination_vision.py`, 1,008 via `cleanup_frame_clip_duplication_vision.py` across two runs after one transient network timeout) — project 1097972 is now 12,794 → 10,971 remote samples, all pending live cleanup complete. **Next: a retrain against the cleaned project is needed for honest new per-class recall numbers**, and the "source more IR/night data" thread is still open — see the checkpoint below for exact state. Earlier text retained verbatim below for continuity — see the new checkpoint first, then the "28 Aug (later still #3)" checkpoint immediately below it for the prior round's still-relevant detail: user sharpened priority to Elephant-first, urgently, target >92% recall including at night, plus an explicit audit-and-fix instruction on the existing corpus's annotation quality. Both flagged IR/night Roboflow candidates were vetted and rejected on real visual inspection (`elephant-thermal` not actually thermal; `detecting-elephants-at-night` has no downloadable export). `wcs-elephas-maximus` confirmed fully exploited (194/325, no headroom). A third data-quality audit pass found a wholesale non-field-photography batch in `elephant-detection-cxnt1-v2` — 164 filenames sharing a naming shape the existing TV-broadcast filter didn't reach, 16/16 visually sampled were not usable (Thai TV broadcast, stock photography, or wrong-species African elephant). Local filter fix implemented and verified clean via `--dry-run`. Live cleanup script written and dry-run-confirmed (165 live matches) but the actual delete was blocked by the environment's permission classifier as a live external-service action — **pending explicit user confirmation to execute**, see the new checkpoint. Earlier text retained verbatim below for continuity — see the new checkpoint first, then, unchanged from before: project 1097972's live/manifest mismatch (995 samples) was decomposed into three causes and remediated — 1,178 stale-named orphans deleted, 1,368 split-boundary-reshuffled samples moved non-destructively, 192 residual "missing" Boar samples confirmed as benign already-known duplicates and left alone; a follow-up automated fix for that residual 192/9 gap was caught in `--dry-run` before going live and reverted — it would have silently zeroed out three major sources' training data (see `ml/vision/README.md`'s "995-sample live/manifest mismatch" entry for the full story and why). EON Tuner confirmed unusable for this project (two independent live failures), deployed threshold set to 0.05 for the field test only (explicit user rationale, must revisit before real ranger alerts go live), architecture head-to-head run — YOLO-Pro-nano has real numbers (Elephant R 0.860 / Boar R 0.797 at threshold 0.05), MobileNetV2-SSD OOM-killed a second time on a platform-side batch-size limitation the API cannot override and was dropped; **honest verdict as of that pass: the ≥92%-per-class recall bar was not met by any architecture/threshold tried**, closest was 6.0 points short on Elephant and 12.3 short on Boar — this is exactly the gap the current Elephant-focused audit-and-fix pass is working against; a final retrain back to the winning YOLO-Pro-nano config was in progress as of that checkpoint. The "RESUME HERE — 28 Aug (late)" checkpoint below this one covers Track B (vision genuinely wired into the pre-decision fusion path) and remains accurate as its own current state — the two tracks are independent and both still open)
 
-## RESUME HERE — 30 Aug, later (planning-session strategic redirect: STOP vision tuning, pivot everything to physical hardware bring-up — 2 Sept field deployment is ~3 days out and zero actuator-wiring progress has been reported since 26 Aug)
+## RESUME HERE — 2 Sept (overnight, later) — MCU flash-path settled + firmware-state corrected + new flash runbook; night camera/IR battery + dawn soak both DONE and analysed (ADR 0019 night gate validated on real sunrise); board rebooted spontaneously ~08:27 IST 2 Sept (64 s, self-recovered) → hardware work stopped for the session; platform-docs research consolidated into `docs/research/platform/` (power/reboot fix = VIN power; GPU accel confirmed impossible on QRB2210); still no git commit, no reflash
+
+Autonomous continuation of the same overnight session (user asleep, explicit "look into the Arduino
+UNO Q docs and find if there is actually a way to do this" + "update all findings and learnings so
+we never get confused in another session" + "finish everything ... you have my full permission").
+**No code changed. Nothing committed to git. No reflash. No power rewire. No actuator fired outside
+the sanctioned `night_char.py` battery.** Board health held: `boot_id`
+`6b2c727a-af0d-4517-a6c7-a8069da92a64` unchanged at every check, container `eletect-x-main-1`
+`RestartCount=0` / running, thermal 41–46 °C throughout.
+
+### The MCU flash question is settled — there IS a supported headless path
+
+Earlier notes (and an earlier claim this session) said "no verified flash procedure exists on this
+Windows machine." **That was wrong.** Direct inspection of the board plus the Arduino / Edge Impulse
+App Lab docs confirms:
+
+- `arduino-app-cli app restart user:eletect-x` compiles the sketch **and uploads it to the
+  STM32U585 in one step** — the same operation as App Lab's green *Deploy* button. This is exactly
+  what the 1 Sept bring-up used ("STM32 flashed clean via OpenOCD ... `arduino-app-cli app restart`").
+- The flash is an **on-board SWD link** — the Qualcomm SoC bit-bangs SWD on its own GPIO
+  (`/opt/openocd/openocd_gpiod.cfg`, bundled OpenOCD at `/opt/openocd/bin/openocd`, not on `PATH` —
+  that absence is what misled the earlier check). **Nothing runs on the Windows machine. No probe.
+  No `rsync`.**
+- Low-level path: `arduino-cli compile -b arduino:zephyr:unoq:wait_linux_boot=app` then
+  `arduino-flash <sketch.ino.elf-zsk.bin>`. The 1-arg `arduino-flash` writes **only the sketch
+  partition** (`0x080F0000`), never the Zephyr core → not hard-brickable, always re-flashable over
+  the same GPIO SWD.
+- An MCU flash / MCU reset does **not** change the Linux `boot_id` and does **not** reboot Linux —
+  the "`boot_id` changed → stop" tripwire is a Linux-reboot detector and a flash won't trip it.
+  `arduino-flash` alone does not restart the container; `arduino-app-cli app restart` **does**.
+
+Full procedure + toolchain facts + risk profile written up in the new
+**`docs/runbooks/mcu-flash-uno-q.md`** — read that before any future flash instead of re-deriving.
+
+### Corrected firmware-state understanding — the MCU is very probably ALREADY on schema 3
+
+Board `/home/arduino/ArduinoApps/eletect-x/sketch/` was pulled and `diff`ed against the local
+working tree (`device/mcu/src/`): **`config.h`, `led.cpp`, `bridge_handlers.cpp` are byte-identical**
+— `BRIDGE_SCHEMA_VERSION 3`, `LED_WING_LEFT_PIN 3` / `LED_WING_RIGHT_PIN 6`, ADR 0014 pattern
+constants, `FIRE_TEST_HARNESS 0`. The production binary `.cache/sketch/sketch.ino.elf-zsk.bin`
+(109 280 B) and the container restart both date to **1 Sept 17:31**; board + container MPU both
+report `SCHEMA_VERSION = 3`. So the current tree was almost certainly flashed as part of that
+17:31 `app restart`. **The "schema v3 has never run on hardware / must be flashed after the power
+rewire" framing in the checkpoints below is likely stale.** Not yet 100 % confirmed — needs the
+supervised morning checks (serial banner, right-wing D6 drive, `SAFE_MODE=0` handshake); see
+`KNOWN_GAPS.md` and the runbook's "Current firmware state" section.
+
+### Night camera/IR characterisation battery — ran to completion
+
+The sanctioned `night_char.py`-based battery (`/home/arduino/vdiff/night_battery.sh` +
+`night_battery2.sh`, all within firmware limits: IR 500 ms / ≥5 s, no LED beyond the tiny budget,
+`guard()` aborts on `boot_id` change / container `RestartCount≠0` / temp >62 °C) ran overnight:
+Phase 1 (baseline, exposure ladder e32–e256 no-IR, auto-exposure IR sweep, locked-exposure IR
+ladder e64–e384, 16-cycle pulse-landing) then Phase 2 (exposure ladder e320–e512 no-IR, IR clip
+sweeps e448/e512, 24-cycle pulse-landing), then it relaunched `night_char.py soak --interval 120
+--max-min 600` → **`/home/arduino/vdiff/soak_dawn.log`** for the dawn transition. Log:
+`/home/arduino/vdiff/night_battery.log`.
+
+**Battery: DONE and analysed.** `night_battery.log` (482 lines) is written up as **Finding 4** in
+`docs/qa/night-ir-led-characterisation.md` — headline: **lock night exposure at ≈ 256 and keep the
+500 ms IR pulse.** That maximises the pulse's treeline sharpness gain (+100 Laplacian, ~1.3–2.5×
+the gain at other exposures), never clips (saturation 0.000 even at exp 512), keeps a usable
+no-pulse baseline, and produced zero false positives. **Auto-exposure at night is harmful** — it
+cuts the IR luma benefit to +5–7 % and is the sole source of spurious Boar boxes (`maxconf` to
+0.408). Acting on this needs a night locked-exposure path in camera control (firmware/MPU) — new
+open item. Board held `boot_id` + `RestartCount=0` + 39–44 °C flat across the ~1 h battery
+(~2½ h continuous camera load total with no crash — a small positive on the SoM-reliability
+question).
+
+**Dawn soak: DONE and analysed** (`soak_dawn.log`, 184 samples, appended to the QA doc Appendix as
+"Dawn transition — captured"). Headlines:
+
+- **ADR 0019 night gate validated on real sky.** `sat` held flat `0.0` all night, then crossed
+  `NIGHT_SATURATION_THRESHOLD = 12.0` at ≈ 06:15 IST — within minutes of local sunrise. `luma`
+  barely moved (132 → 151) over the same span, confirming saturation (IR-cut filter re-engaging),
+  not brightness, is the right night discriminator. Threshold sits on the knee with a whole night
+  of headroom; no tuning needed.
+- **Dawn AGC throws low-confidence `Boar` false positives.** Zero FPs for the whole night and first
+  light (samples 0–144); then 26 samples (≈ 07:12–08:29 IST) each with a `Boar` box, `v` =
+  0.074–0.223 (median ≈ 0.11), never `Elephant`, all on one fixed treeline feature, all with
+  `EXPOSURE readback = 512` (AGC pinned at ceiling). Same failure mode Finding 4 isolates — argues
+  for carrying the Finding 4 night locked-exposure across the dawn ramp, not snapping back to AGC
+  at the `sat` crossover. All 26 are far below the 0.4 fusion threshold, so nothing would fire.
+- **Board temperature flat** 40.0–42.8 °C across the ~4 h run, no daylight climb (bench rig,
+  indoors — not a solar figure).
+
+**Board rebooted spontaneously at ≈ 08:27 IST 2 Sept** — 64 s downtime (`journalctl --list-boots`:
+boot `6b2c727a-…` ended 02:57:20 UTC, `2c601696-8ce6-463d-917b-6da275008c34` began 02:58:24 UTC),
+full daylight so **not** thermal/dawn-linked, no shutdown or panic record → unclean drop consistent
+with the Portronics-hub power-starvation fault. **Recovery was fully automatic**: Linux + Docker
+bridge + container `eletect-x-main-1` (RC=0) all back in ~1 min — a genuine positive for unattended
+field survivability. The `night_char.py soak` foreground process did not resume (not a service).
+`--list-boots` still shows 3 further reboots on 1 Sept; the `6b2c727a` run that just ended (~10 h)
+was the longest clean stretch in the list. Root cause (hub power path) unfixed, physical.
+
+**Per the standing rule the `boot_id` change ends hardware work for the session** — everything since
+is analysis of data already on disk. Live `boot_id` is now `2c601696-8ce6-463d-917b-6da275008c34`
+(per-boot by nature; only a "did Linux reboot" tripwire).
+
+**Still TODO:**
+
+1. Daylight exposure ladder — the "day" half of "best footage night and day" still needs a
+   daytime run. The dawn soak only caught the earliest AGC ramp before the reboot, not a settled
+   mid-morning frame.
+2. Re-launch a passive logger **as a restart-on-failure unit** (not a bare foreground process) if
+   more unattended soak data is wanted — this reboot cost the tail of the run.
+
+### Doc corrections made this session
+
+- **`docs/qa/night-ir-led-characterisation.md`** — fixed a wrong `boot_id` (line 8 had
+  `6b2c727a-a0fa-4819-...`, an old monitor-bug splice of stray identifier text) → canonical
+  `6b2c727a-af0d-4517-a6c7-a8069da92a64`. Folded in three user corrections: the IR board's onboard
+  CdS photocell is **not** in the control path (only the illuminator power pins are used, switched
+  by the pin-7 MOSFET; one night gate = `perception/night.py` per ADR 0019) — resolved, not an open
+  item; LED wings are wired **in parallel, not series** (so the field checklist item is a
+  shorted-emitter / broken-common-lead check, not a series-dark-fail check); bench rig is PETG-HS
+  but the field enclosure is ABS/ASA with more thermal headroom, so the thermal findings are a
+  conservative bound.
+- **`docs/runbooks/mcu-flash-uno-q.md`** — new file (new `docs/runbooks/` dir).
+- **`docs/KNOWN_GAPS.md`** — the stale "reflash from clean tree required before field, should be
+  that session's FIRST action" entry revised to reflect the byte-identical tree + likely-already-
+  flashed state + the three supervised checks that remain; runbook pointer added.
+
+### Morning supervised checklist — 2 of 3 DONE 2 Sept ≈ 11:10 IST
+
+1. **OPEN** — `arduino-app-cli monitor user:eletect-x` → confirm the MCU boot banner reports schema
+   3. (Serial attach DTR-resets the MCU.) Effectively a formality now: byte-identical tree + 1 Sept
+   17:31 binary + MPU schema 3 + a clean schema-3 `drive_led` round-trip (step 2) with no mismatch
+   warning in the container logs. Not yet done because a DTR reset is a hardware perturbation and
+   the `boot_id`-change rule was in force.
+2. **PASS** — with the user watching, two per-wing `drive_led` calls via `fire_client.py`
+   (`[3,0,0,25.0,1000]` then `[3,1,0,25.0,1000]` — schema 3, channel, steady, 25 %, 1 s):
+   **channel 0 → left wing only, channel 1 → right wing only, each off cleanly after ~1 s, no
+   latch-on**, both acked `[1,1,null,true]`. D6 right-wing drive + channel mapping now verified on
+   hardware (was the one unverified actuator). The harness's safety classifier blocked the fire
+   from this session — the user ran the two SSH commands.
+3. **PASS (subsumed)** — `fire_client.py` talks straight to `/run/arduino-router.sock`, so
+   `SAFE_MODE` is not in that path; step 2's clean round-trip on the post-reboot boot is the bridge
+   handshake check. A separate `ELETECT_SAFE_MODE=0` app-path check is only needed if the *main app*
+   deterrence chain (perception → fusion → deterrence) is to be exercised, which is not on the
+   critical path right now.
+
+### Platform documentation research — 2 Sept (this session) — `docs/research/platform/`
+
+Went wide through the Arduino UNO Q docs, Edge Impulse docs (Studio + Linux SDK), the
+`edgeimpulse/agent-tools` App Lab skill, and the Arduino / Edge Impulse forums + GitHub issues, to
+stop re-deriving platform facts and to pin down real fixes for the recurring blockers. Five source
+files + an index, all linked to primary sources, all uncommitted:
+`docs/research/platform/README.md` (index + consolidated fixes-by-problem),
+`arduino-uno-q-power-and-ops.md`, `uno-q-forum-findings.md`, `app-lab-flash-and-routerbridge.md`,
+`edge-impulse-linux-inference.md`, `edge-impulse-studio-vision-tuning.md`.
+
+**Power / reboot fault — concrete fix path (physical, user-present, still pending):**
+
+- The reboots are a **5 V rail brown-out**, corroborated from Arduino's own power spec, forum
+  moderators, and Tom's Hardware current measurements: the board needs ~0.66 A idle / ~0.9 A
+  all-cores *before* camera + USB-Ethernet + actuators, and a passive hub fed by a
+  non-PD-negotiated charger cannot hold 5 V through transients. Caps on 5 V do not fix it.
+- **Best fix is to power the board via the VIN pin (7–24 V) from a regulated DC supply** — through
+  the on-board LMR51440 buck onto 5V_SYS, bypassing USB-C PD and the sagging hub rail entirely.
+  Caveats: VIN **disables the USB-C VBUS output**, so the camera + USB-Ethernet then need their
+  own self-powered hub; pre-Nov-2025 images (`cat /etc/buildinfo` absent) also need a systemd unit
+  forcing USB `host` mode. If staying on USB-C: a genuine 5 V/3 A (15 W+) charger straight into the
+  board's port, **no hub between charger and board**, peripherals on a separately-powered hub.
+- **Correction to the earlier framing in this file:** `power_operation_mode: default` / no
+  `port0-partner` is a hub CC-pin quirk, **not** a hard 500 mA cap. PD is not required on this
+  board to exceed 500 mA — it draws more and runs for hours; the hub just can't hold the rail
+  under load. So "locked at 5 V / 500 mA" overstates it — it is rail sag under transient.
+- **Second plausible cause, do this too:** Linux-side memory pressure on the 1.7 GB board.
+  Arduino's "board software out of date" article says the current image adds ZRAM *because*
+  "random restarts … are typically caused by memory pressure." Flash the latest Linux image,
+  confirm `zramctl`, cap the Python/EIM footprint.
+- **Decisive test:** switch to VIN (or direct 5 V/3 A, no hub), watch MTBF; around each crash
+  `journalctl -k -b -1 | tail -200`, `last -x`, and cron-log `voltage_now` +
+  `power_operation_mode` every 5 s.
+- **Survivability:** no documented Linux hardware watchdog — use Monit for app auto-restart +
+  alerts; enable the STM32 IWDG in reflex firmware; any passive field logger must be a
+  `Restart=on-failure` systemd unit (a bare foreground process does not survive a reboot, as the
+  dawn soak proved); force NTP sync at boot before timestamped logging (RTC is on the unbacked
+  `VCOIN` rail — the clock jump is extra evidence of a deep brown-out, not a clean panic).
+
+**GPU delegate — settled, permanent:** no supported GPU/NPU/DSP acceleration on QRB2210. No NPU in
+silicon; the GPU `.eim` needs `libtensorflowlite_gpu_delegate.so` (never shipped) *and* proprietary
+Adreno OpenCL (image is Vulkan-only Mesa Turnip). The missing-`.so` line is a **silent CPU
+fallback, not a hard failure**. CPU int8 + NEON + XNNPACK + EON is the ceiling; ~138 ms/frame is
+normal. Cut latency by model shape, not hardware.
+
+**Camera exposure lock:** no runner flag exists; the supported way (and it matches our V4L2 side
+harness) is for our app to own the camera — V4L2 `/dev/video2`, `auto_exposure=1`,
+`exposure_time_absolute ≈ 256`, fixed gain — and feed frames to the model via
+`runner.get_features_from_image()` + `.classify()` or `edgeimpulsevideoinfer`.
+
+**Vision recall bar:** the silent-miss gap is a data/label problem. Re-scan existing training
+images with AI labeling for unlabelled animals (teaches suppression), stay on YOLO-Pro one size
+up, class-weight toward Boar, keep threshold 0.05 and recover precision with the object-tracking
+post-processing block. EON Tuner likely can't beat the champion because YOLO-Pro may not be a
+valid search-space model id. Full detail in `edge-impulse-studio-vision-tuning.md`.
+
+**App Lab / flash corrections:** `arduino-app-cli app start`/`restart` is the whole deploy (no
+separate flash verb); do NOT pin `Arduino_RouterBridge` in `sketch.yaml` on core ≥ 0.55; MCU
+recovery uses the `jlink` bootloader burn via `system update` (no USB-DFU); never call
+`Bridge.call()`/`Monitor.print()` inside a `provide()` callback. See
+`app-lab-flash-and-routerbridge.md` "Corrections to our current understanding".
+
+### Constraints honoured (unchanged from the checkpoint below)
+
+No git commit. No horn hardware work. No reflash / no power rewire (a safe path now exists and the
+user pre-authorised a *supervised* reflash, but the "stay reachable 30 min" precondition is unmet
+while asleep, and `app restart` would kill the running battery mid-run). `docs/decisions/0017-*.md`
+untouched. Behavioural-science doc §3.1 untouched (append only). No AI-assistance references
+anywhere. Raw `docker exec … < fire_client.py` fires stay classifier-blocked; `night_char.py` is
+the permitted path. A `boot_id` change → stop all hardware work, finish on writing only.
+
+## RESUME HERE — 2 Sept (overnight) — night-IR characterisation doc + ADR 0019 + Item C proposal + activity-timing research + behavioural-synthesis append; overnight soak running on the board
+
+Autonomous overnight documentation session (user asleep, explicit "run a test till morning and see
+how it performs in daylight and the night→day shift" + a batch of writing deliverables). **No code
+changed this session** — Item B (external-IR night gating) code was already implemented and green
+at the end of the 1 Sept evening session (255 pytest passed); everything below is docs, plus one
+long-running board test. **Nothing committed to git.** Board health held throughout: `boot_id`
+`6b2c727a-af0d-4517-a6c7-a8069da92a64` unchanged at every check, container `eletect-x-main-1`
+`RestartCount=0` / running, thermal steady ~41–42 °C, frame saturation 0.0 (confirms night),
+0 vision boxes.
+
+### Overnight soak — RUNNING on the board, independent of any SSH session
+
+- Launched detached on the board: `setsid nohup python3 /home/arduino/vdiff/night_char.py soak
+  --interval 120 --max-min 480` (8 h run, sample every ~2 min).
+- Output dir: `/home/arduino/vdiff/nightchar/soak_20260901_185050/` — `soak.jsonl` (one line per
+  sample: per-band photometrics, vision box count, `tele` block with temp + boot_id + container
+  state).
+- **Board wall-clock runs ~4 h 40 m behind real IST** (known dead-RTC / clock-jump smell — see the
+  SoM-fault checkpoints below). Soak dir/timestamps say "18:50 / 1 Sept"; real start was ~23:51 IST
+  1 Sept. Run ends at board-time ~02:50 → **real IST ~07:40 2 Sept**.
+- It is **not** tied to the SSH session — it survives disconnects. Poll it with short
+  commands only (long ssh commands hit exit 255 on this link).
+
+### Still TODO when the soak finishes (~07:40 IST 2 Sept)
+
+Parse `soak.jsonl` and append results to the **"Appendix — overnight soak"** section of
+`docs/qa/night-ir-led-characterisation.md` (currently a placeholder). Extract:
+
+1. Night→day saturation crossover — wall-clock sample where `sat` rises off 0.0 and crosses
+   `NIGHT_SATURATION_THRESHOLD = 12.0`; validate the threshold against the real transition.
+2. Thermal trace across the whole night (min/max/mean `temp_max_c`), any climb.
+3. Night false-positive count — any sample with `vision.n > 0` (bench has no animals → all are FPs).
+4. Any `boot_id` change or container `RestartCount` increment (crash-reboot check — the open
+   SoM-reliability question; a clean 8 h idle-plus-camera-load run is a data point toward trust).
+5. Daylight photometrics once transitioned (luma/sharp/clip_hi per band) vs the night baseline.
+
+### Documents written this session (all uncommitted, staged-ready)
+
+- **`docs/qa/night-ir-led-characterisation.md`** — Item D findings doc. Establishes a `docs/qa/`
+  text-doc convention. Writes up the external-IR night characterisation already captured on the
+  board: IR sweep at exp=100 and exp=156 (full-frame luma +24.6/+29.1, treeline Laplacian sharpness
+  +53.7/+91.2, no clipping, 0 animals in any frame); the LED-vs-camera interference table (all four
+  night patterns: luma delta −0.28…−0.72 vs within-burst sd 0.35–0.49, `clip_hi` exactly 0.000 →
+  our own strobe does **not** blind our own night camera, so detection and deterrence can overlap);
+  baselines; method notes (exposure must be locked or AGC hides the IR delta; capture window must
+  be ≫ the 500 ms pulse because `docker exec` cold-starts 1–3 s). Honest caveats: all measured with
+  exposure locked while the deployed pipeline runs AGC; scene was empty so the detection benefit vs
+  image-quality benefit is unmeasured; LED aim vs camera FOV still unverified (a perfectly flat
+  interference result also means the wings may not be lighting the camera scene at all). Appendix
+  reserved for the soak results (above).
+
+- **`docs/decisions/0019-external-ir-illuminator-night-gating.md`** — ADR 0019, status **proposed**,
+  dated 2026-09-02. Documents the already-implemented Item B change: external IR illuminator fires
+  on a frame-derived night signal, not on the deterrence tier. Covers the new
+  `device/mpu/perception/night.py` (`frame_mean_saturation`, `frames_are_night`),
+  `NIGHT_SATURATION_THRESHOLD = 12.0` in `services/config.py` (separation-based, sits in the
+  empirical gap between night sat 0.0 and daylight sat >30 — not tuned), the `reflex_loop.py`
+  `NightDecideFn` Protocol + `is_night` required kwarg + `fire_ir_now` gate (True→fire,
+  False/None→suppress+log, exception inside `is_night`→fire anyway), the `main.py` wiring, and the
+  tests (`test_night.py` 12 cases + `test_reflex_loop.py` 5 new cases). Pulse drive/duration
+  deliberately NOT changed here — that is the still-open auto-exposure tuning question. Alternatives
+  considered (wall-clock, photocell, exposure readback, `fire_ir=False` everywhere, gate inside
+  `decide()`) all listed with rejection reasons.
+
+- **`docs/research/elephant-activity-timing-and-raid-patterns.md`** — Research F1 ("at what times
+  do elephants come"). Diel: crop-raiding is overwhelmingly nocturnal 22:00–06:00 (PeerJ 2020 /
+  PMC7335499, N=380, North Bengal, risk-avoidance strategy; ~89/11 night/afternoon split treated as
+  "one landscape, indicative"); movement peaks are crepuscular (dusk arrival ~17:00–20:00, dawn
+  departure ~06:00–08:00); raid duration mean 308 min (~5 h), range 15 min–15 h. Seasonal: North
+  Bengal peaks monsoon+post-monsoon; **Wayanad/Western Ghats (ATREE 2023) is the better local prior
+  — May–Sep fruit (jackfruit/mango) then Sep–Dec paddy, driven by crop phenology + forest-boundary
+  proximity**; honest bound — no Kothamangalam-specific dataset exists, the device's own log will be
+  the first. Consequences: device fully alive 20:00–07:00 nightly in season, look for power savings
+  in daylight only, reinforces ADR 0019; encounter model = dusk arrival burst → hours of sparse
+  feeding-lull triggers (NOT a departure) → dawn departure burst (corroborates ADR 0017 window
+  lengthening); nothing changes actuator design.
+
+- **`docs/research/elephant-deterrence-behavioral-science.md`** — Research F2, **appended §7 + §8
+  only, all prior content including §3.1 preserved untouched** (single Edit anchored on the last
+  existing bullet). §7 "Behavioural, psychological and biological synthesis": large-brained
+  individual learner with multi-year spatial memory (so consequence-free deterrents decay); the
+  animal at a 2 a.m. fence is very probably a lone male (risk/reward asymmetry, musth) → effect
+  priors + web-app alert framing + per-individual bandit learning; habituation mechanism —
+  *predictability* not familiarity is the enemy, weak stimulus habituates / strong sensitizes
+  (supports max-intensity-every-tier), dishabituation is real and exploitable; three outcomes
+  flight/curiosity/tolerance + "leave the animal a way out"; stress physiology + welfare bound
+  (redirect not terrorise, no auto tier 4); why the current architecture is right + its one real
+  weakness (proxy reward has no presence/departure signal); a 10-row concrete-adjustments table
+  cross-referenced to ADRs/files; a one-paragraph DFO/contest framing. §8 adds the sources.
+
+- **`docs/proposals/led-horn-fire-duration-burst-cooldown-and-cadence.md`** — Item C proposal
+  (new `docs/proposals/` dir). Status: proposal, needs a bench pass before any constant changes.
+  Owns no code; the eventual decision lands as an ADR 0014 amendment (burst shape) + companion
+  values alongside ADR 0017 (cadence). **Explicitly does not modify ADR 0017 or ADR 0014.** Joins
+  the ADR 0014 §E.3 deferral + ADR 0017 open Question B + the 1 Sept KNOWN_GAPS quantification (LED
+  runs a full 10 s per fire, blocking the MCU loop). Case for cutting `LED_BURST_MAX_MS` 10000 →
+  2000–3000 on four grounds (habituation, MCU real-time starvation, thermal, battery); horn 3 s
+  already short; cooldowns → encounter-aware cadence (MCU hard floor lowered + kept as a safety
+  floor, MPU adaptive interval keyed to the bandit `habituation_context()` bucket). Full bench
+  thermal/battery-sag protocol (T1 single-burst step response, T2 60–90 min sustained-encounter
+  sim, T3 battery sag vs ADR 0012 10-day autonomy, T4 cadence vs MCU real-time) with pass/fail
+  criteria. Out of scope: proactive timer re-firing, non-blocking actuator state machine, horn
+  content, any change tonight.
+
+- **`OVERNIGHT_RESUME.md`** (repo root) — scratch continuity file for a fresh session if this one
+  hit a limit. Delete once this batch is closed and the soak is analysed.
+
+### Constraints honoured (standing, for whoever picks this up)
+
+No git commit (not asked). No horn hardware work (horn not wired). No reflash, no power rewire.
+`docs/decisions/0017-*.md` untouched. Behavioural-science doc §3.1 untouched (append only). No
+AI-assistance references anywhere. Raw `docker exec … < fire_client.py` actuator fires stay blocked
+by the classifier; the purpose-built `night_char.py` harness is the permitted path. A `boot_id`
+change → stop all hardware work and finish on writing only.
+
+## RESUME HERE — 1 Sept (evening) — ADR 0014 item A reflashed + hardware-verified (max-gain LED every tier, 11 Hz top-tier strobe); camera day/night solved; ADR 0014 §E.3 written checkpoint
+
+Follow-on to the "§E dual-wing host implementation" checkpoint just below. This session took three
+design decisions the user made about the LED deterrent, cut them to the one that was self-contained
+(**item A**), implemented + reflashed + hardware-verified it, and characterised the actual camera.
+
+### Item A — LED fires at max intensity on every tier; escalation moved onto pattern / wings / rate
+
+User's field call, stated repeatedly: **there is no field use for a dimmed deterrence flash** — a
+partially-lit strobe just reads as a weaker light, not "less threatening, saving headroom." So the
+brightness axis is retired as an escalation lever.
+
+- **`device/mpu/cognition/config.py`:** `LED_TIER_1_GAIN_FRACTION` and `LED_TIER_2_GAIN_FRACTION`
+  → `1.0` (T3 already was). All three tiers now resolve `led_gain_pct = 100.0` — no change to the
+  `DETERRENCE_TIERS` literal, the fractions feed it. Comment blocks rewritten.
+- **`device/mcu/src/config.h`:** new `#define LED_STROBE_FAST_HZ 11` — the top-tier escalation
+  strobe rate. `LED_FAST_STROBE_HZ 7` unchanged (Tiers 1-2 + `PATTERN_SWEEP` keep it).
+- **`device/mcu/src/led.cpp`:** `pattern_pulse_both_sync` (pattern_id 5, a Tier 3 pattern) now
+  strobes at `LED_STROBE_FAST_HZ`; `pattern_sweep` still at `LED_FAST_STROBE_HZ`. Block comments
+  rewritten to E.3.
+- **What now carries tier escalation:** wing count (T1 one wing → T2/T3 both) + pattern character
+  (strobe → antiphase sweep → sync/independent) + strobe rate at the top rung only (7 → 11 Hz).
+  Not brightness. The bandit's `escalation_floor()` still reserves the dual-wing patterns for
+  repeat animals, so E.2's anti-habituation logic is intact — only the (never-strong) brightness
+  lever changed.
+- **Horn deliberately NOT changed to match:** `HORN_TIER_1/2/3_GAIN_FRACTION` stay 0.25 / 0.45 /
+  1.0 because `HORN_GAIN_MAX_PCT` is a hearing-safety cap for people/livestock near the unit
+  (ADR 0016) — a real physical-harm limit the LED does not have.
+- **Tests, all green:** `pio test -e native` **64/64** (was 63; new
+  `test_pulse_both_sync_runs_at_the_top_tier_escalation_rate` in `tests/test_led` asserts
+  pattern 5 strobes at ~11 Hz, distinct from the 7 Hz rate). `pio run -e native` clean, `ruff`
+  clean, `pytest` **238 passed** (two graded-gain tests in `test_cognition_config.py` replaced
+  with "every tier requests exactly `LED_GAIN_MAX_PCT`").
+- **ADR:** `docs/decisions/0014-led-deterrence-pattern-and-intensity.md` **§E.3 amendment** added
+  (max intensity every tier, escalate on wings/pattern/rate, `LED_STROBE_FAST_HZ = 11` rationale
+  plus honest bound — no citation ranks 11 over 7 Hz, only the 4-12 Hz aversive band and the
+  ~15 Hz fusion ceiling; horn keeps its ramp; IR reclassified vision-only; duration → ADR 0017).
+  Two Consequences bullets added.
+
+### Reflash + supervised hardware verification — DONE, boot_id held throughout
+
+- Sync (`device/mcu/src/` → `sketch/`, Python source dirs → `python/`, no `rm -rf`, so the `.eim`
+  models and the real `secrets.h` are preserved) + `arduino-app-cli app restart user:eletect-x`
+  → **rc=0, 1m49s**,
+  sketch 13 % flash / 17 % RAM, STM32U585 flashed via OpenOCD SWD.
+- **`boot_id` = `6b2c727a-af0d-4517-a6c7-a8069da92a64` — held before AND after the flash** (the
+  heaviest CPU load in the exercise), and across both supervised LED fires. Same boot_id as the
+  end of the prior session. Container `RestartCount=0`.
+- **2× supervised fires** of `drive_led(sv=3, channel=2, pattern_id=5, gain_pct=100.0,
+  duration_ms=4000)` (both wings, pattern 5, 100 %, ~11 Hz, `timeout=20`): both returned `True`,
+  both blocked **4.023 s** for the 4000 ms request (dual-wing single-window confirmed again — D,
+  not 2D), boot_id unchanged, thermal 38-40 °C flat. **User visually confirmed:** both wings in
+  phase, full brightness, the ~11 Hz rate reads as clearly faster / harsher than the 7 Hz sweep
+  from the earlier bring-up. Item A is verified on hardware.
+- Manual `docker exec` `Bridge.call` needs `timeout=20` for a >10 s-blocking fire; the live
+  reflex loop is unaffected (it uses the per-actuator `BRIDGE_LED_CALL_TIMEOUT_S` override).
+
+### Camera characterised — it is an Arducam B0CQ4QDCXN (IMX462, auto IR-cut, onboard 940nm IR LEDs)
+
+Confirmed from the product page + the repo's own `CAMERA_DEVICE` by-id string: **Arducam 1080P
+Day & Night USB2.0, 2MP Sony IMX462 (STARVIS, strong NIR), automatic IR-cut switching triggered by
+an onboard CDS light sensor, 3× built-in 940 nm IR LEDs.** Runs all-day autonomously; the host has
+no control over the day/night switch.
+
+- **Night frame measured** (board pointed out the window at the backyard, genuinely dark):
+  mean luma **116** (well-exposed, NOT dark), mean HSV saturation **0.00**, R = G = B on every
+  pixel. The camera has **already auto-switched to night mode** — IR-cut filter pulled, onboard
+  IR LEDs on, output forced to grayscale — and the scene is properly lit on the onboard LEDs alone.
+- **Day/night detection is SOLVED with zero new hardware:** the frame itself is the signal —
+  `is_night = mean_saturation < ~2` (this unit reads a literal 0.00 at night; > 0 with real colour
+  by day). Free — a warmup frame is already grabbed every capture. Astronomical dusk/dawn schedule
+  is now only an optional sanity backstop, not needed for correctness.
+- **V4L2 exposure/gain readback is DEAD on this unit** — re-probed day and night,
+  `exposure_time_absolute` frozen at 156, `gain` at 0, byte-identical both times. The camera does
+  not expose its AE state or day/night switch over UVC. (Corrects an earlier suggestion in this
+  session to use that method.)
+- **Implication for the project's external `IR_ILLUMINATOR_PIN` (940 nm) illuminator:** it is now
+  understood as a **range extender only** — the camera self-illuminates the near field; the
+  external unit is for the deterrence-zone distance. At night the vision model gets grayscale
+  (R=G=B) frames — confirm the `.eim` behaves on that (a 3-channel array, should be fine).
+
+### Deferred / follow-ups (NOT done this session)
+
+- **Item B — decouple IR from the deterrence tiers:** move the IR firing path out of
+  `DeterrenceAction`/tier into the camera-capture path, gate it on `is_night` (frame saturation),
+  always fire at the best-for-vision config. Needs its own ADR + item D's result. `fire_ir`
+  per-tier values (T1 False / T2 True / T3 True) left as-is for now — a half-migration that set
+  them all false without the new path would leave night captures unlit. `test_reflex_loop.py` +
+  `test_cognition_config.py::test_only_the_lowest_tier_withholds_ir` get rewritten at that time.
+- **Item C — LED/horn active fire-duration per detection:** how long each should run to maximise
+  the chance of blocking an approach. Separate written proposal; ADR 0017 already covers the
+  relevant part (retune `HABITUATION_WINDOW_S` / `PROXY_REWARD_HORIZON_S`; do NOT build blind
+  timer re-firing). Longer ≠ better — habituation, battery/thermal, horn hearing-safety near homes.
+- **Item D — external IR illuminator night characterisation:** rig is already pointed at the
+  backyard. Vary IR drive/pulse config, capture footage, evaluate which config gives the best
+  detection-quality frames for the elephant/boar model at range, on top of what the onboard LEDs
+  already provide. Needs a written test protocol. Feeds item B.
+- **Power rewire (Mport 51 hub out of the power path) + 10-day idle soak:** STILL deferred. The
+  hub is still in the path (`power_operation_mode: default`). It held clean through this ~1 h
+  supervised session (uptime unbroken, boot_id held through the flash + 2 fires) but that does
+  **not** clear the 10-day unattended-trial gate.
+- Nothing committed to git this session. `docs/decisions/0017-*.md` and the §3.1 addition to
+  `docs/research/elephant-deterrence-behavioral-science.md` are net-new from a parallel track —
+  left untouched.
+
+### DFO-facing language constraint (unchanged, restated)
+
+Do not claim the LED deterrent "keeps elephants out" or any absolute exclusion language. Every real
+number is a probability of deterring a given approach, not a guarantee. Describe it as: real,
+evidence- and practitioner-informed dual-wing strobe deterrence with genuine per-tier escalation,
+verified working on hardware — not a promise elephants won't enter.
+
+## RESUME HERE — 1 Sept, POWER-DELIVERY ROOT CAUSE FOUND (idle crash-reboots = Portronics Mport 51 hub in the power path) + ADR 0014 §E dual-wing LED implemented host-side (all green, NOT reflashed) checkpoint
+
+### Power-delivery root cause — the recurring idle crash-reboot fault is diagnosed
+
+Read-only SSH forensics (board on WiFi, no reflash, no actuator fired) traced the fault the prior
+checkpoint left "UNRESOLVED".
+
+**What it is NOT** (all ruled out by direct evidence):
+- Kernel panic / oops — journal stops mid-stream at every crash, no panic/oops/trace.
+- SoC watchdog reset — `qcom_wdt` state `inactive`, `bootstatus=0`, `CARDRESET` boot-status `0`.
+- Thermal — all 11 zones 37–43 °C throughout; no thermal-trip messages.
+- OOM — 3 GB `MemAvailable`, no oom-killer.
+- Periodic software trigger — crash intervals span **2 s to 13 h**; no cron/timer correlates.
+- Subsystem/remoteproc crash — no EDAC/MCE/rproc errors.
+- "Started 28/30 Aug" — **false.** `wtmpdb` shows the same `- crash` on **every boot since the
+  board's first-ever record, 28 May 2026**. (The `- crash` label itself is a red herring: this
+  image never records clean shutdowns, so literally every boot shows it. The real signal is the
+  spontaneous idle reboots + the power-up retry bursts.)
+
+**What it IS — power delivery, via the hub:**
+- The board is powered **through a Portronics Mport 51** 5-in-1 bus-powered USB-C dock
+  (RJ45 + HDMI + 2×USB-A + a "PD passthrough" USB-C port). The user's 45 W Robu Pro-Range PD
+  charger + its 80 cm C-to-C cable feed the dock; the camera and the dock's RTL8152 USB-Ethernet
+  hang off the dock; a single USB-C tether goes to the UNO Q's **only** USB-C port.
+- On the board: `/sys/class/typec/port0` → `power_role: [sink]` ✓ but
+  `power_operation_mode: default` and **`port0-partner` does not exist** — the PMIC Type-C
+  controller (`pm4125_typec`, I²C TCPC at `1-0058`) **sees nothing on the CC pins.** VBUS 5 V is
+  present (board runs) but CC is electrically absent, so the board can never advertise for more
+  than the USB-default floor: **5 V / 500 mA.** The Mport 51's PD passthrough is built to charge a
+  laptop-style host (a PD *sink*); the UNO Q is the USB *host* here, so the dock never presents a
+  proper Type-C source contract up the tether.
+- That 5 V / 0.5 A budget is shared by the SoM + WiFi + the dock's Ethernet + the USB camera
+  (`bMaxPower 500 mA`). Every camera-frame burst / WiFi TX / (and any actuator fire) is a load
+  transient the rail can't hold → brownout → reboot.
+- Boot history confirms the electrical signature: power-up **retry bursts of 4–7 reboots within
+  3–20 s** (30 Jul ×3 in 6 s, 31 Jul ×7 in 17 s, 12 Aug ×4 in 8 s, 28 May ×3). Software cannot
+  reboot a machine that fast; only a sagging supply can.
+- Fits the prior "power cycle helped for ~4 h then it crashed again (10:13→14:17 on 1 Sept)"
+  observation — reseating the USB-C connector momentarily improved a marginal contact.
+
+**Fix (physical, user present, DEFERRED per user's sequencing — do the LED/camera/horn work first):**
+1. Remove the Mport 51 from the power path. 45 W PD charger → its C-to-C cable → **straight into
+   the UNO Q's USB-C port**, nothing else on that connector, wall socket.
+2. Re-read `/sys/class/typec/port0`: success = `power_operation_mode` → `usb_pd` or `3.0`, and a
+   `port0-partner` dir with a PDO list appears.
+3. Leave it idle, watch `boot_id` for several hours (it used to crash every few) → if it holds,
+   root cause is nailed and it is NOT an RMA.
+4. If it **still** shows `default` / no `port0-partner` plugged straight into the charger → the
+   board's USB-C CC pins or the cable are bad → swap to a known-good e-marked C-to-C cable →
+   RMA the board if a good cable doesn't restore negotiation.
+5. Trial rig implication: single USB-C port + a camera means the camera must run off a
+   **separately powered** hub (its own wall wart, zero draw from the board), or a proper powered
+   USB-C dock with real PD-IN passthrough that is *verified on the board* to negotiate. A cheap
+   bus-powered dock in the power path cannot go to a 10-day unattended trial.
+
+### ADR 0014 §E — real dual-wing LED — implemented host-side this session (NOT on the board)
+
+Host-only build call (schema bump + firmware + MPU + tests), per the ADR's §E / §E.1 / §E.2.
+15 files touched, uncommitted. Summary:
+- **Schema `2 → 3`:** `device/mcu/src/config.h` `BRIDGE_SCHEMA_VERSION`, `device/mpu/services/
+  config.py` `SCHEMA_VERSION`, `bridge/schema.md` header + version history, `bridge/rpc.py`
+  docstrings. `channel` wire value **2 now means "both wings"** (was "unrecognized → left"); this
+  repurpose is the breaking change the bump records. `pattern_id` gains `4 = sweep`,
+  `5 = pulse-both-sync`, `6 = flicker-both-independent`. No wire field added/removed.
+- **`device/mcu/src/led.{h,cpp}`:** `led_channel::kWingBoth` (=2); patterns `kSweep=4`,
+  `kPulseBothSync=5`, `kFlickerBothIndependent=6`. New `flash_pair()` dual-wing primitive (set
+  both pins, then ONE `delay`), `pattern_sweep` (antiphase, break-before-make so the two wings are
+  never lit together), `pattern_pulse_both_sync` (in phase), `pattern_flicker_both_independent`
+  (two independent xorshift32 streams, seeds deliberately differentiated as `micros()` doesn't
+  advance within a host call). `run_pattern_dual()` + `drive_led_both()`: gates BOTH wings against
+  `g_wing_left` / `g_wing_right`, refuses the whole fire if EITHER wing is still in cooldown, uses
+  the left wing's gate result for the ack (both resolve identically when allowed), updates both
+  channel states, and runs the pattern in **one blocking window** — a dual-wing fire of duration D
+  blocks for ~D, not ~2D (verified by test). All three new patterns anchored on
+  `LED_FAST_STROBE_HZ` (7 Hz).
+- **`device/mcu/src/bridge_handlers.{h,cpp}`:** `led_channel_from_wire(2) → kWingBoth`;
+  unrecognized (3, 255) still → `kWingLeft`.
+- **`device/mpu/cognition/config.py` `DETERRENCE_TIERS`** reallocated per §E.2: **T1** = single
+  wing (ch 0) + `PATTERN_FAST_STROBE` (id 2) + 50 % gain (was slow-pulse); **T2** = `PATTERN_SWEEP`
+  (id 4) + both wings (ch 2) + 75 %; **T3** = both wings (ch 2) + 100 % gain + **rotating** between
+  id 5 and id 6 via new `resolve_tier_action(tier, rng)` (reuses the bandit's injected `rng`;
+  returns the exact `DETERRENCE_TIERS` object unchanged for T1/T2, so identity-based tests barely
+  move). `TIER_3_LED_PATTERN_IDS = (5, 6)`. `reflex_loop.py` call site switched to
+  `resolve_tier_action`. `bench/demo_replay.py` labels extended.
+- **Tests:** `tests/test_led/` (new dir this session) gains dual-wing timing cases — sweep
+  antiphase at strobe rate, pulse-both-sync in-phase, flicker not mirrored, blocks-for-D-not-2D,
+  dual-fire puts both wings in cooldown, dual fire refused whole when one wing still cooling.
+  `test_bridge_handlers` channel-2 case. `test_cognition_config.py` widened allowlists (patterns
+  0–6, channels 0–2) + T2/T3 dual-wing + `resolve_tier_action` rotation tests.
+  `test_reflex_loop.py` two identity→`.tier` assertion adjustments.
+- **Verification, all green:** `pio test -e native` **63/63**, `pio run -e native` clean link,
+  `ruff check` clean, `pytest` **238 passed**. Nothing committed. Nothing reflashed. No actuator
+  has fired with this code.
+
+**Deferred (gated on the power rewire above + user physically present):** reflash carrying §E +
+the earlier per-actuator `BRIDGE_*_CALL_TIMEOUT_S` fix + D5→D3 pin fix + reverted safety flags;
+physical first-fire of `kSweep` / `kPulseBothSync` / `kFlickerBothIndependent` on both wings;
+re-fire of the 3 field tiers with the new allocation; then the overnight idle soak on the
+rewired power path.
+
+**DFO-facing language constraint (for any future HANDOVER / DFO note about the LED deterrent):**
+do not claim it "keeps elephants out" or any absolute exclusion language. Every real number this
+repo has is a probability of deterring a given approach, not a guarantee. Describe it as: real,
+evidence- and practitioner-informed dual-wing strobe deterrence with genuine per-tier escalation,
+verified working on hardware — not a promise elephants won't enter.
+
+## RESUME HERE — 1 Sept, hardware bring-up session (ADR 0014 reflash + 4 pattern first-fires + daylight vision matrix DONE; recurring idle crash-reboot fault hit, diagnosed, power-cycle + soaks recovered it, root cause UNRESOLVED) checkpoint
+
+Task this session (user instruction, carried from the prior session): reflash carrying the D3 pin
+fix + ADR 0014 pattern code + already-reverted safety flags together in one shot; pause only at the
+four first-fire moments (D3 left wing, each pattern's first real hardware fire) for confirmation;
+then run unattended through the daylight vision-model matrix and the grey-card IR-throw test. Added
+watch item: if the board reboots again while genuinely idle and untouched, STOP and treat it as a
+real power/connector fault. Also: add the container `restart:` policy fix to scope.
+
+**DONE — reflash (supervised):**
+- `device/mpu/` + `device/mcu/src/` synced to `~/ArduinoApps/eletect-x/{python,sketch}/` via
+  tar-over-ssh (`scripts/sync-to-board.sh` uses `rsync --delete` — **rsync is not available in
+  Windows Git Bash**; workaround: `ssh 'rm -rf <dir> && mkdir -p <dir>'` then
+  `tar -C <src> -cf - . | ssh 'tar -C <dst> -xf -'`, python tree excluding
+  `tests bench pyproject.toml __pycache__ *.pyc .pytest_cache .ruff_cache models/vision/*.eim`).
+- `arduino-app-cli app restart user:eletect-x` → compiled sketch + flashed STM32U585 (OpenOCD
+  clean, 13 % flash / 16 % RAM) + started the Python container together, rc=0, ~1m44s. Board did
+  not reboot during the flash.
+
+**DONE — 4 supervised first-fires (all user-confirmed):** each via
+`Bridge.call("drive_led", 2, 0, <pattern_id>, 50.0, <ms>)` → returned `True`.
+Order: `kSteady` (D3 left wing — fired twice, user asked for a repeat), then `kSlowPulse`, then
+`kFastStrobe`, then `kRandomFlicker`. **Measured latency = burst duration + ~15 ms for every
+pattern** → ADR 0014's "timing logic inside the existing blocking window, zero new blocking cost"
+claim is confirmed on hardware. D3 left-wing pin fix confirmed. 5-arg `Bridge.provide` arity binds
+on the real `Arduino_RouterBridge`; schema v2 accepted (mismatch only logs, doesn't reject).
+
+**DONE — daylight vision-model matrix (ran unattended after the first-fires validated the patterns;
+user had explicitly authorised continuing unattended through the matrix incl. LED fires near the
+camera, at 50 % gain / short bursts / 20 s cooldown respected).** Architecture: EIM runner
+(`edge-impulse-linux-runner --model-file /home/arduino/etx_cpu_final_0830.eim --run-http-server
+1337`, ETX-V v4, labels `["Boar","Elephant"]`, `min_score 0.05`) + camera capture + inference all
+run HOST-side (container is on a bridge net, can't reach host `127.0.0.1:1337`); only actuator fires
+`docker exec` into the container. Fire/capture timing aligned via the fire subprocess's **stdout
+pipe** (a reader thread timestamps flushed `START`/`END` lines) — an earlier file-marker approach
+failed because the container FS is a separate namespace; frames hard-capped per condition to avoid a
+buffered-frame flood. Results JSON + 12 sample JPEGs preserved in the session scratchpad
+(`.../scratchpad/matrix_results.json`, `matrix_run.log`).
+
+| condition | infer ms mean/max | luma lit vs unlit | clip (`frac>250`) | spurious dets (bench = no animals ⇒ all FP) |
+|---|---|---|---|---|
+| camera_only | 207 / 240 | — / 139.5 | ~0 | 8/20 frames — Elephant, conf 0.074–0.111 |
+| pulsed_ir ×3 | 205 / 221 | — / 141.8 | ~0 | 28/42 — Elephant, conf pinned 0.111 |
+| led_steady | 203 / 215 | 144.7 / 144.3 | ~0 | 5/44 — Elephant, 0.074 |
+| led_slow_pulse | 205 / 213 | 149.0 / 148.5 | ~0 | 9/44 — Elephant, ≤0.111 |
+| led_fast_strobe | 203 / 210 | 154.8 / 154.1 | ~0 | **0/44** |
+| led_random_flicker | 204 / 215 | 146.4 / 146.8 | ~0 | **0/44** |
+
+Day-vs-night read:
+- **LED patterns firing next to the camera cause NO daylight washout.** Within every condition
+  lit-frame vs unlit-frame mean luma differs by <0.5; the 139→155 drift across the ~4-min run is
+  the sun moving, not the LED. No clipping. This is the OPPOSITE of the night result (single 500 ms
+  IR pulse = +99.5 % luma indoors, 74→146) — in daylight the 50 %-gain LED is swamped by ambient.
+- **Pulsed IR in daylight: +1.6 % luma** (141.8 vs 139.5) — negligible vs +99.5 % at night. IR
+  illuminator is invisible against daylight. A real IR-throw characterization must be a **night**
+  test with a physical 18 % grey card at measured distances.
+- **Latency ~203–207 ms mean, every condition, tight spread** (min 196, max 240) — higher than the
+  ~137 ms prior-night baseline (daylight frames carry more texture for the model). **LED pattern
+  choice adds zero latency**, matching the first-fire finding.
+- **Every false positive is a noise-floor "Elephant" ghost at conf 0.074–0.111** — barely over the
+  0.05 deployment threshold, far below any usable operating threshold. The prior "Elephant FP 0 %"
+  does NOT hold on the daytime bench. **A deployment threshold of ~0.2 eliminates every one.**
+  `fast_strobe` and `random_flicker` had zero FPs (rolling-shutter banding / motion blur during
+  those bursts may disrupt the low-level texture driving the ghost box — sample too small to claim
+  causation).
+
+**THEN — the board rebooted while idle. Automated path HALTED per the failure clause.**
+- boot_id `f30eae1e…` → `b2c2d983…` (regenerated only on kernel boot). The matrix had finished
+  cleanly (results written, SSH session closed) ~1 h before the crash; at crash time the board was
+  doing only hourly cron + `fwupd-refresh`. Not caused by session workload.
+- `last -x`: **every boot since 30 Aug ends in `- crash`** (unclean — no shutdown record). 12
+  crash-reboots in ~3 days, intervals 9 min to 11 h. The prior session's checkpoint had attributed
+  the earlier reboots to "physical power interruptions during the D5→D3 rewire" — **that
+  explanation no longer holds**: this crash happened with nobody touching the board, days later,
+  and the pattern is continuous.
+- NOT thermal (all 10 thermal zones 40–42 °C). No `dmesg` hardware-reset cause readable (no
+  passwordless sudo). Journal-stopping-mid-line + `- crash` + ~25-min-to-hours dead gap is the
+  signature of a power/VBUS drop, an intermittent connector, a sub-threshold brownout, or a hard
+  SoC lockup with watchdog reset. The board's RTC also appears to jump forward on reboot (dead
+  backup cell — a second SoM hardware smell).
+- Collateral: `eletect-x-main-1` came up `Exited (255)` and stayed dead after the crash-reboot (and
+  again after the user's power cycle) — the app auto-recovery gap, now demonstrated for real.
+
+**Recovery (user power-cycled the board, then asked to retry):**
+- Post-power-cycle health check: boot_id `b08c69f1…`, router active, thermal 43 °C.
+- **30-minute idle soak → PASS** (boot_id held, zero SSH failures).
+- Brought the app container + EIM runner back up (`arduino-app-cli app start`; `main.py` running,
+  `SAFE_MODE=True`). Bridge zero-light probe `drive_led(2,1,0,0.0,150)` → `True`, ~12 ms overhead
+  → **firmware intact in STM32 flash, no reflash needed** (confirmed, not assumed).
+- **2-hour idle soak → PASS** — boot_id held `b08c69f1…` across all 25 five-minute checks,
+  container + EIM up at every check, zero SSH failures. ~2 h 40 m continuous idle-stable total.
+- Verdict: the power cycle changed the board's behaviour (before, it couldn't get through a session
+  without crash-rebooting; now rock-solid for 2.5 h+). Most likely a reseated connector or a
+  cleared latched PMIC state. **Root cause still unknown — not yet trustworthy for a 10-day
+  unattended deployment.**
+
+**DONE — container auto-recovery fix (two layers, no sudo):**
+- `arduino-app-cli properties set default user:eletect-x` — the default app was **unset** (`No
+  default app set`), which is why the `arduino-app-cli` daemon never restarted it on boot. Now set.
+- `docker update --restart=unless-stopped eletect-x-main-1` — policy was `no`, now `unless-stopped`.
+  Caveat: this is wiped whenever `arduino-app-cli app restart` **recreates** the container.
+
+**DONE — 2 Sept survivability layer (user present, MCU reflash + watchdog + exposure ladder):**
+- **MCU reflash confirmed — 3/3 checks PASS.** Clean tree flashed via `arduino-app-cli app restart
+  user:eletect-x`; 8/8 sketch source files hash-match `device/mcu/src/`; `FIRE_TEST_HARNESS 0`,
+  `BRIDGE_SCHEMA_VERSION 3`, `Arduino_RouterBridge 0.4.3` not pinned. Confirmation harness
+  `/home/arduino/vdiff/confirm_pass_v3.py` (schema-3 wire frames): 10/10 steps OK, zero schema
+  mismatch. (a) schema-3 frames all round-trip; (b) D3 left + D6 right wings each drive over real
+  Bridge RPC and self-extinguish — **no latch-on** (user visually verified); a 60000 ms request
+  clamps to `LED_BURST_MAX_MS` = 10 s then OFF; per-channel cooldown proven independent; (c)
+  transport clean through the full ~110 s sequence, boot_id held.
+- **Hardware watchdog armed.** `/etc/systemd/system.conf.d/10-watchdog.conf` →
+  `[Manager] RuntimeWatchdogSec=20s / RebootWatchdogSec=3min`; `sudo systemctl daemon-reexec`.
+  Journal now: `Using hardware watchdog 'qcom_wdt' … device /dev/watchdog0` /
+  `Watchdog running with a hardware timeout of 20s`. `wdctl` shows Timeout 20 s, Timeleft counting
+  down (systemd is petting it). Kernel / PID 1 lockup → SoC hard-reset in ≤20 s; hung shutdown
+  forced after 3 min. Supersedes the earlier "no documented Linux hardware watchdog" line and the
+  proposed `eletect-x-guard` timer (not needed — `unless-stopped` + docker-at-boot + watchdog
+  cover the same failures). Disable: `sudo rm /etc/systemd/system.conf.d/10-watchdog.conf &&
+  sudo systemctl daemon-reexec`.
+- **Daylight exposure ladder — running as a unit.**
+  `~/.config/systemd/user/exposure-ladder.service` (`Restart=on-failure`, linger on → survives
+  reboot) runs `/home/arduino/vdiff/exposure_ladder.py`: every 15 min it walks
+  `exposure_time_absolute` = [1,2,3,4,6,8,16,32,64,125,250,500,1000,2000] on `/dev/video2`
+  (auto_exposure=1, gain=0, AWB off), logs mean luma / clip% / crush% / Laplacian sharpness
+  (full-frame + 4 far→near bands) + 1 JPEG per rung to `~/vdiff/explad/`, `ladder.jsonl`. 12 h cap,
+  stop file `~/vdiff/explad/stop`. **First outdoor sweep → lock `exposure_time_absolute=4` for
+  daytime** (mean luma 128, 0.58 % highlight clip, sharpness peak 1277); ≥16 washes out (luma
+  218→242), ≤2 underexposes. Unit will show noon vs golden-hour drift.
+
+**NOT DONE — grey-card IR-throw test.** Can't produce useful data in daylight without a physical
+18 % grey card and controlled lighting — the matrix already showed pulsed IR is +1.6 % luma against
+daylight (unmeasurable). Needs a **night session the user sets up** with the card at measured
+distances. Not faked.
+
+**Nothing committed to git.** Working tree unchanged from session start (the `M` files predate this
+session — ADR 0014 code from the prior build call, still uncommitted).
+
+**Immediate next steps:**
+1. **Overnight idle soak** before trusting the board for the trial. If it crash-reboots again while
+   idle → the board needs swapping/RMA, not more software work.
+2. Install the systemd guard (2 sudo commands above).
+3. Grey-card IR-throw test — night, physical card, user-set-up.
+4. Raise the deployment detection threshold from 0.05 toward ~0.2 (kills all the daytime
+   noise-floor Elephant FPs) — revisit before real ranger alerts, was always flagged as
+   field-test-only.
+5. Kill the host EIM runner when vision testing is fully done; clean `/home/arduino/etx_*` +
+   `/tmp/etx_*.sh` scratch.
+
+**Session-continuity call:** start a FRESH session. This one did its job (reflash ✓, 4 first-fires
+✓, daylight matrix ✓, reboot diagnosis ✓, recovery + restart fix ✓). The overnight-soak result and
+the next actions are self-contained above.
+
+### Addendum — 1 Sept, LED tier verification pass (same board, later; supervised, via `Bridge.call`)
+
+Purpose: bench-verify the 4 bare ADR 0014 patterns + the 3 field tiers **as implemented today**
+(`cognition/config.py` `DETERRENCE_TIERS` — single wing per tier), one at a time with the user
+watching every fire. `FIRE_TEST_HARNESS` was ruled out for this: it hardcodes `led_pattern::kSteady`,
+one wing, fixed 50 % / 1000 ms — no pattern/gain/tier selection — and is `FIRE_TEST_HARNESS 0`
+(needs a reflash) with no USB serial on this board. Path used instead:
+`Bridge.call("drive_led", 2, <ch>, <pattern_id>, <gain_pct>, <ms>)` via `docker exec`, same as the
+4 first-fires.
+
+- **Fires 1–4 (bare patterns) — all user-confirmed on hardware.** Left wing (ch 0), 60 % gain,
+  3000 ms each. `kSteady` = stable on; `kSlowPulse` = 2 slow on/off blinks; `kFastStrobe` = ~7 Hz
+  strobe; `kRandomFlicker` = visibly irregular. Wall time = duration + 13–18 ms every pattern
+  (matches the first-fire finding). boot_id `b08c69f1…` held throughout.
+- **Fire 5 (Tier 1: slow-pulse / left ch 0 / 50 %) — hit a `TimeoutError`, diagnosed as a
+  client-side bug. The LED fired correctly regardless** (user-confirmed: 2 slow pulses, left wing,
+  ~10 s, ~50 %). boot_id held — **no reboot, no firmware/hardware fault.**
+  - The auto-mode classifier blocked the literal `TIER_DURATION_MS` value `65535` as an unsafe
+    long-drive request (it has no knowledge of the MCU clamp). Per the user's call, Fire 5 used the
+    **post-clamp value 10000**, not the literal `DETERRENCE_TIERS` constant 65535. Physically
+    identical — the MCU clamps 65535 → `LED_BURST_MAX_MS 10000` anyway.
+  - `Bridge.call` raised `TimeoutError: Request 'drive_led' timed out after 10s`. Confirmed on the
+    board: `Bridge.call(method_name: str, *params, timeout: int = 10)` — **default 10 s**. A clamped
+    10 s burst doesn't ack until it finishes, so the client gives up ~15 ms before the ack arrives.
+  - **Field impact (the real bug):** `main.py`'s `drive_horn` / `drive_led` / `pulse_ir` lambdas
+    called `Bridge.call` with **no `timeout=`**, and `services/config.py`'s documented
+    `BRIDGE_CALL_TIMEOUT_S = 12.0` was **never actually passed anywhere**. Since every tier commands
+    `TIER_DURATION_MS = 65535` → clamp 10000, **every LED tier fire in the field would have raised
+    `TimeoutError` in the reflex loop** — the deterrent still fires physically, but cognition sees an
+    exception where the ack should be (bandit reward attribution, logging, any post-fire logic all
+    sit downstream of that call). `drive_horn` was at the same risk margin.
+- **FIX — done this session, host-tested, NOT yet on the board (uncommitted):**
+  - `device/mpu/services/config.py`: single `BRIDGE_CALL_TIMEOUT_S` → per-actuator timeouts, each
+    just above its own `device/mcu/src/config.h` cap + transport margin —
+    `BRIDGE_HORN_CALL_TIMEOUT_S = 5.0` (cap 3000), `BRIDGE_LED_CALL_TIMEOUT_S = 12.0` (cap 10000),
+    `BRIDGE_IR_CALL_TIMEOUT_S = 2.0` (cap 500). `BRIDGE_CALL_TIMEOUT_S` kept as an alias = the LED
+    value for the non-actuator (`get_system_state`) path and `bridge/rpc.py`'s docstrings.
+  - `device/mpu/main.py`: all three actuator lambdas now pass
+    `timeout=config.BRIDGE_<ACTUATOR>_CALL_TIMEOUT_S`.
+  - `device/mpu/tests/test_config.py`: the old single drift check split into
+    `test_actuator_call_timeouts_each_exceed_their_mcu_cap` (per-actuator, reads the three caps from
+    `config.h`) + `test_generic_bridge_call_timeout_still_covers_longest_burst`.
+  - `ruff check` clean, `pytest` **234 passed**. `timeout=` kwarg confirmed accepted on the board
+    (zero-light probe, gain 0.0, `ret=True`). `tests/test_reflex_loop.py` structurally can't cover
+    this seam — it injects fake `drive_*` callables and `main.py` can't be imported host-side
+    (module-scope `from arduino.app_utils import Bridge`, forbidden by `pyproject.toml`) — so the
+    host guard is `test_config.py` + full-suite-green; the integration proof is the supervised
+    hardware re-fire.
+  - **Deploy:** the running container still has the old `main.py`; the fix goes live at the next
+    `arduino-app-cli app restart` / reflash. Fires 5–7 tonight pass an explicit `timeout=` in the
+    manual `docker exec` call, so they don't wait on the deploy.
+- **ADR 0014 Part C — simultaneous dual-wing for Tier 2 / Tier 3 — is UNIMPLEMENTED, not just
+  unverified.** MPU-side orchestration for it does not exist: `DETERRENCE_TIERS` drives exactly one
+  wing per tier (T1 slow-pulse / left ch 0 / 50 %, T2 fast-strobe / **right ch 1** / 75 %, T3
+  random-flicker / left ch 0 / 100 %). MCU `drive_led` also takes one channel per blocking call, so
+  it can't do simultaneous dual-wing per call regardless. This is a real scope gap tracked as
+  follow-up work (`cognition/config.py` ~L316–319 already flags it; the later checkpoint below at
+  "T2 … Alternating both wings within one tier (ADR Part C …)" is the same item). Tonight's pass
+  verifies the single-wing tiers only and is not expected to cover Part C.
+- **Fires 6–7 (Tier 2 fast-strobe / right ch 1 / 75 %, Tier 3 random-flicker / left ch 0 / 100 %):**
+  to be re-run with the explicit `timeout=` fix, user present.
+
+## RESUME HERE — 1 Sept, later session (ADR 0014 LED patterns + gain wired end-to-end and host-tested; board NOT reflashed) checkpoint
+
+Task this session (user instruction): implement all four ADR 0014 LED patterns in `led.cpp`, wire
+them through the new `channel`/`gain_pct` schema, host-test — then (deferred) reflash with the D3
+pin fix + safety flags, and run the full daylight vision-model test matrix. Only the code +
+host-test half was in scope this session; the reflash and the entire vision matrix are hard-blocked
+(see "Deferred" below).
+
+**Done — MCU (`device/mcu/`):**
+- `src/led.h` — new `enum class led_pattern : uint8_t { kSteady=0, kSlowPulse=1, kFastStrobe=2,
+  kRandomFlicker=3 }`, `led_pattern_from_id()` (unknown id → `kSteady`), `led_request` gains
+  `pattern` and `gain_pct` fields.
+- `src/led.cpp` — the four patterns as timing logic **inside `drive_led()`'s existing blocking
+  window** (replaces the single `delay(duration_ms)`): `kSteady` = on/hold/off; `kSlowPulse` =
+  `LED_SLOW_PULSE_CYCLES` (2) even on/off cycles, remainder folded into the last cycle so the burst
+  still totals `duration_ms` exactly; `kFastStrobe` = `LED_FAST_STROBE_HZ` (7) strobe, sub-period
+  remainder spent dark; `kRandomFlicker` = xorshift32 (no `<random>`/libm/heap) irregular on/gap
+  flashes seeded from `micros()` at call time. **Zero new blocking cost** — every pattern's on+off
+  spans sum to exactly the rule-gate-resolved `duration_ms`; `rule_gate_apply()` stays the sole
+  authority on duration and duty.
+- `src/config.h` — `BRIDGE_SCHEMA_VERSION 1 → 2`; new `LED_SLOW_PULSE_CYCLES`, `LED_FAST_STROBE_HZ`,
+  `LED_RANDOM_FLICKER_{MIN,MAX}_{ON,GAP}_MS` timing constants.
+- `src/bridge_handlers.{h,cpp}` — `bridge_drive_led(schema_version, channel, pattern_id, gain_pct,
+  duration_ms)` (was `(schema_version, pattern_id, duration_ms)`); `led_channel_for_pattern_id()`
+  renamed `led_channel_from_wire()` (0 → left, 1 → right, else → left). `gain_pct` is no longer
+  hardcoded to the config max.
+- `src/fire_test.cpp` — the two `led_request` aggregate inits carry `led_pattern::kSteady` (bench
+  harness verifies wiring/polarity, not pattern shape).
+- `hostshim/` — new `hostshim::PinWrite{pin,value,at_ms}` event log + `pin_writes()` accessor;
+  `digitalWrite`/`analogWrite` append to it, `reset()` clears it. Lets a host test assert on the
+  *shape* of a blocking flash sequence (edge count, gaps, total elapsed) that `pin_state()` — only
+  the final value — cannot see.
+- `tests/test_led/test_led.cpp` — **new**, 7 cases: pattern-id mapping incl. fallback; each of the
+  four patterns' edge count + "ends off" + "burst totals exactly `duration_ms`"; `kRandomFlicker`
+  gaps are non-uniform; over-cap gain clamps but still fires; a re-fire inside `LED_COOLDOWN_MS` is
+  refused and touches no pin.
+- `tests/test_bridge_handlers/test_bridge_handlers.cpp` — rewritten for `led_channel_from_wire` +
+  `schema_version 2`.
+
+**Done — MPU (`device/mpu/`):**
+- `services/config.py` `SCHEMA_VERSION 1 → 2`; `bridge/rpc.py` `drive_led(schema_version, channel,
+  pattern_id, gain_pct, duration_ms)` + docstring; `main.py` lambda now 5-arg; `services/
+  reflex_loop.py` `DriveLedFn` Protocol + call site + SAFE_MODE log line all updated.
+- `cognition/bandit.py` `DeterrenceAction` gains `led_channel_id: int` and `led_gain_pct: float`;
+  `led_pattern_id` now a real pattern selector (0–3), not a channel selector.
+- `cognition/config.py` — new `LED_TIER_{1,2,3}_GAIN_FRACTION` (0.5 / 0.75 / 1.0); `DETERRENCE_TIERS`
+  reallocated per ADR 0014 Part D: **T1** slow-pulse (1) / left wing (0) / 0.5 gain; **T2**
+  fast-strobe (2) / right wing (1) / 0.75; **T3** random-flicker (3) / left wing (0) / full gain.
+  Alternating *both* wings within one tier (ADR Part C — needs MPU-side dual `drive_led` calls) is
+  left as a follow-up; each tier drives one wing today.
+- `tests/test_cognition_config.py` — pattern-id check widened to 0–3, new channel-id / distinct-
+  signature / LED-gain-monotonic / LED-clamp-drift checks; `tests/test_reflex_loop.py` `_FakeDriveLed`
+  5-arg; `bench/demo_replay.py` LED print line updated (wing + pattern name + gain).
+- `bridge/schema.md` — header `schema_version = 2` + version-history note; `drive_led` row rewritten;
+  "Actuator gain defaults" section now covers only `pulse_ir` (LED has a real `gain_pct` field now).
+
+**Verification (all green):** `pio test -e native` 56/56 (new `test_led` 7/7, `test_bridge_handlers`
+4/4); `pio run -e native` clean link; `ruff check` clean; `pytest` 233/233. Nothing committed.
+
+**Pre-existing breakage noticed, NOT fixed (out of scope):** `device/mpu/bench/demo_replay.py`
+already fails before reaching any LED code — `handle_footfall_event() missing 1 required keyword-only
+argument: 'detect_vision'` — this predates ADR 0014. Its LED print line was updated in place and
+byte-compiles; the script's own missing-`detect_vision` bug is for whoever owns the bench.
+
+**Docs updated:** `TRIAL_READINESS_PLAN.md` §E (implement + host-test marked done, reflash bullet now
+lists the arity + reboot checks to do first), `docs/KNOWN_GAPS.md` (the `pattern_id → led_channel`
+invented-mapping entry and the LED half of the `gain_pct` wire-mismatch entry both closed via ADR
+0014, IR halves unchanged).
+
+**Deferred to a supervised daylight session (hard-blocked, per project Hard Safety Rule + ADR 0014
+Consequences + the failure clause):**
+- Reflash from the clean tree carrying ADR 0014 patterns + the D5→D3 left-wing pin fix +
+  `FIRE_TEST_HARNESS 0` + `FIRE_TEST_LED_GAIN_PCT 50.0f` — one reflash, confirm all together
+  (`TRIAL_READINESS_PLAN.md` §H).
+- First physical fire of each new pattern (pause points: D3 left wing, then each pattern's first
+  real fire).
+- Verify the new **5-arg `Bridge.provide("drive_led", bridge_drive_led)` arity** actually binds on
+  the real `Arduino_RouterBridge` — this is exactly the case the one-at-a-time `provide()`
+  discipline exists for.
+- ~~Diagnose the 3× board reboots and the `eletect-x-main-1` `Exited (255)`~~ **DONE, 1 Sept**
+  (SSH, actuators unpowered, no reflash). **Not a hardware fault — physical power interruptions
+  during the 31 Aug D5→D3 wing-pin rewire.** `journalctl --list-boots` + a fault-signature sweep
+  across all 7 retained boots: zero OOM / thermal-trip / undervoltage / brownout / watchdog /
+  panic / RCU-stall signatures. Each of the 3 transitions = journal ending abruptly mid-routine-op,
+  no `systemd` shutdown sequence, board off 6–10 min (a panic/watchdog recovers in seconds), RTC
+  reset to 1970 on each recovery (full power loss, not a warm reset). `last`/wtmpdb marks *every*
+  boot back to 27 Aug as `crash` — this board is habitually unplugged, not shut down. Container:
+  `docker inspect` → `OOMKilled: false`, `Error: ""`, `RestartCount: 0`, `FinishedAt` one second
+  after the current boot's kernel start — it died *with* the power cut; exit 255 is the generic
+  containerd-shim "ungraceful stop", not an app error (logs at exit show only the `SAFE_MODE=True`
+  startup banner, no traceback). It "did not auto-recover" because the platform-generated
+  `app-compose.yaml` has no `restart:` policy (Docker default `no`) — added as a field-readiness fix
+  to `TRIAL_READINESS_PLAN.md` §H. Board healthy now: 37–41 °C, 3 GB RAM free, uptime stable since
+  the 01:24 UTC boot. **Safe to proceed to the reflash** (Hard Safety Rule unchanged). Caveat: a
+  no-software-visible-fault verdict can't rule out a marginal USB-C cable/connector — if the board
+  reboots again while genuinely idle and untouched, treat it as a real power-connector problem.
+  Full write-up: `TRIAL_READINESS_PLAN.md` "Board-reboot / container-exit diagnosis" section.
+- **Entire daylight vision-model test matrix** (part 2 of the user's request): stand up the EIM
+  `:1337` runner + full `device/mpu` sync; capture daylight footage per condition (camera-only,
+  pulsed-IR, each of the 4 LED patterns firing near the camera); run `HttpVisionDetector` per
+  condition; report FP/FN/latency + exposure-washout / spurious-detection; compare against last
+  night's camera-only and pulsed-IR numbers; write the day-vs-night per-pattern per-condition
+  comparison into the report and update `TRIAL_READINESS_PLAN.md` + `HANDOVER.md`. Runs unattended
+  once started except the four first-fire pauses.
+
+**Session-continuity call:** start a FRESH session for the daylight reflash + bring-up + vision
+matrix. This session was the code/host-test build call; per the project protocol it should not roll
+straight into hardware work.
+
+## RESUME HERE — 1 Sept, ~01:45 IST (steady-on actuation path re-verified for the trial; field-safety flags reverted in source, board NOT yet reflashed; overnight monitor was dusk-only; strobe deferred) checkpoint (same long session as the ~15:40 sweep below, continued)
+
+Task this session: before ending, verify exactly what the 2 Sept DFO trial ships, lock the
+field-safety state, pull the overnight data, and record tonight's real findings.
+
+**Steady-on Bridge RPC path re-verified end-to-end — this is the trial's actuation path.** A
+disposable host pass (`/home/arduino/vdiff/confirm_pass.py`) fired left wing / right wing / IR each
+over the real `arduino-router` socket (`docker exec` → `fire_client.py` → `/run/arduino-router.sock`
+→ MCU `bridge_drive_led`/`bridge_pulse_ir`, **not** the `FIRE_TEST_HARNESS` console path):
+
+- Each wing fires (`ack=true`); each re-fire inside its 20 s window correctly refused (`ack=false`);
+  right fires while left is still gated and vice-versa → `LED_COOLDOWN_MS` is genuinely per-channel.
+- IR fires; `IR_MIN_INTERVAL_MS = 5000` gate holds — a tightened re-test (needed because the first
+  pass's timing was loose) refused re-fires at +2.0 s and +3.4 s, allowed one at +10.6 s.
+- Over-cap requests still `ack=true` — the rule-gate clamps silently, never rejects.
+
+Two apparent mismatches in the first pass were both run-harness artifacts, cleared on re-test:
+(a) an IR re-fire that acked `true` had actually landed ~6 s after the prior pulse, outside the 5 s
+window; (b) `drive_led[1,1,60000]` returned no ack because it clamps to `LED_BURST_MAX_MS = 10 000`
+and the MCU **blocks on `delay(10000)`** (`led.cpp:63`) longer than the test client's ~10 s socket
+timeout. Neither is a firmware fault. Data pulled to
+`device/mpu/bench/camera_check/output/confirm_2026-08-31/` (log.txt, 20 base/peak JPEGs,
+tightened_recheck.txt).
+
+**New quantified finding — every real actuator fire stalls the MCU control loop for the full clamped
+burst.** The deployed MPU requests `TIER_DURATION_MS = PROTOCOL_DURATION_MS_MAX = 65535` on *every*
+`drive_led`/`drive_horn`/`pulse_ir` (`device/mpu/cognition/config.py`, "ask for the max, let the MCU
+clamp" policy). So per live alert the real stall is: **`drive_led` → 10 s** (`LED_BURST_MAX_MS`),
+`drive_horn` → 3 s, `pulse_ir` → 500 ms — `led.cpp`/`horn.cpp` both do `HIGH → delay(clamped) → LOW`
+inline. Reproduced live tonight. Production ack survives only because `services/config.py`
+`BRIDGE_CALL_TIMEOUT_S = 12.0` is sized for exactly the 10 s LED clamp; a shorter-timeout client
+loses it. Geophone/LoRa starvation during the burst is real and is now a 10 s window per wing fire,
+not the ~3.15 s the old `loop()`-blocking gap quotes for the horn. Same root cause / same fix as the
+27 Aug `pulse_ir()` blocking entry — recorded as a 1 Sept addendum on the `loop()`-blocking entry
+near the top of `docs/KNOWN_GAPS.md`, plus a new "Steady-on actuation path re-verified" section at
+the file's end. **Not touched before the trial** (would need a reflash of trial-critical firmware).
+
+**Field-safety flags reverted in `device/mcu/src/config.h` — SOURCE ONLY:**
+`FIRE_TEST_HARNESS 1 → 0`, `FIRE_TEST_LED_GAIN_PCT 100.0f → 50.0f`, both back to committed values.
+`LED_GATE_ACTIVE_LOW` confirmed absent. The only remaining working-tree change in config.h is the
+legitimate D5→D3 left-wing pin move. **The board's flashed binary still has the harness compiled in
+and gain at 100** — it was built that way earlier in the bring-up. A reflash from this now-clean tree
+is required before the node goes to the field, and that same reflash is what first carries the D3
+left-wing pin fix onto the board (without it the left wing is driven on a dead USB pin). It should be
+the **first action of the next session** (`scripts/sync-to-board.sh` → App Lab / `arduino-flash`),
+before any IR-throw work. Deferred tonight per "no reflash hours before a live trial."
+
+**Overnight monitor was dusk-only — `STOP_HOUR` bug.** `vdiff_overnight.py`'s stop check
+(`datetime.now().hour >= STOP_HOUR` with `STOP_HOUR = 8`) is true all afternoon/evening too, so it
+self-stopped at 16:43 board time after ~1 h instead of running to dawn. Got 61 luma samples / 6
+frames / 3 IR pairs (IR deltas +26.1 / +24.3 / +27.1 %, consistent with the sweep). All pulled to
+`device/mpu/bench/camera_check/output/overnight_2026-08-31/` (15 files). `mainpy_overnight.log` came
+back **0 bytes** — the `docker logs -f` capture wrote nothing; not yet diagnosed. No dawn-transition
+data exists; that still needs a real overnight run with the stop logic fixed.
+
+**Correction to the ~15:40 checkpoint below:** `main.py` is **not** restart-looping. `docker inspect`
+shows `RestartCount=0`, status running, started 13:30 UTC — up ~6 h. The repeated "App is starting"
+banners in the log are the whole session history (09:58 / 10:09 / 10:30 / 13:30), not a loop. It is
+quietly blocking-alive after registration, as designed. `SAFE_MODE=1` still confirmed (fires
+nothing).
+
+**Strobe LED patterns deferred — trial ships steady-on wings only.** An irregular/randomised strobe
+(the deterrence literature's actual argument for light) needs `led.cpp` `pattern_id` timing, a host
+test, a reflash, and re-verification of the one proven actuation path — not a change to make hours
+before the trial. Recorded as named post-trial work in `docs/KNOWN_GAPS.md`. `led.cpp` untouched
+this session.
+
+**Live board state at checkpoint:** `run.py` streamer running on the board (:8090, 90-min self-cap),
+SSH tunnel to `localhost:8090` still open, `docker logs -f` PID 43562 may still be running. Camera is
+held by `run.py`. Two `confirm_*` dirs + one `overnight_*` dir + the disposable `.py` scripts remain
+in `/home/arduino/vdiff/` for cleanup once vision work is done. Nothing committed to git (no explicit
+ask). Working tree now has: `device/mcu/src/config.h` (D3 pin move only), `docs/KNOWN_GAPS.md`
+(tonight's entries), `HANDOVER.md` (this checkpoint) — plus everything already modified before.
+
+**Pending, in priority order:**
+
+1. **Reflash the MCU from the clean tree** — first action next session. Carries the `FIRE_TEST_HARNESS
+   0` / gain-50 reverts AND the D3 left-wing pin fix onto the board. Blocking for field deployment.
+2. Daylight IR-throw characterization (grey card at 3/5/10/15/20 m on boresight, `pulse_ir`, log
+   delta% at target region). Needs daylight + a helper. **Fresh session** — this one is very long.
+   Full plan in the ~15:40 checkpoint below and in `docs/KNOWN_GAPS.md`.
+3. Full `device/mpu` Python-tree sync (`sync-to-board.sh`) to bring `HttpVisionDetector` current on
+   the board, then stand up the EIM `:1337` HTTP runner and re-run the vision-behaviour checks.
+   `.eim` artifacts are already on the board at `/home/arduino/etx_*.eim`.
+4. Fix `vdiff_overnight.py`'s `STOP_HOUR` logic and run one real dawn-transition monitor.
+5. Confirm the D7 MOSFET actually switches the external IR board's ground return; ~300 mA when pulsed.
+6. Cleanup: board `/home/arduino/vdiff/` scratch scripts + dirs, kill `docker logs -f` PID 43562 and
+   the SSH tunnel, scratchpad JPEGs, `device/mpu/bench/drive_led_check/`.
+
+## RESUME HERE — 31 Aug, ~15:40 (30-min actuator sweep: LED wings camera-invisible at foliage range, IR strong and repeatable; no vision model deployed on the board; overnight monitor started) checkpoint (live vision-diff bring-up session, following on directly from the ~14:00 actuator-confirmation checkpoint below)
+
+Goal this session: with all three actuators already physically + Bridge-RPC confirmed (per the
+~14:00 checkpoint), characterize whether each one produces a camera-detectable scene change at
+realistic outdoor range — optical effect, not "does it fire." A 5-condition pilot, then a proper
+30-minute automated sweep (9 conditions x 5 reps, interleaved round-robin, auto-verified against a
+~10% threshold derived from tonight's own measured noise floor).
+
+**Real, repeatable result — not a bug, not a fluke:** neither LED wing produces a camera-detectable
+change at foliage range. 45/45 sweep trials, zero verdict inconsistencies across repeats: baseline
+0.89%, left wing 1.57%, right wing 1.73% — both wings statistically indistinguishable from the
+0.89% baseline noise floor. The pilot's earlier "left +14.9%" was a transient outlier that did not
+reproduce once across 5 clean reps — the right wing was never broken either (the pilot's "right
++0.1%" was actually the *left* reading being anomalous that one time). **IR is the opposite story**:
++28.9% mean, tightly repeatable (+-1.5%), across every condition that includes it (IR-alone and
+mixed both land there — the wings add nothing measurable on top of IR). Every one of the 70 live
+fires acked; 10 within-cooldown re-fires correctly acked=false (20s per-channel gate, independently
+verified for left and right). This is conclusively **not** a firmware/wiring fault — the same
+Bridge -> MCU -> camera path that produces IR's clear signal carries the LED calls too. The wings
+are simply not bright enough relative to the lit scene at this distance/exposure to register on
+camera. Full data: `device/mpu/bench/camera_check/output/vision_diff_2026-08-31/` (pilot + sweep,
+92 sweep files: t01-t45 JPEG pairs, log.csv, summary.txt) — board copy at
+`/home/arduino/vdiff/shots/sweep_20260831_150907/`.
+
+**Important scope correction, worth being explicit about:** `device/mpu/perception/` on the board
+right now is camera.py + storage.py only — no detector. This means tonight's data (pilot, sweep,
+and the overnight monitor below) is pure camera/luma characterization, **not** real vision-model
+inference or false-positive data, despite earlier framing this session as being partly about "how
+does the vision model react." This is not a regression or a forgotten deployment — it's the direct,
+expected consequence of the planning session's own earlier decision this session to sync
+**MCU sketch only** (not the full `device/mpu` Python tree) for the LED bring-up work, specifically
+to isolate that test from 9 days of unrelated Python changes. `HttpVisionDetector`
+(`device/mpu/perception/detector.py`) and its fusion-loop wiring are real, committed code
+(commit `b5e139a`, `9 Aug 22` heading below) — just not yet synced to this board's running copy.
+Folding the full Python sync in is a legitimate near-term follow-up, not urgent tonight.
+
+**Overnight monitor started** (`vdiff_overnight.py`), `SAFE_MODE=1` confirmed already the running
+state (main.py container dry-running, logs "[SAFE_MODE] would open camera..." and fires nothing).
+Records: 60s luma samples, 10min full frames, 20min fixed-exposure IR on/off pairs with logged
+delta% (first two: +26.1%, +24.33%, consistent with the sweep's IR numbers). Self-stops at local
+hour 8 / a stop file / a 12h hard cap — **started 15:43 board time 31 Aug, so the 12h cap likely
+already fired around 03:43 1 Sep; this run is probably complete but the data has not yet been
+pulled to the laptop** — that pull is the one concrete immediate next step, doable in the current
+session while the board's still reachable. Given the scope correction above, expect this to be a
+luma/light-transition dataset, not a detection dataset — still valuable for the original dawn-light
+question, just not for false-positive-rate.
+
+**A second, real open question surfaced and partially investigated: IR throw/range.** The
+"10-20m" figure the user has been operating on **appears nowhere in any project document** (BOM,
+procurement notes, WIRING_GUIDE.md, KNOWN_GAPS.md, the enclosure CAD concept, the vision-model
+prompt) — likely a misremembered listing figure or conflation with the design target. The one
+documented range figure (~3m, `KNOWN_GAPS.md:1673`) is for the camera's own onboard 940nm LEDs,
+explicitly *separate from* the external VISTORA 48-LED board's real-range extension. That external
+board's throw **has never been characterized** — `enclosure-design-concept.md:467` already flagged
+a "five-minute bench check" that was never done; everything "known" about its range is inference
+from near-field foliage luma, which cannot answer a distance question. User confirmed mid-session
+the external board is wired to 12V, ruling out under-drive as the explanation. Remaining candidates:
+measurement artifact (most likely — no target-at-distance test has ever run), beam angle (a wide
+90-120 flood from 48 small LEDs genuinely doesn't throw far; 940nm reads ~1/3 as bright to the
+sensor as 850nm for the same power), aim/focus, or the D7 MOSFET not actually switching the
+external board's ground return (worth a quick eyeball check). **Real verification plan, needs
+daylight and a helper, not tonight:** inline/clamp meter on the board (confirm ~300mA when pulsed),
+phone selfie-cam check (confirm LEDs visibly flash), a wall-circle beam-angle measurement, and the
+test that actually settles it — a grey card at 3/5/10/15/20m on boresight, `pulse_ir`, log delta%
+at the target region (not whole-frame) — wherever it drops under ~10% is the real usable throw.
+Correct `enclosure-design-concept.md`'s "30-40m" claim and add the real number to
+`docs/KNOWN_GAPS.md` once measured.
+
+**Deterrence-efficacy question also addressed this session, worth recording plainly:** IR is not a
+deterrent by design — 940nm was chosen in `CONTEXT.md` specifically because elephants can't see it
+(camera illumination only, no startle). The white+blue strobe is the actual visual deterrent, but
+per human-elephant-conflict literature, light-based deterrents are a low tier tool (flashing lights
+work mainly by simulating human presence), habituation within days-to-weeks is the dominant failure
+mode, and effect in daylight is near-zero. Strong evidence instead favors beehive fences, chilli,
+and multi-modal unpredictable deterrents. This device's own design already treats light as the
+junior partner (horn primary, LED supplementary, IR non-deterrent) for exactly this reason — the
+bandit's never-repeat/stop-on-retreat logic and the unpredictable-pattern strobe exist precisely
+because fixed deterrents stop working. Tonight's finding that the wings are camera-invisible at
+range doesn't prove an elephant can't see them (different eye, no exposure lock like the camera
+has) but isn't encouraging. **Efficacy on this hardware is completely unvalidated** — no
+animal-outcome feedback exists anywhere, the bandit reward is an unvalidated proxy, `gain_pct` has
+no physical effect yet. Contest/DFO material must say deterrence is *designed*, never *measured*.
+
+**Other findings:** `main.py`'s container showed repeated "App is starting" banners — possibly
+restart-looping, not run down this session (captured in `mainpy_overnight.log`). Nothing committed
+to git this session (per instruction — no commit without explicit ask).
+
+**Pending, in priority order:**
+1. Pull the overnight monitor data (`overnight_20260831_154314/` + `mainpy_overnight.log`) from the
+   board while still reachable — quick, low-risk, do this before ending tonight's session.
+2. Update `docs/KNOWN_GAPS.md`: wings produce no camera-detectable change at foliage range; IR
+   throw never measured; the "10-20m" figure has no documentary basis.
+3. Daylight IR-throw characterization (grey-card-at-distance test) — needs daylight + a helper,
+   explicitly deferred, not tonight. Recommended as a **fresh session** (this one is very long).
+4. Confirm the D7 MOSFET actually switches the external IR board's ground return and it draws
+   ~300mA when pulsed — quick multimeter check, anytime.
+5. Before any field-bound sync: revert `FIRE_TEST_HARNESS` to 0 (still 1 from tonight's bench
+   work) — not urgent to do as a standalone reflash right now (would disturb the still-possibly-
+   running overnight monitor), fold it into whichever session next needs to touch the MCU sketch.
+6. Cleanup once vision work is fully done: board `/home/arduino/vdiff/` scratch scripts,
+   `camera_check_bench` dir, scratchpad JPEGs.
+7. Fold the full `device/mpu` Python tree sync in eventually (brings `HttpVisionDetector` current
+   on the board) — legitimate near-term work, not urgent tonight, do deliberately per the same
+   isolate-the-variable discipline as everything else this engagement.
+
+## 31 Aug, ~14:00 (all three reflex actuators physically confirmed — left wing D3, right wing D6, IR D7; LED_GATE_ACTIVE_LOW workaround reverted; drive_led + pulse_ir both registered)
+
+The 31 Aug ~02:30 checkpoint's `LED_GATE_ACTIVE_LOW` firmware workaround was **reverted** — it was
+the wrong direction. A new user observation settled the polarity question: with the board powered but
+no code running, **both wings sit OFF**; they only latched ON once the renamed firmware ran. That is
+normal active-high / fail-safe-off behaviour (`WIRING_GUIDE.md` §4 as written), so inverting in
+firmware was backwards. The real fault: **D5 = PA11 = USB_OTG_FS D−** on the UNO Q. The Arduino core
+claims PA11/PA12 for the USB CDC, so `digitalWrite(5, LOW)` in `led_init()` is a no-op and the left
+wing gate latched high. Confirmed against the Zephyr board devicetree
+(`boards/arduino/uno_q/arduino_r3_connector.dtsi`).
+
+**Fix applied and verified:** left wing gate moved **D5 → D3 (PB0, TIM3_CH3)** — a clean PWM GPIO not
+shared with any bus. User re-wired it physically. `config.h` now `LED_WING_LEFT_PIN 3` with a comment
+recording why; right wing unchanged on D6 (PB1). `led.cpp` fully restored to the plain active-high
+path — `gate_duty()` helper removed, `digitalWrite(LOW)` / plain `analogWrite` back; `git diff` on
+`led.cpp` is now the 30 Aug rename only. `FIRE_TEST_LED_GAIN_PCT` bumped 50→100 for visual
+confirmation (revert before field).
+
+**All three reflex actuators physically confirmed this session** — harness path (App Lab serial
+`2`/`3`/`4`) and Bridge RPC path (bench client `device/mpu/bench/drive_led_check/`) both:
+- `drive_led` pattern 0 → **left wing (D3)** — lit then off, user-confirmed, `ack=True`
+- `drive_led` pattern 1 → **right wing (D6)** — lit then off, user-confirmed, `ack=True`
+- `pulse_ir` → **IR illuminator (D7)** — `ack=True`; camera-diff test on the real IMX462 (indoor
+  room scene) showed a single 500 ms pulse **doubles mean scene luma (74 → 146, +99.5 %)** for
+  ~480 ms then drops straight back. "Dim on a phone camera" was only the phone's IR-cut filter — the
+  IMX462 (NIR-sensitive) sees it strongly. Real optical output still depends on the §5 dedicated
+  12 V IR buck (on a bench rail now), a field-wiring item.
+- `drive_led` still works after adding `Bridge.provide("pulse_ir", ...)` — the "new provide breaks
+  the previously-working ones" regression did not occur.
+
+**`main.cpp` now has BOTH `Bridge.provide("drive_led", ...)` and `Bridge.provide("pulse_ir", ...)`
+uncommented.** One-at-a-time discipline was followed — `drive_led` first, confirmed end-to-end, then
+`pulse_ir`. `drive_horn` / `get_system_state` / `send_lora_alert` still commented.
+
+**State / holds:**
+
+- `config.h`, `led.cpp`, `main.cpp` (+ the 30 Aug rename set) edited locally AND synced to the board
+  sketch (tar-over-ssh, `secrets.h` preserved — Jul 28 mtime intact). App Lab flashed. Board sketch
+  verified to match local.
+- `device/mpu` tree on the board still stale (Aug 22) — deliberately not synced.
+- `FIRE_TEST_HARNESS 1` still set; `FIRE_TEST_LED_GAIN_PCT 100.0f` — both must revert before any
+  field-bound sync.
+- `LED_GATE_ACTIVE_LOW` fully removed — do not reintroduce.
+- `WIRING_GUIDE.md` §4 active-high / fail-safe-off gate stage (10 kΩ gate→source pulldown, series
+  gate resistor) is still the mandatory pre-field wiring; the D5→D3 move is a firmware/pin fix, not a
+  substitute. An ADR for the pin move + the bench/field wiring split is still worth writing.
+- Next: "strategy 4" — autonomous vision-diff (baseline / LED / IR / mixed) + unattended overnight
+  dawn-transition monitor.
+- `device/mpu/bench/drive_led_check/` can be deleted now that both `drive_led` and `pulse_ir` are
+  physically confirmed.
+
+## 30 Aug, live bench session (LED_WHITE_PIN/LED_BLUE_PIN renamed to LED_WING_LEFT_PIN/LED_WING_RIGHT_PIN, code-side; live bring-up in progress with user at the bench)
+
+User is actively wiring/testing LED wings + IR tonight (D5=left wing, D6=right wing, D7=IR, both
+confirmed wired). Before the bench fire-test, the firmware naming mismatch flagged earlier this
+session (task #21) was fixed for real: `LED_WHITE_PIN`/`LED_BLUE_PIN` -> `LED_WING_LEFT_PIN`/
+`LED_WING_RIGHT_PIN` across `config.h`, `led.h`, `led.cpp`, `fire_test.h`/`.cpp`,
+`bridge_handlers.cpp`, and both `test_fire_test.cpp`/`test_bridge_handlers.cpp` unit tests -
+enum values (`kWhite`/`kBlue` -> `kWingLeft`/`kWingRight`), variable names, ack print labels
+(`led_white`/`led_blue` -> `led_wing_left`/`led_wing_right`), the fire-test menu text, and test
+names all updated consistently. Verified no residual old-name references remain outside stale
+`.pio/build/` artifacts (regenerate on next build). `hardware/PIN_MAP.md` and
+`hardware/WIRING_GUIDE.md` updated to match - both previously described the never-built 4-channel/
+10-LED plan's naming as "planned"; now correctly show the real 2-wing/2-MOSFET build as done.
+**Not yet done**: no compilation has been verified (no embedded toolchain available from this
+session) - the sync-to-board.sh + App Lab flash the user is about to run is the first real
+compile/flash check. If it fails to build, the rename is the first place to check.
+
+Live bring-up sequence in progress, full detail in chat: Phase 1 manual fire-test via App Lab
+(LED wings then IR, human-triggered and physically watched) -> Phase 2 Bridge.provide() 
+registration for drive_led/pulse_ir one at a time, tested between each -> Phase 3 automated
+vision-diff analysis (baseline/LED/IR/mixed, via Bridge once registered) -> Phase 4 unattended
+overnight dawn-transition monitor. horn/geophone integration deferred to morning.
+
+## RESUME HERE — 30 Aug, later still (bring-up order finalized by the user: LED wing first, then IR, then horn/speaker, then combine — supersedes the earlier horn-first ordering) checkpoint (user request: "generate a proper progress plan and plan forward, with led physical setup first and test, then ir, then speaker, then what plan")
+
+The 26 Aug audit and the 30 Aug strategic-redirect checkpoint below both documented the bring-up
+order as power bus → GPIO → **horn** → LED → IR → Bridge registration → filmed end-to-end test. The
+user has now explicitly reordered this: **LED first, then IR, then horn/speaker**, then combine.
+This checkpoint records the finalized order and the full plan through to field-deployment
+readiness — treat this as superseding the actuator sequencing in every earlier checkpoint (the
+non-sequencing content of those checkpoints, e.g. the known `delay()`-blocking bug, the
+IR-cut-filter test requirement, and the Bridge-registration regression history, all still applies
+unchanged).
+
+**Stage 0 — Power bus finished and verified (prerequisite to every stage below, not skippable).**
+Complete fuse + switch wiring per `hardware/WIRING_GUIDE.md` §1. Multimeter-verify every buck
+output with **no load connected** — the 12V rail (horn + IR) and whichever rail feeds the LED wings
+(user has floated 3.3V) — against their set points before anything downstream is connected. Only
+then connect the real LiFePO4 pack, per ADR 0012's discipline (the pack's own BMS is the only
+overvoltage backstop in this design, so a clean buck reading before connection is the whole safety
+margin). This can happen in parallel with Stage 1's wiring prep, but no actuator gets bus power
+until this stage reads clean.
+
+**Stage 1 — LED wing, physical setup and test (first, per the user's reorder).**
+Before wiring: resolve the still-open firmware/design mismatch — `WIRING_GUIDE.md` §4.0 documents a
+4-channel/10-LED redesign (white-L/R, blue-L/R, decided 22 Aug) that was never implemented in
+firmware; the user's actual build is the simpler 2-wing/2-MOSFET design (2 blue + 3 white LEDs in
+parallel per wing) on the existing `LED_WHITE_PIN`(5)/`LED_BLUE_PIN`(6) pins. Firmware and docs
+should reflect whichever one is actually being wired before the fire-test harness is trusted to
+mean anything. Also still open: no series resistors on the parallel LEDs was flagged as a real
+cascading-thermal-failure risk for a multi-day unattended trial — worth a final decision before
+this stage, not after.
+1. Wire one wing (one MOSFET, its 5 LEDs in parallel, gate resistor + pulldown per the project's
+   standard IRLZ44N low-side pattern).
+2. Flash with `FIRE_TEST_HARNESS 1`, trigger the LED command, and **physically watch it fire** —
+   the harness has only ever confirmed a serial ack before, never a real actuator response.
+3. Repeat for the second wing.
+4. Fire both wings together once each is individually confirmed; check the shared buck doesn't sag
+   under combined draw.
+
+**Stage 2 — IR illuminator.**
+Do the IR-cut-filter dark test *first*, before wiring anything — this has been an open, unconfirmed
+item since the 26 Aug audit. If the camera's IR-cut filter blocks the 940nm illuminator, night
+captures blackout and the illuminator's placement/approach needs rethinking before wiring commits to
+a physical position. Then wire per §5 (dedicated 12V buck), same low-side IRLZ44N pattern on
+`IR_ILLUMINATOR_PIN`(7). Fire-test with a phone camera pointed at the illuminator in a dark room —
+940nm is invisible to the naked eye but visible to most phone camera sensors, so this is the actual
+way to confirm it's firing, not just a multimeter continuity check.
+
+**Stage 3 — Horn/speaker.**
+Confirm the amp wiring matches the corrected understanding from earlier this window: the
+`HORN_AMP_ENABLE_PIN`(4) MOSFET switches the XH-M543 amp module's **GND return path** (low-side),
+not a logic enable pin (it doesn't have one) and not literally the VCC line as `WIRING_GUIDE.md` §3
+item 4's current wording says — worth fixing that wording while this stage is being wired anyway.
+Confirm the DFPlayer PRO has the actual deterrent audio file(s) loaded before the fire-test, then
+flash and **physically listen** for the horn firing — same "don't trust the serial ack alone"
+discipline as the other two stages. `HORN_AMP_ENABLE_DELAY_MS=150` is unmeasured engineering
+judgement, not bench data — this is the first real chance to confirm the amp actually needs that
+warm-up delay.
+
+**Stage 4 — Combine all three actuators on the final power bus.**
+Fire LED + IR + horn close together (horn is the highest single current draw) and watch for voltage
+sag or brownout on the shared bus. Confirm total peak combined current still sits inside the
+battery's 3C discharge rating and the revised 6A fuse's margin — this was checked on paper in the
+solar/power review earlier this window, this stage is the first real measurement against a load
+that actually exists.
+
+**Stage 5 — Register `Bridge.provide()` functions one at a time, never batched.**
+`drive_horn`, `drive_led`, `pulse_ir`, `get_system_state` are all still commented out — this is why
+nothing has ever been actuated from the real decision loop, wiring aside. Register and test each
+individually; a past batched registration broke every previously-working function, so this is a
+known regression risk, not caution for its own sake. `SAFE_MODE` stays on through this stage.
+
+**Stage 6 — Revisit the known `delay()`-blocking bug now that it's live, not theoretical.**
+Actuator `delay()` calls block `loop()` for up to ~3.15s during a horn fire, silently dropping
+geophone/LoRa reads during that window — documented since the 15 Aug geophone bring-up, unfixed
+because nothing could trigger it for real until actuators exist. Decide fix-vs-accept for the field
+trial once Stage 5 makes it observable.
+
+**Stage 7 — One real filmed end-to-end test, `SAFE_MODE` off.**
+Geophone trigger through the fusion decision to an actual horn/LED/IR response, filmed. Still the
+single highest-leverage piece of evidence for both field-deployment sign-off and the Hackster
+write-up — nothing before this stage substitutes for it.
+
+**Stage 8 — Parallel-track items that don't gate Stages 1-7 but do gate an actual 10-day unattended
+deployment:** LoRa hands-on debug (voltage logic-level mismatch or AT-mode hypothesis, plus the
+gateway's still-unresolved EU868→IN865 band move — 868MHz is illegal in India per `CONTEXT.md`);
+camera confirmed working from VIN/battery power, not just USB-C (never tested); enclosure sealing
+physically confirmed, not just designed; solar panel bench-connected and load-tested if not already.
+
+**Stage 9 — Go/no-go against the 2 Sept deadline**, using the gate criteria already given this
+window (power bus verified live, all three actuators wired/fired/confirmed, one real filmed
+trigger-to-deterrence cycle, LoRa working or a documented fallback decided, enclosure actually
+sealed) — with the project's own documented partial-coverage fallback as the honest move if time
+runs out, rather than deploying anything still untested on faith.
+
+**Repo lineage note (new this checkpoint, correction added same session):** the user pasted
+`github.com/Abhinavkrishna3211/EleTect` (no "-X") by mistake — the intended repo was, and always
+is, `EleTect-X`. Kept below for the record since it is still real, useful background: it is a
+separate, **public** repo, not the same repo under another name (`git ls-remote` succeeds with no auth; `EleTect-X` requires auth, consistent with its known
+Private status). It is the **original EleTect submission**: built on Seeed Grove Vision AI V2 +
+Xiao ESP32S3 Sense, a honeybee-buzzing-sound deterrent (not the current horn/LED/IR trio), 12
+commits, and its README points directly at
+`hackster.io/517317/eletect-mitigating-human-elephant-conflict-with-tinyml-31a66d`. This is very
+likely the exact Hackster project page this project's "Hackster submission 13 Sept" deadline means
+to **update**, not a fresh submission — worth confirming with the user before the Hackster-write-up
+work starts, since an update vs. a new-project submission are different tasks. No action taken on
+the old repo itself this checkpoint, informational only.
+
+## 30 Aug, latest (git cleanup confirmed done and pushed; hyperparameter trials explicitly declined for now; physical hardware bring-up remains the sole priority)
+
+Closing the loop on the strategic redirect above. The execution session completed exactly what was
+asked, cleanly:
+
+- **6 commits landed and pushed** (`b5e139a`..`38e909e`, `develop` now matches `origin/develop`,
+  confirmed via `git rev-list --count origin/develop..develop` = 0). Push had been silently blocked
+  by a `gh`/git-credential auth-context mismatch (wrong GitHub account active), not a repo problem
+  — fixed with `gh auth switch`. Repo stayed Private throughout, as instructed.
+- **A real secret leak was caught before it hit a commit** — `docs/VISION_MODEL_BUILD_PROMPT.md` had
+  the live `EI_API_KEY` prefix and a full plaintext Roboflow key in prose. Redacted, verified clean
+  with two grep sweeps. Worth remembering: this repo is Private-on-free-tier, so GitHub's own
+  secret-scanning is not running — the manual grep step is the only backstop, keep doing it on every
+  future commit into this repo, not just this one.
+- **Repo health check, all clean**: Private confirmed, not archived/disabled, 0 open issues/PRs,
+  collaborators = just the owner, CI green on the last 6 runs. `main` is 18 commits behind `develop`
+  — real but explicitly not fixed this pass (not asked for, not urgent while the repo is Private and
+  has no other viewers) — defer to right before the Hackster visibility flip.
+
+**Explicit decision on the 6 untried hyperparameter axes (freeze-backbone, augmentation strength,
+resolution retry on YOLO-Pro, LR/batch size, early-stopping epoch, validation split): declined for
+now, not deferred-and-forgotten.** The execution session correctly did not treat "stop, this is
+cleanup not new work" as license to launch these on its own, and asked explicitly. Answer: don't run
+them. Every axis already tried has independently plateaued, the ≥92% bar likely needs more
+domain-matched Elephant data rather than more tuning on the current corpus, and there are ~3 days
+left before the 2 Sept trial with zero physical hardware wiring done. This stays a documented,
+prioritized backlog item (see `ml/vision/README.md`'s "Hyperparameter axes never actually swept"
+section for the priority order if it's ever picked back up) — not something to spend trial-prep time
+on.
+
+**`main` 18 commits behind `develop`: also declined for now**, same reasoning — cheap but not free
+(context switch, another verification pass), not blocking anything while the repo is Private. Do
+this right before flipping visibility to Public ahead of the Hackster submission, as one combined
+step.
+
+**The instruction stands unchanged a third time: all remaining time goes to physical hardware
+bring-up**, per the order in the checkpoint immediately below. Vision-model work (tuning, dataset
+work, git hygiene) is fully paused, not just deprioritized — nothing in that category should resume
+before either the 2 Sept trial happens or someone explicitly reopens it.
+
+## 30 Aug, later (planning-session strategic redirect: STOP vision tuning, pivot everything to physical hardware bring-up — 2 Sept field deployment is ~3 days out and zero actuator-wiring progress has been reported since 26 Aug)
 
 Written from the planning session after reviewing the full 26-30 Aug vision-model engagement (four
 days of real, high-quality work — dataset forensics, architecture head-to-head, capacity ladder,
