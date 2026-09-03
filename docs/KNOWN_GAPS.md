@@ -2136,3 +2136,91 @@ should not be cited as evidence of the model regressing or improving. The genuin
 is the entry above this one (`≥92%-per-class-recall bar` not met on real held-out data) — this run
 neither confirms nor worsens it. Status: **closed** as an investigation (root cause understood); the
 underlying recall gap stays **open**, tracked separately, unchanged by this finding.
+
+## ADR 0020's event-video pipeline as coded could not run on real hardware; fixed, verified, still gated off (3 Sept)
+
+Two independent bugs meant every real trigger in the field would have failed to record, silently
+(`EVENT_VIDEO_ENABLED` still defaulted to False, so nothing would have noticed until someone went
+looking for footage that didn't exist):
+
+1. **`matroskamux` is unreachable from `v4l2h264enc` on this board, and the reason is
+   structural, not a missing flag.** `v4l2h264enc`'s src pad only ever emits byte-stream H.264;
+   `matroskamux`'s sink only accepts avc/avc3. The element that bridges the two, `h264parse`,
+   lives in `gstreamer1.0-plugins-bad`, which is **not installed in the production container and
+   cannot be** — confirmed via `apt-get install -s gstreamer1.0-plugins-bad` inside
+   `eletect-x-main-1`: no installation candidate in the pinned Debian trixie snapshot repo, and the
+   container user (`arduino`) has no root. `jpegparse`, from the same missing package, turned out
+   to be unneeded — `jpegdec` takes `v4l2src`'s MJPEG buffers directly with zero errors.
+2. **`EVENT_VIDEO_FRAMERATE = 15` did not correspond to any real camera mode.** GStreamer's
+   `v4l2src` negotiates exact discrete caps and rejects anything the sensor doesn't advertise —
+   unlike OpenCV's V4L2 backend used elsewhere in this codebase, which silently snaps to the
+   nearest supported mode. `services/config.py`'s own comment claimed the camera "is free to
+   negotiate the nearest mode it actually supports"; that claim was false for this code path.
+   Swept on the real sensor: at 1280×720, 5/10/15/20/25fps all fail `not-negotiated`; only 30fps
+   links. A broader sweep across several resolutions found no combination offering 15fps at all —
+   30fps is this sensor's only mode at any usable size, not a fallback from one.
+
+**Fix, validated on real hardware:** drop the muxer entirely and write the H.264 encoder's output
+straight to a `filesink` as a raw Annex-B elementary stream (`perception/video.py`,
+`services/config.py`'s `EVENT_VIDEO_SUFFIX` now `.h264`); accept 30fps
+(`EVENT_VIDEO_FRAMERATE = 30`). A 6-second dual-branch recording against the real camera on
+`eletect-x-main-1` produced zero pipeline errors; the resulting file was pulled to a separate
+machine and decoded cleanly frame-by-frame via OpenCV/FFmpeg, confirming real, sharp, correctly
+oriented frames — the first time this project has proven the encode chain works end to end on real
+hardware. Dropping the muxer is arguably a stronger version of ADR 0020's own truncation-resilience
+argument, not a downgrade of it: an elementary stream has no header or index to corrupt at all, so a
+brown-out mid-write (a documented, observed failure on this board, see the brown-out entries above)
+leaves a valid, playable stream missing only its trailing frames. Host suite green (362 passed, 1
+skipped) and `ruff check` clean against the changed files.
+
+**Still open, and still why `EVENT_VIDEO_ENABLED` stays False:**
+
+- The encoder's bitrate control does not appear to take effect. `EVENT_VIDEO_BITRATE_BPS =
+  2_000_000` (2 Mbps) should produce roughly 1.5MB over 6s; the observed output was 24.8MB over 6s
+  (~33 Mbps effective, ~16x over target). `v4l2h264enc`'s `extra-controls` silently drops
+  unrecognised V4L2 control names rather than erroring, so `video_bitrate` is suspected wrong for
+  this board's Venus encoder rather than genuinely ignored — not yet confirmed, since `v4l2-ctl` is
+  not present in the production container to enumerate the encoder's real controls. Real storage
+  consequence: at the observed rate a 45s extended watch-window event (`EVENT_VIDEO_RETREAT_TAIL_S`)
+  would run roughly 180+MB against ~15GB free on `/home/arduino`.
+- Every check above ran on **USB-C/hub power, not VIN.** The field build is VIN-powered, and
+  whether the camera enumerates at all under that topology is a separate, still-open question (see
+  the VIN/brown-out entries above) — the video feature and the pre-existing JPEG-burst path both
+  rest on it.
+
+Status: **open** (bitrate control, VIN-power camera check) with the two hardware-blocking bugs
+above **fixed and verified**.
+
+## Sudden power loss recovers cleanly today; an in-process crash while powered does not (3 Sept)
+
+Asked and checked directly, because a field trial that goes dark silently after a fault is as bad
+as one that never worked. Two different failure modes, two different answers:
+
+**Sudden power loss → power restored: already working, and not by luck.** This board's own
+brown-out history (documented above) has produced repeated real sudden-power-loss events — `last
+-x reboot` shows four in the 24 hours before this check, every one ending in `crash`, none in an
+orderly shutdown. Checked what happens after each: `docker.service` and `arduino-app-cli.service`
+are both `systemctl enabled` (start unconditionally at boot, `Restart=always` on the daemon unit
+itself), and `arduino-app-cli` relaunches the `eletect-x-main-1` app container itself on daemon
+start — confirmed by `docker inspect`'s `StartedAt` landing ~40s after the daemon's own start on
+the most recent boot, with `RestartCount: 0` (a fresh, clean start, not a crash loop). Checked
+`journalctl -b -1` and `-b -2` (the two prior crash-boots): both show `docker.service` and
+`arduino-app-cli.service` starting clean with no errors beyond benign internal Docker sandbox-cleanup
+noise. `CAMERA_DEVICE` already resolves through the udev by-id symlink rather than a bare `/dev/videoN`
+index specifically because raw indices are known to reshuffle across a reboot (verified 17 Aug,
+see `services/config.py`'s own comment) — so the camera path survives this too. The
+`ExperienceStore` SQLite connection uses no `journal_mode=WAL` or `synchronous=OFF` override, so
+SQLite's default rollback-journal crash safety applies with no application code needed to recover a
+transaction torn by a mid-write power cut. `main.py` also unconditionally clears orphaned video
+scratch files left by a run that died mid-recording, on every startup, specifically for this case.
+
+**An in-process crash while the board stays powered is a real, separate gap, already named
+above (2 Sept brown-out entry: "no documented Linux hardware watchdog — use Monit for app
+auto-restart + alerts").** `main.py` runs as PID 1 inside `eletect-x-main-1` with the container's
+own `RestartPolicy` set to `no` and no exception handling anywhere in its top-level module code —
+so an unhandled exception anywhere in the wiring, or in the final `while True: time.sleep(1)`,
+would exit PID 1, exit the container, and leave the deterrence system dark until the next reboot or
+a manual `arduino-app-cli app restart`. This has not been exercised live (killing PID 1 in the
+production container was deliberately not done without asking first) and is not yet fixed — the
+remedy named in the brown-out entry (a `Restart=on-failure` supervisor, or Monit) still stands as
+the concrete next step if this needs closing before the field trial. Status: **open**.
