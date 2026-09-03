@@ -193,9 +193,14 @@ class _FakeVisionDetect:
     used/dropped/contributions bookkeeping, not any fused log-odds value.
 
     Args:
-        detections: What every call should return - a flat list applied
-            regardless of how many images are passed in, since no test here
-            needs per-image differentiation.
+        detections: What every frame in every call should return - the same
+            flat list broadcast to each image passed in, since no test here
+            needs per-image differentiation. Implements VisionDetectFn's
+            list[list[Detection]] shape by repeating this list once per
+            image (list[Detection] appears on every frame -> qualifies
+            under both the default one-frame-is-enough gate and any
+            per-label majority gate alike, so this fake needs no change
+            for either).
         raises: If set, __call__ raises this instead of returning.
     """
 
@@ -212,7 +217,7 @@ class _FakeVisionDetect:
         self.calls.append(list(images))
         if self._raises is not None:
             raise self._raises
-        return self._detections
+        return [list(self._detections) for _ in images]
 
 
 class _FakeSaveFrames:
@@ -1765,8 +1770,18 @@ class _ScriptedVisionDetect:
     only has to describe the interesting prefix.
 
     Args:
-        script: Per-call results. A list of Detections is returned; an
-            Exception instance is raised instead.
+        script: Per-call results. Two shapes for a non-exception entry,
+            chosen by what most tests need to say: a flat list of
+            Detections (e.g. `[BOAR]`) is broadcast to every frame in that
+            call - implements VisionDetectFn's list[list[Detection]] shape
+            without every existing script needing to know frame counts,
+            and is indistinguishable from "this label was on every frame"
+            to any per-label burst gate. A list of lists (e.g.
+            `[[BOAR], [], [BOAR]]`) is passed straight through, one entry
+            per frame, for the tests that need to plant a label on only
+            some of a burst's frames - the within-burst majority gate
+            cannot be exercised any other way. An Exception instance is
+            raised instead of either.
     """
 
     def __init__(self, script: list):
@@ -1778,7 +1793,9 @@ class _ScriptedVisionDetect:
         item = self._script[min(self.calls - 1, len(self._script) - 1)]
         if isinstance(item, Exception):
             raise item
-        return item
+        if item and isinstance(item[0], list):
+            return item
+        return [list(item) for _ in images]
 
 
 class _Clock:
@@ -2086,6 +2103,205 @@ def test_the_watch_never_sleeps_past_its_own_deadline():
     assert sum(clock.sleeps) == pytest.approx(2.5)
 
 
+# --- VISION_SPECIES_CONSECUTIVE_POLLS debounce ------------------------------
+#
+# services/config.py's VISION_SPECIES_CONSECUTIVE_POLLS gates entry into
+# watch.species per label, not confirmation - see that constant's own
+# comment. Boar is 2 there; every label not listed, Elephant included,
+# defaults to 1 (see _required_consecutive_polls()). These tests exercise
+# the streak counters directly against the real configured value rather
+# than monkeypatching a smaller one, because the whole point is proving
+# what the shipped constant does.
+
+
+def test_an_isolated_boar_poll_never_enters_species():
+    """One spurious Boar box must not be enough - that is the entire fix.
+
+    The 30 Aug 2-hour live run measured a 31.53% per-frame Boar
+    false-positive rate; a single poll admitting Boar into species would
+    carry that noise straight through to _worth_filming.
+    """
+    camera = _FakeCamera()
+    detect = _ScriptedVisionDetect([[BOAR], [], []])
+
+    watch, _ = _watch(camera, detect, 45.0, poll_interval_s=1.0)
+
+    assert "Boar" not in watch.species
+
+
+def test_two_consecutive_boar_polls_enter_species_from_the_second():
+    """The streak has to actually reach 2, not merely accumulate 2 sightings.
+
+    Distinguishes a real consecutive-poll gate from a simple seen-twice
+    counter, which alternating or sparse sightings would also satisfy.
+    """
+    camera = _FakeCamera()
+
+    watch_after_one, _ = _watch(camera, _ScriptedVisionDetect([[BOAR]]), 0.0)
+    assert watch_after_one.polls == 1
+    assert "Boar" not in watch_after_one.species
+
+    watch, _ = _watch(
+        camera, _ScriptedVisionDetect([[BOAR], [BOAR]]), 1.0, poll_interval_s=1.0
+    )
+    assert watch.polls == 2
+    assert "Boar" in watch.species
+
+
+def test_an_alternating_boar_streak_resets_and_never_admits():
+    """A gap poll must zero the streak, not merely pause it.
+
+    Boar / empty / Boar / empty never presents two polls in a row, so under
+    a true consecutive-poll gate it must never qualify - only a (buggy)
+    seen-twice-anywhere counter would let it through.
+    """
+    camera = _FakeCamera()
+    detect = _ScriptedVisionDetect([[BOAR], [], [BOAR], [], [BOAR]])
+
+    # watch_s=4.0 at a 1.0s poll interval runs exactly 5 polls - one per
+    # scripted entry, so the script's own repeat-last-entry behaviour never
+    # comes into play.
+    watch, _ = _watch(camera, detect, 4.0, poll_interval_s=1.0)
+
+    assert watch.polls == 5
+    assert "Boar" not in watch.species
+
+
+def test_a_sustained_boar_streak_is_admitted_exactly_once():
+    """Once qualified, a label stays in species - it does not re-arm each poll.
+
+    seen_species is a union over the whole window; nothing about a longer
+    streak should change its membership, only how soon it was added.
+    """
+    camera = _FakeCamera()
+    detect = _ScriptedVisionDetect([[BOAR], [BOAR], [BOAR], [BOAR]])
+
+    # watch_s=3.0 at a 1.0s poll interval runs exactly 4 polls - one per
+    # scripted entry.
+    watch, _ = _watch(camera, detect, 3.0, poll_interval_s=1.0)
+
+    assert watch.polls == 4
+    assert "Boar" in watch.species
+
+
+def test_elephant_still_enters_species_on_a_single_poll():
+    """Elephant's default streak requirement is 1 - this debounce must cost it nothing.
+
+    The regression guard for the whole feature: Boar getting a streak gate
+    must not accidentally change Elephant's admission latency or
+    confirm-and-exit semantics.
+    """
+    camera = _FakeCamera()
+    detect = _ScriptedVisionDetect([[ELEPHANT]])
+
+    watch, _ = _watch(camera, detect, 45.0, poll_interval_s=1.0)
+
+    assert watch.polls == 1
+    assert watch.confirmed_on_poll == 1
+    assert "Elephant" in watch.species
+
+
+def test_boar_and_elephant_streaks_are_tracked_independently():
+    """Two labels in the same poll must not share or interfere with one counter.
+
+    Elephant confirms and ends the watch on poll 2 here regardless of
+    Boar's progress, but Boar's own streak must still have advanced
+    correctly on both polls it appeared in.
+    """
+    camera = _FakeCamera()
+    detect = _ScriptedVisionDetect([[BOAR], [BOAR, ELEPHANT]])
+
+    watch, _ = _watch(camera, detect, 45.0, poll_interval_s=1.0)
+
+    assert watch.polls == 2
+    assert watch.confirmed_on_poll == 2
+    assert "Elephant" in watch.species
+    assert "Boar" in watch.species
+
+
+# --- VISION_SPECIES_BURST_MAJORITY_LABELS gate ------------------------------
+#
+# services/config.py's VISION_SPECIES_BURST_MAJORITY_LABELS gates
+# _vision_check()'s within-one-burst aggregation, a different axis from the
+# across-polls streak counters just above: this decides whether a label
+# needs to appear on more than half of a single poll's frames, or just one,
+# before it counts at all - for species membership *and* confirmation.
+# Boar is listed there; every other label, Elephant included, defaults to
+# the original one-frame-is-enough (OR) behaviour. Exercised directly
+# against _vision_check() rather than through _watch_for_vision(), because
+# _watch_for_vision() has no target_labels override yet (Workstream 3) and
+# Boar is not in the default VISION_TARGET_LABELS - so confirmation on Boar
+# can only be observed by calling _vision_check() with an explicit
+# target_labels that includes it, the same way a future confirmation-path
+# caller would.
+
+
+def _frames(count: int) -> list[Frame]:
+    return [Frame(image=None, index=i, timestamp_s=0.0) for i in range(count)]
+
+
+def test_boar_on_a_minority_of_the_burst_is_excluded_from_species_and_confirmation():
+    """One spurious Boar box in a 3-frame burst must not count for anything.
+
+    This is the failure mode the majority gate exists to fix: under the old
+    flat-OR aggregation this single box would have both entered `species`
+    and, had Boar been a target label, confirmed the watch.
+    """
+    detect = _ScriptedVisionDetect([[[BOAR], [], []]])
+
+    check = reflex_loop._vision_check(detect, _frames(3), target_labels=("Boar",))
+
+    assert "Boar" not in check.species
+    assert check.confirmed is False
+
+
+def test_boar_on_a_majority_of_the_burst_is_admitted_and_confirms():
+    """Two of three frames is a real majority - the label must count.
+
+    Same burst size as the minority case above, only the count differs,
+    isolating the gate's own threshold rather than anything about the
+    frames themselves.
+    """
+    detect = _ScriptedVisionDetect([[[BOAR], [BOAR], []]])
+
+    check = reflex_loop._vision_check(detect, _frames(3), target_labels=("Boar",))
+
+    assert "Boar" in check.species
+    assert check.confirmed is True
+
+
+def test_elephant_on_a_minority_of_the_burst_still_counts():
+    """Elephant is not in VISION_SPECIES_BURST_MAJORITY_LABELS - one frame is enough.
+
+    The regression guard for the whole feature: scoping the majority gate
+    to Boar must not cost Elephant any sensitivity, since a missed real
+    elephant, not a false one, is the safety-relevant failure for this
+    class. Byte-for-byte the pre-3-Sept-2026 flat-OR behaviour for
+    Elephant specifically.
+    """
+    detect = _ScriptedVisionDetect([[[ELEPHANT], [], []]])
+
+    check = reflex_loop._vision_check(detect, _frames(3), target_labels=("Elephant",))
+
+    assert "Elephant" in check.species
+    assert check.confirmed is True
+
+
+def test_a_majority_rejected_boar_reading_contributes_no_positive_evidence():
+    """A rejected poll must fall back to BASELINE_VISION, not the detector's own confidence.
+
+    Carrying the raw confidence forward here would let a single spurious
+    Boar frame push positive log-odds into fuse() even though nothing was
+    confirmed - the same trap Workstream 3's confirmation-path design
+    calls out for the across-polls debounce, on the within-burst axis.
+    """
+    detect = _ScriptedVisionDetect([[[BOAR], [], []]])
+
+    check = reflex_loop._vision_check(detect, _frames(3), target_labels=("Boar",))
+
+    assert check.reading.log_odds == pytest.approx(cognition_config.BASELINE_VISION)
+
+
 # --- _vision_could_see ------------------------------------------------------
 
 
@@ -2373,6 +2589,19 @@ def test_a_boar_only_event_keeps_its_video_when_boar_is_configured(monkeypatch):
     A boar on a quiet trigger never confirms and never alerts, so it leaves
     through the no-actuation exit. That is the only place its recording can
     be kept, and under the default configuration it correctly is not.
+
+    Boar now needs VISION_SPECIES_CONSECUTIVE_POLLS["Boar"] = 2 consecutive
+    polls before it is admitted into a watch's species set (see
+    services/config.py), so the single-poll window _fire() defaults to
+    (vision_watch_base_s=0.0) is no longer enough to reproduce the
+    keeps-its-video behaviour this test exists to protect - that window
+    always runs exactly one poll. Give it a real, if tiny, positive window
+    with poll_interval_s=0.0 instead: interval 0 means the loop never
+    sleeps between polls (see _watch_for_vision's start-to-start pacing),
+    so it free-runs against the real monotonic clock until the window
+    closes, easily completing many polls - and therefore Boar's 2-poll
+    streak - inside a few milliseconds of wall time, against a fake
+    detector and camera that both return instantly.
     """
     monkeypatch.setattr(reflex_loop, "VISION_VIDEO_LABELS", ("Elephant", "Boar"))
     video = _FakeEventVideo()
@@ -2382,6 +2611,8 @@ def test_a_boar_only_event_keeps_its_video_when_boar_is_configured(monkeypatch):
         sta_lta_ratio=3.0,
         detect_vision=_FakeVisionDetect([BOAR]),
         event_video=video,
+        vision_watch_base_s=0.05,
+        vision_watch_poll_interval_s=0.0,
     )
 
     assert outcome.decision.alert is False
