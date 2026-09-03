@@ -406,6 +406,15 @@ class CameraProtocol(Protocol):
         """Capture up to count frames - see Camera.capture_burst's own contract."""
         ...
 
+    def lock_night_exposure(self) -> bool:
+        """Lock to a fixed night exposure - see Camera.lock_night_exposure's contract.
+
+        Returns whether the lock actually took (verified read-back), never
+        raises. Called only once night is already confirmed and only right
+        before the IR-lit evidence burst - see handle_footfall_event.
+        """
+        ...
+
     def close(self) -> None:
         """Release the device - idempotent, see Camera.close's own contract."""
         ...
@@ -1948,7 +1957,20 @@ def handle_footfall_event(
             logger.exception("is_night() raised - firing pulse_ir anyway")
             night = True
         if night is True:
-            pass
+            # docs/qa/night-ir-led-characterisation.md, Finding 4: this is
+            # exactly the combination (auto-exposure + IR pulse) that threw
+            # every spurious Boar box the characterisation battery
+            # produced. Locking exposure here, right before the burst the
+            # pulse is about to illuminate, is the fix. camera.open() is
+            # guaranteed to have succeeded by this point - night is only
+            # ever True or (on the except branch above) forced True when
+            # is_night() actually ran on real vision-check frames, and an
+            # empty/never-opened camera makes frames_are_night() return
+            # None, not True, per its own contract. Never blocks: a lock
+            # that fails or is disabled just leaves the capture on whatever
+            # exposure mode the camera already had, logged inside
+            # lock_night_exposure() itself.
+            camera.lock_night_exposure()
         elif night is False:
             logger.info(
                 "pulse_ir suppressed: vision-check frames read as daylight "

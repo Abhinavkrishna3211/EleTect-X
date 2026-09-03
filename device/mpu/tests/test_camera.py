@@ -9,7 +9,9 @@ property.
 
 import pytest
 
+from perception import camera as camera_module
 from perception.camera import Camera, CameraError, fourcc_to_int
+from services import config as services_config
 
 
 class _FakeCapture:
@@ -35,6 +37,10 @@ class _FakeCapture:
         reported_height=1080,
         reported_fourcc="MJPG",
         reported_fps=30.0,
+        auto_exposure=3,
+        exposure=156,
+        ignore_exposure_writes=False,
+        raise_on_set=None,
     ):
         self._frames = list(frames)
         self._opened = opened
@@ -42,6 +48,22 @@ class _FakeCapture:
         self._reported_height = reported_height
         self._reported_fourcc_int = fourcc_to_int(reported_fourcc)
         self._reported_fps = reported_fps
+        # auto_exposure/exposure default to this camera's real documented
+        # defaults (UVC Aperture Priority Mode / exposure_time_absolute
+        # 156) - see perception.camera's _UVC_EXPOSURE_MODE_* and
+        # _CAP_PROP_* constants.
+        self._auto_exposure = auto_exposure
+        self._exposure = exposure
+        # ignore_exposure_writes: set() records the call and reports
+        # success but the underlying state does not move - models the
+        # documented "a set() that reports success on a control the
+        # device silently ignores" failure mode (Camera.lock_night_exposure's
+        # own docstring), so lock_night_exposure()'s read-back check has
+        # something real to catch.
+        self._ignore_exposure_writes = ignore_exposure_writes
+        # raise_on_set: {prop_id: Exception} - lets a test make exactly one
+        # control write blow up without touching the others.
+        self._raise_on_set = raise_on_set or {}
         self.set_calls = []
         self.released = False
 
@@ -50,15 +72,26 @@ class _FakeCapture:
 
     def set(self, prop_id, value):
         self.set_calls.append((prop_id, value))
+        if prop_id in self._raise_on_set:
+            raise self._raise_on_set[prop_id]
+        if self._ignore_exposure_writes and prop_id in (15, 21):
+            return True
+        if prop_id == 21:
+            self._auto_exposure = value
+        elif prop_id == 15:
+            self._exposure = value
         return True
 
     def get(self, prop_id):
-        # Matches the four hardcoded ids in perception.camera (3/4/5/6).
+        # Matches the six hardcoded ids in perception.camera (3/4/5/6 plus
+        # 15/21 for exposure control).
         return {
             3: self._reported_width,
             4: self._reported_height,
             5: self._reported_fps,
             6: self._reported_fourcc_int,
+            15: self._exposure,
+            21: self._auto_exposure,
         }[prop_id]
 
     def read(self):
@@ -221,6 +254,40 @@ def test_info_before_open_raises():
 
 
 # ---------------------------------------------------------------------------
+# open() - _assert_auto_exposure()
+# ---------------------------------------------------------------------------
+
+
+def test_open_asserts_auto_exposure_mode():
+    """open() forces UVC Aperture Priority Mode, guarding against stale device state.
+
+    docs/qa/night-ir-led-characterisation.md and the 3 Sept 2026 live
+    remediation it prompted: a previous opener can leave the device in
+    Manual Mode at a stale exposure, and that state survives close()/
+    release() and even a reboot because it lives on the device, not the
+    file handle. open() must write the auto default on every call, not
+    just the first.
+    """
+    factory = _factory(frames=[], auto_exposure=1, exposure=2000)  # stale Manual/2000
+    camera = Camera(warmup_frames=0, capture_factory=factory)
+
+    camera.open()
+
+    assert (21, 3) in factory.capture.set_calls
+    assert factory.capture._auto_exposure == 3
+
+
+def test_open_still_succeeds_when_auto_exposure_assertion_fails():
+    """A device that rejects the auto-exposure write still opens - never blocks capture."""
+    factory = _factory(frames=[(True, "ok")], raise_on_set={21: RuntimeError("control busy")})
+    camera = Camera(warmup_frames=0, capture_factory=factory)
+
+    camera.open()  # must not raise
+
+    assert camera.capture_frame() is not None
+
+
+# ---------------------------------------------------------------------------
 # capture_frame()
 # ---------------------------------------------------------------------------
 
@@ -321,6 +388,94 @@ def test_capture_burst_rejects_negative_interval():
     camera.open()
     with pytest.raises(ValueError, match="interval_s"):
         camera.capture_burst(count=1, interval_s=-0.1)
+
+
+# ---------------------------------------------------------------------------
+# lock_night_exposure()
+# ---------------------------------------------------------------------------
+
+
+def test_lock_night_exposure_succeeds_and_verifies_readback():
+    """A device that honours the writes locks manual mode at the requested value."""
+    factory = _factory(frames=[])
+    camera = Camera(warmup_frames=0, capture_factory=factory)
+    camera.open()
+
+    assert camera.lock_night_exposure(256) is True
+
+    assert factory.capture._auto_exposure == 1  # Manual Mode
+    assert factory.capture._exposure == 256
+    assert (21, 1) in factory.capture.set_calls
+    assert (15, 256) in factory.capture.set_calls
+
+
+def test_lock_night_exposure_defaults_to_the_configured_value():
+    """No argument locks at services.config.NIGHT_LOCKED_EXPOSURE, not a hardcoded number."""
+    factory = _factory(frames=[])
+    camera = Camera(warmup_frames=0, capture_factory=factory)
+    camera.open()
+
+    assert camera.lock_night_exposure() is True
+
+    assert factory.capture._exposure == services_config.NIGHT_LOCKED_EXPOSURE
+
+
+def test_lock_night_exposure_returns_false_when_the_write_does_not_stick():
+    """A set() that reports success but leaves the device unchanged reads back False.
+
+    The documented failure mode this read-back check exists to catch (see
+    Camera.lock_night_exposure's own docstring) - success must be verified,
+    not assumed from set() returning True.
+    """
+    factory = _factory(frames=[], ignore_exposure_writes=True)
+    camera = Camera(warmup_frames=0, capture_factory=factory)
+    camera.open()
+
+    assert camera.lock_night_exposure(256) is False
+    # Real Camera behaviour on a rejected lock: continue on whatever the
+    # camera already had, not raise and not retry.
+    assert factory.capture._auto_exposure == 3  # unchanged from the open()-time default
+
+
+def test_lock_night_exposure_returns_false_and_does_not_raise_on_a_control_error():
+    """A control write that raises is swallowed - a camera fault must never block capture."""
+    factory = _factory(frames=[(True, "ok")], raise_on_set={15: RuntimeError("device busy")})
+    camera = Camera(warmup_frames=0, capture_factory=factory)
+    camera.open()
+
+    assert camera.lock_night_exposure(256) is False  # must not raise
+    assert camera.capture_frame() is not None  # capture still works afterward
+
+
+def test_lock_night_exposure_returns_false_when_disabled_via_config(monkeypatch):
+    """The NIGHT_EXPOSURE_LOCK_ENABLED kill switch skips the write entirely, not just the effect."""
+    monkeypatch.setattr(camera_module.config, "NIGHT_EXPOSURE_LOCK_ENABLED", False)
+    factory = _factory(frames=[])
+    camera = Camera(warmup_frames=0, capture_factory=factory)
+    camera.open()
+    calls_before = list(factory.capture.set_calls)
+
+    assert camera.lock_night_exposure(256) is False
+
+    # No new exposure-control writes past whatever open() itself already made.
+    assert factory.capture.set_calls == calls_before
+
+
+def test_lock_night_exposure_before_open_raises():
+    """Locking before open() raises CameraError, same contract as every other method."""
+    camera = Camera(capture_factory=_factory(frames=[]))
+    with pytest.raises(CameraError, match="before open"):
+        camera.lock_night_exposure()
+
+
+def test_lock_night_exposure_after_close_raises():
+    """Locking after close() raises CameraError - the handle is really gone."""
+    camera = Camera(warmup_frames=0, capture_factory=_factory(frames=[]))
+    camera.open()
+    camera.close()
+
+    with pytest.raises(CameraError, match="after close"):
+        camera.lock_night_exposure()
 
 
 # ---------------------------------------------------------------------------

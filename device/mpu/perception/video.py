@@ -585,6 +585,56 @@ class EventVideoRecorder:
             frames.append(Frame(image=frame.image, index=i, timestamp_s=frame.timestamp_s))
         return frames
 
+    def lock_night_exposure(self, value: int = config.NIGHT_LOCKED_EXPOSURE) -> bool:
+        """Not implemented on this path. Satisfies CameraProtocol; always returns False.
+
+        perception.camera.Camera.lock_night_exposure (Finding 4,
+        docs/qa/night-ir-led-characterisation.md) works because
+        cv2.VideoCapture holds one open file descriptor per event that a
+        later cap.set() can still reach. This class has no equivalent
+        handle: build_pipeline_description() bakes `v4l2src device=...`
+        into a `Gst.parse_launch` string that is torn down and rebuilt
+        fresh on every open()/close() pair, so a manual-exposure write
+        would have to happen one of two ways, and neither is done:
+
+        - Bake it into the pipeline description via v4l2src's own
+          `extra-controls` property (the same mechanism this module
+          already uses on v4l2h264enc for bitrate mode, see
+          build_pipeline_description's docstring) - but that fixes the
+          exposure for the *whole* recording, including the pre-alert
+          watch segment this same recorder serves, not just the IR-lit
+          evidence burst Finding 4 is actually about. Whether that
+          trade-off is acceptable is unmeasured.
+        - Reach the already-PLAYING v4l2src element's property live
+          (GstElement.set_property mid-stream) - structurally possible,
+          completely unverified on this pipeline or this hardware, and
+          exactly the class of live-camera-state change this module's own
+          docstring already declines to do without a human present (see
+          the module docstring's frame-rate-throttle finding).
+
+        Either path needs its own hardware verification this session did
+        not do. This path is also inert today: EVENT_VIDEO_ENABLED
+        defaults False (services/config.py), so nothing calls open() on
+        this class in production yet. Tracked in docs/KNOWN_GAPS.md rather
+        than guessed at here.
+
+        Returns:
+            Always False. Never raises. The reflex loop already treats
+            False as "continue on whatever exposure mode the camera
+            already had" - see CameraProtocol.lock_night_exposure's
+            contract - so this is a correct, if unhelpful, answer.
+
+        Raises:
+            CameraError: If called before open() or after close(), same
+                as every other method on this class.
+        """
+        self._require_open()
+        logger.info(
+            "event video: night exposure lock not implemented for the GStreamer path - "
+            "continuing on whatever exposure mode the camera already had"
+        )
+        return False
+
     def close(self) -> None:
         """Stop recording and finish the file. Idempotent.
 
