@@ -63,6 +63,25 @@ logger.info(
     "to disable dry-run for a live session)",
     reflex_loop.SAFE_MODE,
 )
+# NODE_DETERRENCE_SCOPE (ADR 0023) beside SAFE_MODE, for the same reason:
+# an operational setting that changes what this node does must be visible
+# in the boot log, not just in an unread config file. This one carries a
+# real hazard the SAFE_MODE line does not - EXPERIENCE_DB_PATH is derived
+# from the scope (services/config.py's deterrence_scope_labels() and
+# experience_db_filename()), so a mid-trial flip to "both" silently resumes
+# whatever bandit policy the home-phase "both" run learned instead of the
+# trial's own cold-started one. Logging both together is what makes that
+# swap visible instead of invisible - see TRIAL_READINESS_PLAN.md's ship-day
+# checklist, which reads this exact line back.
+logger.info(
+    "NODE_DETERRENCE_SCOPE=%s (export ELETECT_DETERRENCE_SCOPE=elephant_only|"
+    "boar_only|both) deterrent_target_labels=%s event_video_target_labels=%s "
+    "experience_db=%s",
+    config.NODE_DETERRENCE_SCOPE,
+    config.DETERRENT_TARGET_LABELS,
+    config.EVENT_VIDEO_TARGET_LABELS,
+    config.EXPERIENCE_DB_PATH,
+)
 
 
 def debug_stream_raw_seismic_sample(volts: float) -> None:
