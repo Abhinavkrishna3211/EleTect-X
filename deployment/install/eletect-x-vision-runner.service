@@ -1,0 +1,15 @@
+[Unit]
+Description=EleTect-X Edge Impulse vision inference HTTP server (host-side, port 1337)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/arduino
+ExecStart=/usr/local/bin/edge-impulse-linux-runner --model-file /home/arduino/etx_cpu_final_0830.eim --run-http-server 1337
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/arduino/.local/state/eletect-x-vision-runner/service.log
+StandardError=append:/home/arduino/.local/state/eletect-x-vision-runner/service.log
+
+[Install]
+WantedBy=default.target
