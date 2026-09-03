@@ -786,6 +786,75 @@ criteria — see each entry's status.
     2-hour continuous live-camera run" entry. Status: open, medium-high severity for any future work
     that wires Boar detections into an actuation decision; not a blocker for the current
     Elephant-only fusion path.
+    **3 Sept update — the "should Boar suppress/modify an alert" question above is answered, and
+    the 31.53% nuisance rate is addressed, not just noted.** Full writeup and every real number in
+    `docs/qa/boar-gap-session-notes.md`; summary here.
+    First, the burst-OR risk this entry's own confidence rate implied was real but unmeasured is now
+    measured: replayed against the same 2-hour, 40,422-frame log on the board, aggregated the way
+    production actually consumes it (a poll is positive if *any* of its 3-frame burst is positive),
+    the poll-level baseline is **worse** than the frame rate above — 43.64% (2,942/6,742 polls) — and
+    a first attempt at a same-poll debounce (2 consecutive positive polls) barely moved it (40.48%).
+    Root cause: burst-OR lets one positive frame in three carry a whole poll positive, so counting
+    consecutive *polls* never touches same-poll noise. Fix: within-burst majority-of-3 aggregation
+    for Boar specifically, stacked with the 2-consecutive-poll debounce — **27.54% (1,857/6,742)**,
+    back in line with the frame-level number and a real ~13-point absolute reduction from the
+    43.64% poll baseline. Elephant stayed at 0% false positives through every stage (unconditionally
+    OR-based, never subject to the majority gate — a deliberate no-op guard, not an oversight).
+    Committed as `596b432`.
+    Second, a `NODE_DETERRENCE_SCOPE` tri-state flag (`elephant_only`/`boar_only`/`both`,
+    `services/config.py`) now lets a node deter and film Boar — shipped **flag-off**
+    (`elephant_only`, byte-for-byte today's `("Elephant",)` behaviour) so this is a commissioning
+    decision, not a code change. Building it surfaced a second, sharper finding: the confirmation
+    path (`check.confirmed` → immediate return from `_watch_for_vision`) bypasses the debounce
+    above entirely, so a single spurious Boar poll would confirm and fire the horn the moment Boar
+    entered `DETERRENT_TARGET_LABELS` — against a ~31-44% real per-poll FP rate, not a corner case.
+    Fixed by extending the same streak gate to confirmation itself (Elephant's streak requirement
+    stays 1, so its confirm-and-exit timing is bit-for-bit unchanged); see ADR 0023 for the full
+    design, including the derived-experience-DB-path mechanism that keeps a home-phase Boar-learned
+    bandit policy from silently carrying into the DFO trial. See `docs/decisions/0023-boar-deterrence-content-and-node-species-scope.md`
+    and `docs/research/boar-deterrence-behavioral-science.md`. Status: the flag and its host-side
+    logic are built and fully tested (398 passed, 1 skipped; `ruff` clean) but **not yet committed**
+    as of this entry — commit is the next scheduled action, still separate from `596b432`.
+- **A deployment-day config-delivery gap affects every `NODE_`-prefixed site attribute, not just the
+  new one (3 Sept).** Checked what actually setting a per-node commissioning constant requires on
+  the real board: `NODE_HOUSEHOLD_PROXIMITY` (existing) and `NODE_DETERRENCE_SCOPE` (new, above) are
+  both plain Python module constants in `services/config.py`. Neither has an env var, config file,
+  or CLI today — despite `NODE_HOUSEHOLD_PROXIMITY`'s own comment describing itself as "overridden
+  per deployment at commissioning time," and despite ADR 0021 naming it as the design's chief
+  safe-config field. ADR 0021 itself is design-only and unbuilt — there is no audited config
+  interface yet for either flag. It is not as easy to set on deployment day as it reads, and it is
+  not a reflash: `python/` is bind-mounted into the container as `/app`, so an SSH edit to
+  `services/config.py` plus `arduino-app-cli app restart user:eletect-x` applies without a rebuild —
+  but it is still an unreviewed source edit on a live field node, with no audit trail.
+  Given an env-first delivery path this session (`ELETECT_DETERRENCE_SCOPE` /
+  `ELETECT_HOUSEHOLD_PROXIMITY`, constant fallback, unknown value warns and falls back to the safe
+  default rather than raising) as an interim measure for both flags together — deliberately not
+  solved only for the new one, since fixing one and not the other is exactly how a second config
+  path gets invented by accident. The env path itself is unproven in delivery: nothing in the repo
+  shows an env var reaching the container's process environment today, since the App Lab
+  `app-compose.yaml` is regenerated on every redeploy (the same fragility the container
+  restart-policy watchdog was built to survive). So the *proven* one-minute path remains the direct
+  source edit above; the env override exists for whenever a service unit or ADR 0021's real
+  interface can deliver one. Exact SSH commands for both directions are in
+  `TRIAL_READINESS_PLAN.md`'s §D. Status: open, interim mitigation shipped, real fix is ADR 0021 —
+  not a blocker for the 5 Sept trial since the trial ships both flags at their safe defaults, but a
+  real gap for anyone flipping either flag on a field node without this session's context.
+- **The Arducam B0490's auto-exposure/AGC path is a likely contributor to the Boar false-positive
+  rate above, and to the 2-hour run's unexplained per-chunk swing — found by a different session,
+  cross-referenced here rather than duplicated (3 Sept).** `docs/qa/night-ir-led-characterisation.md`
+  is an independent board run pointing at camera control, not model weights: auto-exposure + IR was
+  the *only* configuration in that whole characterisation battery to produce a meaningful false-
+  positive population (15/22/28 spurious Boar boxes across three runs, `maxconf` up to 0.408 — above
+  the 0.2 deployment threshold), while locked exposure gave zero false positives across the same
+  battery. That session's own recommendation is on record: "auto-exposure at night should be
+  considered a bug for this pipeline." The deployed pipeline still runs AGC. This is a plausible
+  mechanism for this entry's own unexplained 1.2%-73.9% per-chunk false-positive swing in the 2-hour
+  log, which `ml/vision/README.md` explicitly leaves as "a hypothesis worth testing next, not a
+  conclusion" — not confirmed causal here, just recorded as the lead candidate. **Not implemented in
+  this session** — the camera-control code belongs to a separate session/track; a real
+  implementation blocker is already on record there too: the host V4L2 exposure-write path works,
+  but the container's camera path does not and sits frozen at a fixed exposure value, so whoever
+  picks this up hits that first. Status: open, cross-referenced only.
 - **ADR 0001 §6's two fusion limitations are accepted approximations, not resolved.** Correlated
   noise across modalities (rain/fog degrading seismic SNR and vision IR contrast together) and the
   MCAR assumption behind availability-gated dropout (vision being unavailable due to fog is

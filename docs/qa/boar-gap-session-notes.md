@@ -235,9 +235,195 @@ Workstream 1 — the debounce and the majority gate together — is now
 committed as the real fix; the code is correct, tested against the real
 2-hour log, and scoped to the class that actually has the problem.
 
-## Workstream 2, Workstream 3, exposure-lock write-up
+## Workstream 3 — per-node tri-state deterrence scope
 
-Not started this session — sequenced after the burst-OR decision above,
-per the plan's explicit ordering (Workstream 3 depends on Workstream 1
-being both committed and *actually sufficient*, which this replay says it
-is not, alone).
+Sequenced strictly after Workstream 1 landed (`596b432`), per the plan: the
+confirmation path bypasses the debounce entirely until this workstream closes
+that hole (see "the finding that makes the ordering non-negotiable" below).
+Everything in this section is uncommitted at the time of writing — `config.py`,
+`reflex_loop.py`, `cognition/config.py`, `main.py`, three test files, one new
+ADR, one new research doc. Commit is the next step after this note.
+
+### The confirmation-path bypass — why Workstream 1 alone was not enough
+
+`_vision_check` computes `confirmed` by intersecting raw detections with
+`DETERRENT_TARGET_LABELS`; `_watch_for_vision` returns immediately on the
+first `check.confirmed`. Workstream 1 debounces `seen_species` only — the
+confirm-and-exit path was, and had to stay, untouched for Elephant. So the
+moment Boar enters `DETERRENT_TARGET_LABELS` (`boar_only` or `both`), a
+single spurious Boar box on a single poll confirms, exits the watch, and
+fires the horn — against a measured ~31-44% poll-level Boar FP rate
+(Workstream 1's own numbers, above), not a corner case.
+
+Fix: the streak gate now also gates confirmation. Each poll, after the
+per-label streak counters update, the confirming labels are
+`check.species` intersected with `target_labels`. The early return is taken
+only once a confirming label has met its required streak (Elephant's is 1,
+so it is unchanged - confirms on the poll it first appears,
+`confirmed_on_poll`, `elapsed_s`, `clock.sleeps` and the fired tier all
+bit-for-bit identical to before). A streak-rejected poll no longer
+contributes `_confidence_log_odds(best_confidence)` to `fuse()` - it is
+downgraded to the same `BASELINE_VISION` reading a poll that saw nothing
+contributes. This was flagged in the plan as the part most likely to be got
+wrong silently; it has its own direct test (prior segment) plus this
+segment's end-to-end confirmation that no horn call, no kept video, and no
+positive fusion evidence result from a single spurious poll (below).
+
+### Config shape
+
+`services/config.py`, in the "Node site attributes" section beside
+`NODE_HOUSEHOLD_PROXIMITY` (ahead of `EXPERIENCE_DB_PATH`, which derives from
+it):
+
+```python
+NODE_DETERRENCE_SCOPE = os.environ.get("ELETECT_DETERRENCE_SCOPE", "elephant_only")
+```
+
+`deterrence_scope_labels(scope) -> (deterrent, video)` resolves all three
+states explicitly (`elephant_only` / `boar_only` / `both`); an unrecognised
+value logs a warning and falls back to `elephant_only`, never raises.
+`DETERRENT_TARGET_LABELS, EVENT_VIDEO_TARGET_LABELS =
+deterrence_scope_labels(NODE_DETERRENCE_SCOPE)` - at the shipped default this
+resolves byte-for-byte to `("Elephant",)` for both, same as before this
+change; only the assignment is rewritten, not the value. `NODE_HOUSEHOLD_PROXIMITY`
+got the identical env-first treatment (`ELETECT_HOUSEHOLD_PROXIMITY`) in the
+same commit, for the same reason - it is the same class of setting with the
+same deployment-day config-delivery gap (see fold-back below).
+
+`EXPERIENCE_DB_PATH` now derives from scope: `experience.sqlite3` at
+`elephant_only`, `experience-{scope}.sqlite3` otherwise (named by scope, not
+by phase - `experience-both.sqlite3`, not `experience-home.sqlite3`) - so
+reverting the flag is the same action that restores the trial's bandit DB,
+with no separate archive step to forget. `main.py`'s startup banner now logs
+`NODE_DETERRENCE_SCOPE`, both derived label tuples, and `EXPERIENCE_DB_PATH`
+together, specifically so a mid-trial scope flip (which would silently swap
+which learned policy the node is running) is visible in the boot log rather
+than invisible.
+
+### Boar horn content - `cognition/config.py`
+
+`resolve_tier_action(tier, rng, household_proximity, species="Elephant")` -
+every existing call site and test unaffected by the new default. Boar Tier 1
+reuses the lion track (Freesound 212764, CC-BY 3.0, ADR 0016 Decision C),
+Tiers 2/3 reuse the tiger track (Freesound 149190, CC-BY 4.0) - both already
+provisioned on the DFPlayer's onboard flash, so no new sourcing, no
+reprovisioning, no `SCHEMA_VERSION` bump. No bee track on any Boar tier
+(King et al. 2007's aversion mechanism - stinging near eyes/trunk - has no
+boar analogue), so Boar's tier ladder has one fewer content axis than
+Elephant's, stated as such rather than smoothed over.
+
+### Tests
+
+7 direct unit tests on `deterrence_scope_labels`/DB-path derivation (prior
+segment, `test_config.py`), 5 on `_deterrence_species` (prior segment,
+`test_reflex_loop.py`), 7 on the Boar tier content / no-bee-track guarantee
+(prior segment, `test_cognition_config.py`), plus one direct streak-downgrade
+test (prior segment, `test_reflex_loop.py`).
+
+This segment added the four end-to-end (`_fire()`-level) behavioural tests
+the plan's Testing section named explicitly, under the
+`# --- end-to-end tri-state scope (ADR 0023, NODE_DETERRENCE_SCOPE) ---`
+heading in `test_reflex_loop.py`:
+
+- `test_a_single_spurious_boar_poll_fires_nothing_even_under_boar_only` - one
+  Boar poll followed by an empty streak (`_ScriptedVisionDetect([[BOAR], []])`
+  under a free-running window) fires no `drive_horn`/`drive_led`, keeps no
+  video, contributes no positive fusion evidence.
+- `test_two_consecutive_boar_polls_fire_the_deterrent_and_keep_the_video` -
+  two consecutive Boar polls do all three.
+- `test_elephant_still_fires_on_the_first_poll_under_the_both_scope` -
+  Elephant still confirms on poll 1 under `both`; the new confirm gate costs
+  Elephant nothing.
+- `test_boar_fires_nothing_under_the_shipped_elephant_only_default_at_any_streak_length` -
+  Boar fires nothing under the shipped default regardless of streak length.
+
+All four passed on the first run - the probability/sta_lta_ratio calibration
+(weak seismic trigger, `probability=0.05, sta_lta_ratio=1.2`, insufficient
+alone but carried past the 0.5 alert threshold by a genuine confirmation at
+ELEPHANT/BOAR's fixture confidences of 0.9/0.99) was derived from reading
+existing fixture comments rather than by trial-and-error.
+
+Full-suite result after this segment's edits: **398 passed, 1 skipped** (399
+collected). `python -m ruff check .`: **all checks passed.** (`ruff` alone
+was not on PATH in this shell; `python -m ruff` was used instead - an
+environment quirk, not a code finding.) Existing watch-mechanics tests
+(exact `polls`/`confirmed_on_poll`/`elapsed_s`/`clock.sleeps` assertions)
+needed no edits - the proof that Elephant's N=1 default really is a no-op
+through both the debounce and the confirm-gate changes.
+
+### ADR 0023 and the research doc
+
+`docs/decisions/0023-boar-deterrence-content-and-node-species-scope.md` (new,
+`proposed`) covers all four decisions: A (tri-state scope + env-first
+delivery for both `NODE_DETERRENCE_SCOPE` and `NODE_HOUSEHOLD_PROXIMITY`), B
+(the confirmation-path streak-gate fix, described as the non-negotiable
+finding), C (Boar horn content, full evidence-tier honesty), D (experience-DB
+path derivation and the mid-trial-flip hazard).
+
+`docs/research/boar-deterrence-behavioral-science.md` (new) is the boar
+counterpart to the existing elephant review - same confidence-labelling
+convention. Covers Widen et al. 2022 (triggered predator-call playback
+reducing boar crop damage, the primary evidence), tiger/leopard as real
+Sus scrofa predators on the Indian subcontinent (Bardia NP Nepal, 6.98%
+tiger / 15.72% leopard diet biomass; Nagarjunasagar Srisailam, boar the most
+common prey item by scat analysis), what wild boar can hear (Heffner &
+Heffner 1990, 42 Hz-40.5 kHz, best sensitivity 250 Hz-16 kHz - pig, not
+wild-boar-measured directly) and see (Neitz & Jacobs 1989, dichromatic
+439/556 nm - also pig, no implication for this design since Boar's LED
+patterns are unchanged).
+
+**A correction worth recording as its own finding.** The plan, and the first
+draft of ADR 0023's Decision C, stated a direct boar-specific
+light-vs-sound comparison - a Hunchun, China cornfield study - was
+"inaccessible behind a paywall and bot-protection on every path tried, and
+was not read." Per this project's own verify-before-declaring-blocked
+discipline, that was re-attempted this segment rather than carried forward
+as fact, and the study turned out to be freely readable via PMC (a redirect
+from the `ncbi.nlm.nih.gov/pmc/articles/` URL form to
+`pmc.ncbi.nlm.nih.gov/articles/PMC11987724/`): Ani (2025) 15(7):1017,
+"Comparing Durations of Different Countermeasure Efficacies Against Wild
+Boar (Sus scrofa) in Cornfields of Hunchun, Jilin Province, China," DOI
+10.3390/ani15071017. Real numbers, not assumed: red solar blinkers lasted
+32.25±4.22 days before efficacy declined (best single treatment); electric
+fencing 29.67±0.58; Amur tiger calls + wild boar distress calls 26.50±2.38 -
+category ranking tactile (152.56) > visual (118.29) > auditory (72.60).
+
+That is genuine new information, but reading it as "light beats sound for
+this device" would be a paradigm-mismatch error, and both the ADR and the
+research doc say so explicitly: every Hunchun treatment ran as continuous,
+unconditional exposure across weeks, which is exactly the condition Widen et
+al. 2022's own triggered-camera-trap design exists to avoid, and exactly the
+condition this device's own triggered-once-per-confirmed-encounter horn
+(ADR 0022's watch window) is not. The honest reading is "continuous auditory
+broadcast habituates faster than continuous visual broadcast in this
+environment" - a finding about exposure schedule, not a verdict on triggered
+predator-call playback, which Hunchun did not isolate as its own condition.
+What the correction does add directly: a real, quantified, actual-Amur-
+tiger-call-on-actual-wild-boar result (26.5 days measured efficacy) behind
+ADR 0023's tiger track, stronger than the ecological-inference argument
+(Section 2 of the research doc) alone. `cognition/config.py`'s Boar-content
+rationale comment, the ADR's Decision C evidence paragraph, and the ADR's
+Follow-ups list were all updated to reflect this rather than left carrying
+the stale "unread" placeholder - the Follow-ups gap is now stated precisely
+as "a triggered-paradigm boar-specific light-vs-sound comparison," since
+Hunchun answers the continuous case, not this one.
+
+### Ship-day state
+
+`elephant_only` is the committed default everywhere this segment touched:
+`services/config.py`'s constant, every test default, and (once `main.py`'s
+banner is committed) the startup log. Nothing in this workstream enables
+`boar_only` or `both` live. The three preconditions the plan named as
+separate from the flag - `ELETECT_SAFE_MODE=0` (never yet done on the
+board), `EVENT_VIDEO_ENABLED=True` (still `False` by default, plausibly
+flippable now that `0094b91`/`aa41fb2` landed against real hardware in the
+other session, not yet confirmed with them), and the runner up and
+supervised (closed, Step 0 above) - remain the actual gate on getting real
+boar-deterred footage, not this flag by itself.
+
+## Workstream 2, exposure-lock write-up
+
+Not started this session - Workstream 2 is docs-only and explicitly
+sequenced behind the ship date per the plan; the exposure-lock finding still
+needs its cross-reference into `KNOWN_GAPS.md` and the README (write-up
+only, no implementation - the camera code belongs to the other session).
