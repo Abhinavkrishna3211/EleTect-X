@@ -421,9 +421,34 @@ other session, not yet confirmed with them), and the runner up and
 supervised (closed, Step 0 above) - remain the actual gate on getting real
 boar-deterred footage, not this flag by itself.
 
-## Workstream 2, exposure-lock write-up
+## Exposure-lock write-up (closed) and Workstream 2 (still deferred)
 
-Not started this session - Workstream 2 is docs-only and explicitly
-sequenced behind the ship date per the plan; the exposure-lock finding still
-needs its cross-reference into `KNOWN_GAPS.md` and the README (write-up
-only, no implementation - the camera code belongs to the other session).
+**Exposure-lock finding, closed.** Cross-referenced into both places the
+plan named, write-up only, no implementation (the camera-control code
+belongs to the other session): `docs/KNOWN_GAPS.md`'s Boar false-positive
+entry now has a dated append naming the auto-exposure/AGC finding from
+`docs/qa/night-ir-led-characterisation.md` as a plausible contributor to
+both the Boar FP rate and the 2-hour run's unexplained per-chunk swing, and
+`ml/vision/README.md`'s 30 Aug 2-hour-run section got the matching append,
+plus closing out its own two named next steps: (1) the N≥2 temporal-
+aggregation lever - done, this is Workstream 1, real numbers above; (2)
+true-negative training data from this scene - explicitly not done, folds
+into the still-deferred Workstream 2 gap below. Both cross-references state
+the real implementation blocker already on record on the other side: the
+container's camera path doesn't accept exposure writes and sits frozen,
+unlike the host V4L2 path.
+
+**Workstream 2 — not started this session.** Docs-only (Boar representation
+audit + sourcing plan, no retrain), explicitly sequenced behind the 5 Sept
+ship date per the plan. `ml/vision/boar-representation-audit.md` does not
+exist yet. The real gap it would characterize is already known and
+quantified from the 30 Aug/2 Sept work referenced above and in
+`ml/vision/README.md`: real night/IR Boar imagery is 64 images out of
+7,394 (0.87%), the only genuinely IR-labelled source is
+`pig-rinoz/wild-pig-at-night`, and Boar's weak recall (0.852 vs the ≥92%
+bar) is a domain-match problem, not a volume problem — Boar already
+outnumbers Elephant 7,394 to 4,094. SA-FARI (Conservation X Labs x Meta,
+arXiv 2511.15622) remains the lead sourcing candidate, blocked on two
+unchecked items: confirming *Sus scrofa* is actually in its 99-species
+table, and reading its actual redistribution licence rather than trusting
+site copy. Neither check was run this session.

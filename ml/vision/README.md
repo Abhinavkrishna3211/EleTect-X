@@ -3048,6 +3048,46 @@ box output for all 40,422 classify events) remains on the board at `/home/arduin
 locally given its size — the aggregates above were computed directly against it over SSH and are
 reproducible from it if deeper reanalysis is ever needed.
 
+**3 Sept update — both next steps above were acted on; a real fix landed, and a real second cause
+was found and characterized elsewhere, not chased here.** Full numbers in
+`docs/qa/boar-gap-session-notes.md`; summary here since this section is the reference the numbers
+were promised against.
+
+Next step (1) — the N≥2 temporal-aggregation lever this section names — was implemented and replayed
+against this exact log, aggregated on the board over SSH, never copied down. The naive per-poll
+debounce alone was a near-miss: production doesn't consume raw frames, it consumes 3-frame bursts
+OR'd together into one poll every ~1 s, and that burst-OR unit is itself worse than the frame rate
+above — **43.64%** of polls (2,942/6,742) carried a Boar box before any debounce, not 31.53%. A first
+pass at 2-consecutive-positive-polls barely moved that (40.48%). The fix that actually worked was a
+within-burst requirement stacked on top — a poll only counts Boar if a majority of its 3 frames do,
+not just one — which brought the debounced production rate to **27.54%** (1,857/6,742), back in line
+with the frame-level number. Elephant stayed at 0% false positives through every stage, as expected
+(no boxes at all in this scene). Committed as `596b432`; the config knob and the per-chunk table are
+`device/mpu/services/config.py`'s `VISION_SPECIES_BURST_MAJORITY_LABELS`/
+`VISION_SPECIES_CONSECUTIVE_POLLS` and the replay script committed alongside it.
+
+Next step (2) — true-negative training data from this exact scene — was **not done this session**;
+Workstream 2 (a Boar representation audit and sourcing plan) is docs-only per plan and deliberately
+deferred past the 5 Sept ship date, so the underlying model weights and the 0.87%-real-IR-Boar-imagery
+gap this file's other sections describe remain untouched. This section's numbers describe a
+consumption-layer fix, not a retrain — the model itself is exactly as accurate (or inaccurate) as it
+was on 30 Aug.
+
+**A second, independent cause was found by a different session, and is recorded here by cross-
+reference rather than duplicated or chased further** — `docs/qa/night-ir-led-characterisation.md`, a
+real board-run characterization of camera control (not model weights), found auto-exposure + IR to be
+the *only* configuration across its whole test battery to produce a meaningful false-positive
+population (15/22/28 spurious Boar boxes across three runs, confidence up to 0.408 — above the 0.2
+deployment threshold), while locked exposure gave zero false positives across the same battery. That
+session's own written recommendation: "auto-exposure at night should be considered a bug for this
+pipeline." This is a plausible mechanism for this section's own unexplained per-chunk swing
+(1.2%–73.9%, table above) — dappled light and AGC hunting produce exactly the kind of intermittent,
+non-monotonic signal this section flagged as "a hypothesis worth testing next, not a conclusion." Not
+confirmed causal against this specific log — just the leading candidate, and not implemented here: the
+camera-control code is a separate session's, and a real blocker is already on record there — the
+container's camera path does not accept exposure writes and sits frozen at a fixed value, unlike the
+host V4L2 path. See `docs/KNOWN_GAPS.md`'s matching cross-reference entry.
+
 <!-- LIVE_SYNC_PLACEHOLDER -->
 
 ## Reproducing
