@@ -278,3 +278,64 @@ def test_worst_case_clip_stays_well_inside_the_low_disk_headroom():
         f"{config.CAPTURE_LOW_DISK_HEADROOM_BYTES / 1e6:.0f} MB headroom - too close to "
         "let a busy night run unattended."
     )
+
+
+# --- deterrence_scope_labels() / NODE_DETERRENCE_SCOPE ----------------------
+
+
+def test_deterrence_scope_ships_elephant_only_by_default():
+    """The committed default must be the field trial's actual configuration.
+
+    Nothing in this pass may enable boar_only or both live - that is a
+    commissioning decision, not a code default.
+    """
+    assert config.NODE_DETERRENCE_SCOPE == "elephant_only"
+    assert config.DETERRENT_TARGET_LABELS == ("Elephant",)
+    assert config.EVENT_VIDEO_TARGET_LABELS == ("Elephant",)
+
+
+def test_elephant_only_resolves_to_todays_byte_for_byte_value():
+    """Deriving these two constants must not have changed what they resolve to."""
+    assert config.deterrence_scope_labels("elephant_only") == (("Elephant",), ("Elephant",))
+
+
+def test_boar_only_deters_and_films_only_boar():
+    """Elephant must not appear in either list under boar_only."""
+    assert config.deterrence_scope_labels("boar_only") == (("Boar",), ("Boar",))
+
+
+def test_both_deters_and_films_both_species():
+    """Both labels appear in both lists under the symmetric "both" state."""
+    assert config.deterrence_scope_labels("both") == (
+        ("Elephant", "Boar"),
+        ("Elephant", "Boar"),
+    )
+
+
+def test_an_unrecognized_scope_falls_back_to_elephant_only_instead_of_raising():
+    """A typo in a per-node environment variable must not crash the reflex loop."""
+    assert config.deterrence_scope_labels("bogus") == (("Elephant",), ("Elephant",))
+    assert config.deterrence_scope_labels("") == (("Elephant",), ("Elephant",))
+
+
+# --- EXPERIENCE_DB_PATH derivation -------------------------------------------
+
+
+def test_experience_db_path_derivation_for_all_three_scopes():
+    """Reverting NODE_DETERRENCE_SCOPE to elephant_only must restore the trial's own DB.
+
+    That is the whole safety property this derivation buys: there is no
+    separate archive-or-reset step whose omission could silently ship a
+    boar-shaped policy into the field trial.
+    """
+    for scope, expected_name in (
+        ("elephant_only", "experience.sqlite3"),
+        ("boar_only", "experience-boar_only.sqlite3"),
+        ("both", "experience-both.sqlite3"),
+    ):
+        assert config.experience_db_filename(scope) == expected_name
+
+
+def test_elephant_only_experience_db_path_is_todays_unqualified_filename():
+    """The shipped default must resolve to exactly today's DB, unqualified."""
+    assert config.EXPERIENCE_DB_PATH == config.DATA_DIR / "experience.sqlite3"

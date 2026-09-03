@@ -473,11 +473,67 @@ DETERRENCE_TIERS = {
 # 2015 / Khorozyan & Waltert 2019 describe, so this must not collapse to one.
 TIER_3_LED_PATTERN_IDS = (5, 6)
 
+# ---------------------------------------------------------------------------
+# Boar horn content (ADR 0023) - reuses Elephant's predator-growl tracks
+# ---------------------------------------------------------------------------
+#
+# No new audio, no SCHEMA_VERSION bump: both indices already exist in
+# HORN_CONTENT_LIBRARY[HORN_CATEGORY_PREDATOR] and are already provisioned
+# on the DFPlayer's onboard flash. Boar's ladder has one fewer content axis
+# than Elephant's, deliberately, on two independent grounds:
+#
+#   - No bee-swarm track on any Boar tier. King et al. 2007's documented
+#     aversion is bees stinging around the eyes and trunk - there is no
+#     boar analogue, so Tier 1 cannot reuse Elephant's mildest track and
+#     instead gets the milder of the two predator-growl clips.
+#   - No firecracker/air-horn "bang" pool at Tier 3 either. Every Boar tier
+#     stays inside the predator-growl category, which is also why the
+#     household-proximity gate (never a bang near homes, ADR 0016 Decision
+#     B) is satisfied trivially for Boar rather than needing its own
+#     branch: there is no non-predator pool for it to gate.
+#
+# Fixed, not rotated, unlike Elephant's Tier 2/3 (which alternate tiger/lion
+# specifically to keep a persistent animal from learning one clip): Boar's
+# two tiers already carry the escalation on which track plays, lion at the
+# lower tier and tiger at the higher ones, so collapsing that further into
+# a per-fire draw would blur the one content axis this ladder has left.
+#
+# The evidence: Widen et al. 2022 (Agriculture, Ecosystems and Environment
+# 328:107853) found camera-trap-triggered predator-vocalization playback
+# reduced crop damage across five ungulate species including wild boar -
+# but its stimuli were wolf howl, dog bark and human voice, not tiger or
+# lion. Reusing Elephant's tracks 2/3 here rests partly on a separate,
+# ecological argument (tiger/leopard are real Sus scrofa predators on the
+# Indian subcontinent - multiple India/Nepal tiger-reserve diet studies put
+# wild boar at 7-16% of tiger biomass intake) and partly on a second, more
+# direct study found and read this session: Ani (2025) 15(7):1017 tested
+# actual Amur tiger call playback against actual wild boar in Hunchun,
+# China, and measured it working (~26.5 days before efficacy declined,
+# combined with boar distress calls) - the ecological argument now has a
+# real predator-call-on-boar number behind it, not just an inference. That
+# same study is also the light-vs-sound comparison ADR 0023 discusses in
+# full, including the paradigm mismatch that keeps it from being read as
+# a simple "light beats sound" verdict for this device.
+BOAR_TIER_1_TRACK_ID = HORN_CONTENT_LIBRARY[HORN_CATEGORY_PREDATOR][1]  # lion, track 3
+BOAR_TIER_2_3_TRACK_ID = HORN_CONTENT_LIBRARY[HORN_CATEGORY_PREDATOR][0]  # tiger, track 2
+BOAR_TIER_1_TRACK_ID = HORN_CONTENT_LIBRARY[HORN_CATEGORY_PREDATOR][1]  # lion, track 3
+BOAR_TIER_2_3_TRACK_ID = HORN_CONTENT_LIBRARY[HORN_CATEGORY_PREDATOR][0]  # tiger, track 2
+
 
 def resolve_tier_action(
-    tier: Tier, rng: random.Random, household_proximity: bool = False
+    tier: Tier,
+    rng: random.Random,
+    household_proximity: bool = False,
+    species: str = "Elephant",
 ) -> DeterrenceAction:
     """Return the DeterrenceAction to fire for `tier`.
+
+    `species` defaults to "Elephant" - the byte-for-byte-unchanged default
+    behaviour every call site had before ADR 0023, and the only species this
+    system was designed for until then. For "Elephant" (or any other
+    unrecognised value - never raises on a typo any more than
+    services.config.deterrence_scope_labels() does), tier resolution is
+    exactly what it always was:
 
     Tier 1 is fixed - this returns the exact DETERRENCE_TIERS object, so
     identity checks against it still hold. Tiers 2 and 3 return a fresh
@@ -492,9 +548,18 @@ def resolve_tier_action(
         TIER_3_NON_HOUSEHOLD_TRACK_POOL (firecracker-weighted bang) when it
         is False.
 
+    For "Boar" (ADR 0023, only reachable once NODE_DETERRENCE_SCOPE admits
+    Boar - see services.config.deterrence_scope_labels()): horn_track_id is
+    BOAR_TIER_1_TRACK_ID (lion) at Tier 1, BOAR_TIER_2_3_TRACK_ID (tiger) at
+    Tiers 2 and 3, fixed rather than drawn - see that constant's own
+    comment for why. `household_proximity` still gates the Tier 3
+    led_pattern_id draw exactly as it does for Elephant; it has no separate
+    horn-pool branch for Boar because Boar never leaves the predator-growl
+    category in the first place.
+
     Every draw is off the same RNG the bandit's exploration draw already
     uses, so no new seeding path is introduced. Everything else in each
-    action (wings, gain, durations, IR) is unchanged.
+    action (wings, gain, durations, IR) is unchanged, for either species.
 
     `household_proximity` defaults to False - the elephant-safe,
     resident-worst-case default, matching services.config.NODE_HOUSEHOLD_
@@ -502,6 +567,16 @@ def resolve_tier_action(
     passes the real per-node value; only Tier 3 reads it.
     """
     base = DETERRENCE_TIERS[tier]
+    if species == "Boar":
+        if tier is Tier.TIER_1:
+            return dataclasses.replace(base, horn_track_id=BOAR_TIER_1_TRACK_ID)
+        if tier is Tier.TIER_2:
+            return dataclasses.replace(base, horn_track_id=BOAR_TIER_2_3_TRACK_ID)
+        return dataclasses.replace(
+            base,
+            led_pattern_id=rng.choice(TIER_3_LED_PATTERN_IDS),
+            horn_track_id=BOAR_TIER_2_3_TRACK_ID,
+        )
     if tier is Tier.TIER_1:
         return base
     if tier is Tier.TIER_2:

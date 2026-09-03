@@ -558,6 +558,96 @@ def test_tier_3_non_household_node_prefers_firecracker_two_to_one_over_siren():
     assert 1.7 < ratio < 2.3, counts
 
 
+# --- Boar species content (ADR 0023) ----------------------------------------
+
+
+def test_species_defaults_to_elephant_and_changes_nothing():
+    """resolve_tier_action's species param is additive - the old call shape must still work.
+
+    Every pre-ADR-0023 test above calls resolve_tier_action without a
+    species argument; this is the explicit regression guard that doing so
+    is identical to passing species="Elephant", for all three tiers.
+    """
+    for tier, kwargs in (
+        (Tier.TIER_1, {}),
+        (Tier.TIER_2, {}),
+        (Tier.TIER_3, {"household_proximity": True}),
+    ):
+        rng_implicit = random.Random(42)
+        rng_explicit = random.Random(42)
+        implicit = config.resolve_tier_action(tier, rng_implicit, **kwargs)
+        explicit = config.resolve_tier_action(
+            tier, rng_explicit, species="Elephant", **kwargs
+        )
+        assert implicit == explicit
+
+
+def test_boar_tracks_stay_inside_the_predator_growl_category_and_differ():
+    """The two Boar track ids must be real, distinct predator-growl tracks.
+
+    Distinct so Tier 1 and Tiers 2/3 are actually different content, not the
+    same clip under two names; inside the category so no new audio and no
+    licensing obligation beyond ADR 0016 Decision C is introduced.
+    """
+    predator = set(config.HORN_CONTENT_LIBRARY[config.HORN_CATEGORY_PREDATOR])
+    assert config.BOAR_TIER_1_TRACK_ID in predator
+    assert config.BOAR_TIER_2_3_TRACK_ID in predator
+    assert config.BOAR_TIER_1_TRACK_ID != config.BOAR_TIER_2_3_TRACK_ID
+
+
+def test_boar_tier_1_always_plays_the_lion_track():
+    """Boar Tier 1 is fixed to lion (track 3), never rotated, never the bee track."""
+    rng = random.Random(3)
+    for _ in range(50):
+        action = config.resolve_tier_action(Tier.TIER_1, rng, species="Boar")
+        assert action.horn_track_id == config.BOAR_TIER_1_TRACK_ID
+
+
+def test_boar_tier_2_and_3_always_play_the_tiger_track_regardless_of_household():
+    """Boar Tiers 2/3 are fixed to tiger (track 2) - household_proximity is moot for Boar.
+
+    Boar never reaches the firecracker/air-horn bang pool at all, so unlike
+    Elephant's Tier 3 the household flag has nothing left to gate here; both
+    values must produce the identical track.
+    """
+    rng = random.Random(4)
+    for tier in (Tier.TIER_2, Tier.TIER_3):
+        for household_proximity in (True, False):
+            for _ in range(50):
+                action = config.resolve_tier_action(
+                    tier, rng, household_proximity=household_proximity, species="Boar"
+                )
+                assert action.horn_track_id == config.BOAR_TIER_2_3_TRACK_ID
+
+
+def test_no_boar_tier_ever_plays_the_bee_track():
+    """King et al. 2007's bee-sting aversion has no boar analogue - see ADR 0023."""
+    bee = set(config.HORN_CONTENT_LIBRARY[config.HORN_CATEGORY_BEE])
+    rng = random.Random(5)
+    for tier in (Tier.TIER_1, Tier.TIER_2, Tier.TIER_3):
+        for _ in range(50):
+            action = config.resolve_tier_action(tier, rng, species="Boar")
+            assert action.horn_track_id not in bee
+
+
+def test_boar_tier_3_still_rotates_the_led_pattern():
+    """Content selection changes for Boar; the LED escalation axis must not.
+
+    Tier 3's pattern rotation (ADR 0014 E.2) is species-agnostic - it is the
+    unpredictability lever, not a content-library concern - so Boar must see
+    the same two-pattern rotation Elephant does.
+    """
+    rng = random.Random(6)
+    seen = set()
+    for _ in range(200):
+        action = config.resolve_tier_action(
+            Tier.TIER_3, rng, household_proximity=True, species="Boar"
+        )
+        seen.add(action.led_pattern_id)
+        assert action.horn_track_id == config.BOAR_TIER_2_3_TRACK_ID
+    assert seen == set(config.TIER_3_LED_PATTERN_IDS)
+
+
 def test_default_bandit_params_do_not_drift_from_their_constants():
     """The assembled params must match the constants documented above them."""
     params = config.DEFAULT_BANDIT_PARAMS

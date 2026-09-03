@@ -19,7 +19,11 @@ constants in the same sense as the MCU's pin assignments (config.h), not
 tuning knobs for cognition math.
 """
 
+import logging
+import os
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Bridge RPC schema
@@ -65,7 +69,29 @@ SCHEMA_VERSION = 4
 # this left at False near homes would be allowed to fire the firecracker
 # track, so every real near-home node MUST have this set True during
 # commissioning. Not auto-detected: nothing on the device knows where it is.
-NODE_HOUSEHOLD_PROXIMITY = False
+#
+# Read from the environment first, same pattern as reflex_loop.py's
+# SAFE_MODE and for the same reason: python/ is bind-mounted into the
+# container as /app (HANDOVER.md), so ELETECT_HOUSEHOLD_PROXIMITY is not
+# actually deliverable through App Lab's regenerated compose file today -
+# this is an interim path for ADR 0021 to absorb, not the audited config
+# interface it specifies. The proven one-minute flip on a live node is
+# still editing this module constant directly and restarting the app.
+NODE_HOUSEHOLD_PROXIMITY = os.environ.get("ELETECT_HOUSEHOLD_PROXIMITY", "0") != "0"
+
+# Which species this node deters and films. Three states, no auto-detected
+# fourth: "elephant_only" (the field-trial default), "boar_only", "both".
+# A commissioning-time site attribute exactly like NODE_HOUSEHOLD_PROXIMITY
+# just above, not sensed or inferred - see deterrence_scope_labels() below
+# for what each state resolves to, and EXPERIENCE_DB_PATH just below for
+# why this has to be defined up here rather than down with the label
+# constants it derives.
+#
+# Same env-first, constant-second delivery path as NODE_HOUSEHOLD_PROXIMITY,
+# for the same reason. Unrecognized values fall back to "elephant_only" -
+# see deterrence_scope_labels() - never raise, since a typo in a per-node
+# environment variable must not crash the reflex loop on a field node.
+NODE_DETERRENCE_SCOPE = os.environ.get("ELETECT_DETERRENCE_SCOPE", "elephant_only")
 
 # ---------------------------------------------------------------------------
 # Bridge.call() timeout and retry policy
@@ -132,7 +158,44 @@ _MODULE_DIR = Path(__file__).resolve().parent.parent
 # (a tmp_path, or cognition.experience.IN_MEMORY_PATH) so neither ever
 # writes real learning state.
 DATA_DIR = _MODULE_DIR / "data"
-EXPERIENCE_DB_PATH = DATA_DIR / "experience.sqlite3"
+
+# Filename derived from NODE_DETERRENCE_SCOPE, not a fixed name plus a
+# separate archive-at-ship step. The bandit's learned action values
+# (BANDIT_STEP_SIZE against experience.action_values()) are persisted with
+# no decay, so two days of boar-driven fires under "both" durably move the
+# tier a node prefers - reverting the scope flag alone would not revert
+# what the node learned if the filename never changed. Keying the filename
+# on the flag instead collapses that into one action: reverting the flag
+# back to "elephant_only" IS what restores the trial's own DB, with no
+# separate step whose omission would silently ship a boar-shaped policy
+# into the field trial. Named by scope, not by phase ("experience-both",
+# not "experience-home") - a name that said "home" would mislead the first
+# time "both" got set anywhere else. See docs/qa/boar-gap-session-notes.md
+# and TRIAL_READINESS_PLAN.md for the real hazard this still leaves open: a
+# mid-trial flip to "both" silently resumes the home-phase DB instead of
+# the trial's - main.py logs the resolved path at startup specifically so
+# that is never silent.
+
+
+def experience_db_filename(scope: str) -> str:
+    """Resolve a NODE_DETERRENCE_SCOPE value to its experience-store filename.
+
+    A pure function (not just the inline expression below) so the
+    derivation is directly testable for all three states, the same reason
+    deterrence_scope_labels() above is its own function rather than three
+    inline tuples. Deliberately does not validate `scope` against the
+    three known values the way deterrence_scope_labels() does - an
+    unrecognized value still gets its own qualified filename here rather
+    than silently falling back to "experience.sqlite3", so a typo in
+    NODE_DETERRENCE_SCOPE can never point a misconfigured node at the real
+    trial's learned policy.
+    """
+    if scope == "elephant_only":
+        return "experience.sqlite3"
+    return f"experience-{scope}.sqlite3"
+
+
+EXPERIENCE_DB_PATH = DATA_DIR / experience_db_filename(NODE_DETERRENCE_SCOPE)
 
 # On-device vision model artifacts (Edge Impulse export target).
 MODELS_DIR = _MODULE_DIR / "models"
@@ -427,32 +490,80 @@ NIGHT_SATURATION_THRESHOLD = 12.0
 # no horn, no battery, no habituation - so it is the cheap list, and it is
 # the right place to start with a new species.
 #
-# The three configurations worth naming, so the change is one edit:
+# Both lists are now *derived* from NODE_DETERRENCE_SCOPE rather than
+# hand-set, via deterrence_scope_labels() below - a per-node commissioning
+# attribute, same shape as NODE_HOUSEHOLD_PROXIMITY, rather than a two-line
+# source edit for a species change. This rewrites the two lines but does
+# not change what they resolve to today: NODE_DETERRENCE_SCOPE's default
+# "elephant_only" maps to ("Elephant",) for both, byte-for-byte the same
+# value these two constants have always had.
 #
-#   1. Elephant only (default, and what the first field trial runs):
+# The three states this resolves, so the tradeoff each one makes is named
+# once rather than re-derived at every call site:
+#
+#   1. "elephant_only" (default, and what the first field trial runs):
 #          DETERRENT_TARGET_LABELS = ("Elephant",)
 #          EVENT_VIDEO_TARGET_LABELS = ("Elephant",)
-#   2. Deter elephants, but collect boar footage - the honest next step,
-#      because it produces the evidence for whether boar deterrence is even
-#      worth doing before any horn fires at one:
-#          DETERRENT_TARGET_LABELS = ("Elephant",)
-#          EVENT_VIDEO_TARGET_LABELS = ("Elephant", "Boar")
-#   3. Deter both:
+#   2. "boar_only" - deters and films Boar; Elephant is detected, logged and
+#      filmed but never fires an actuator. Named for a node whose site
+#      makes elephant deterrence not the priority.
+#          DETERRENT_TARGET_LABELS = ("Boar",)
+#          EVENT_VIDEO_TARGET_LABELS = ("Boar",)
+#   3. "both":
 #          DETERRENT_TARGET_LABELS = ("Elephant", "Boar")
 #          EVENT_VIDEO_TARGET_LABELS = ("Elephant", "Boar")
 #
-# Config 3 carries a real caveat that config 2 does not, and it is not a
-# style objection. The bandit in cognition/bandit.py learns one deterrence
-# policy per node, not one per species, and the habituation window
-# (ADR 0017) counts triggers without asking what caused them. Deterring
-# boar therefore spends the same escalation ladder and the same encounter
-# memory that elephant deterrence depends on: a night of boar visits can
-# walk the node up to tier 3 and leave an elephant arriving at dawn facing
-# an already-habituated response. Nothing here prevents that, and nothing
-# in the ADRs has decided it - so config 3 is a deliberate choice to make
-# with that trade in view, not a free upgrade. See docs/KNOWN_GAPS.md.
-DETERRENT_TARGET_LABELS: tuple[str, ...] = ("Elephant",)
-EVENT_VIDEO_TARGET_LABELS: tuple[str, ...] = ("Elephant",)
+# The asymmetric case the three symmetric states do NOT cover - deter
+# elephants, but only collect boar footage, the honest next step because it
+# produces the evidence for whether boar deterrence is even worth doing
+# before any horn fires at one - is not a fourth named state. It is
+# "elephant_only" plus one explicit reassignment below the derivation:
+#
+#          EVENT_VIDEO_TARGET_LABELS = ("Elephant", "Boar")
+#
+# Keep making that a visible one-line override at the point of use, not a
+# fourth entry in deterrence_scope_labels() - the whole point of deriving
+# these two constants is that a hand-edit of just one of them now reads as
+# a deliberate departure from the derivation, not as dead code overwritten
+# by it.
+#
+# "both" carries a real caveat that "boar_only" alone does not, and it is
+# not a style objection. The bandit in cognition/bandit.py learns one
+# deterrence policy per node, not one per species, and the habituation
+# window (ADR 0017) counts triggers without asking what caused them.
+# Deterring both species on one node therefore spends the same escalation
+# ladder and the same encounter memory: a night of boar visits can walk the
+# node up to tier 3 and leave an elephant arriving at dawn facing an
+# already-habituated response. Nothing here prevents that, and nothing in
+# the ADRs has decided it - so "both" is a deliberate choice to make with
+# that trade in view, not a free upgrade. See docs/KNOWN_GAPS.md.
+
+
+def deterrence_scope_labels(scope: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Resolve a NODE_DETERRENCE_SCOPE value to (deterrent, video) label tuples.
+
+    Pure function, same shape as cognition.config.resolve_tier_action -
+    the imperative shell reads the site attribute, this turns it into the
+    two lists everything else in the reflex loop actually consumes. An
+    unrecognized scope logs a warning and falls back to "elephant_only"
+    rather than raising: a typo in a per-node environment variable must
+    not crash the reflex loop on a field node.
+    """
+    if scope == "elephant_only":
+        return ("Elephant",), ("Elephant",)
+    if scope == "boar_only":
+        return ("Boar",), ("Boar",)
+    if scope == "both":
+        return ("Elephant", "Boar"), ("Elephant", "Boar")
+    logger.warning(
+        "unrecognized NODE_DETERRENCE_SCOPE %r, falling back to 'elephant_only'", scope
+    )
+    return ("Elephant",), ("Elephant",)
+
+
+DETERRENT_TARGET_LABELS, EVENT_VIDEO_TARGET_LABELS = deterrence_scope_labels(
+    NODE_DETERRENCE_SCOPE
+)
 
 # ---------------------------------------------------------------------------
 # Deterrent-event capture storage (perception/storage.py)

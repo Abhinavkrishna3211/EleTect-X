@@ -932,6 +932,7 @@ def _watch_for_vision(
     poll_interval_s: float = services_config.VISION_WATCH_POLL_INTERVAL_S,
     frame_count: int = services_config.VISION_CHECK_FRAME_COUNT,
     max_empty_polls: int = services_config.VISION_WATCH_MAX_EMPTY_POLLS,
+    target_labels: tuple[str, ...] = VISION_TARGET_LABELS,
     monotonic: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
 ) -> VisionWatch:
@@ -948,7 +949,12 @@ def _watch_for_vision(
     1. **A confirmation.** Returns immediately, without sleeping out the
        rest of the window. This is the case the function exists for: the
        caller fires the deterrence sequence at this moment, which is the
-       moment the elephant is actually in frame.
+       moment the elephant is actually in frame. A poll's raw
+       `check.confirmed` is not enough on its own - the confirming label
+       must also have cleared its own VISION_SPECIES_CONSECUTIVE_POLLS
+       streak (see the loop body), so a target label configured for
+       burst-majority-plus-poll-streak (Boar) cannot confirm off one poll.
+       Elephant's streak is 1, so this is unchanged for it.
     2. **The window closes.** Returns the strongest reading seen. The caller
        then decides on seismic alone, exactly as it did before this function
        existed - a watch that finds nothing costs time, never a changed
@@ -975,6 +981,13 @@ def _watch_for_vision(
             overruns is not compensated for; the next simply starts late.
         frame_count: Frames per poll, handed to capture_burst().
         max_empty_polls: Consecutive empty polls that end the watch.
+        target_labels: Which labels count as confirmation/deterrence
+            evidence, forwarded to _vision_check(). Defaults to
+            VISION_TARGET_LABELS (services.config.DETERRENT_TARGET_LABELS).
+            Injected, not read from the module global directly, so tests
+            can exercise all three NODE_DETERRENCE_SCOPE states without
+            monkeypatching module state - the same reason household_proximity
+            is injected into handle_footfall_event.
         monotonic: Clock source. Injected for tests.
         sleep: Sleep function. Injected for tests.
 
@@ -1023,7 +1036,7 @@ def _watch_for_vision(
             empty_polls = 0
             if not first_frames:
                 first_frames = frames
-            check = _vision_check(detect_vision, frames)
+            check = _vision_check(detect_vision, frames, target_labels=target_labels)
             for label in list(species_streaks):
                 if label not in check.species:
                     species_streaks[label] = 0
@@ -1031,7 +1044,42 @@ def _watch_for_vision(
                 species_streaks[label] = species_streaks.get(label, 0) + 1
                 if species_streaks[label] >= _required_consecutive_polls(label):
                     seen_species.setdefault(label, None)
+            # check.confirmed only proves this poll's burst cleared the
+            # majority gate for a target label - it says nothing about
+            # whether that label has cleared its own poll-level streak yet.
+            # Gate confirmation on the same species_streaks counters
+            # seen_species reads, so a target label with
+            # VISION_SPECIES_CONSECUTIVE_POLLS > 1 (Boar) cannot confirm,
+            # exit the watch and feed fuse() off a single spurious poll -
+            # exactly the bypass the debounce above would otherwise still
+            # have, since this early-return path used to read check.confirmed
+            # directly. Elephant's required streak is 1, so it is admitted
+            # to seen_species on the same poll that first sees it and
+            # confirms here unchanged - this is a no-op for it.
+            effective_check = check
             if check.confirmed:
+                confirming_labels = [
+                    label
+                    for label in check.species
+                    if label in target_labels
+                    and species_streaks.get(label, 0) >= _required_consecutive_polls(label)
+                ]
+                if not confirming_labels:
+                    # Streak-rejected: do not let this poll's raw detector
+                    # confidence carry into `best` or trigger the early
+                    # return. It contributes exactly what a poll that saw
+                    # nothing target-shaped would - real evidence at
+                    # BASELINE_VISION, net zero to fuse() - rather than the
+                    # positive log-odds _vision_check() computed for a
+                    # confirmation this watch is not yet honoring.
+                    effective_check = VisionCheck(
+                        ModalityReading(
+                            Modality.VISION, cognition_config.BASELINE_VISION, available=True
+                        ),
+                        False,
+                        check.species,
+                    )
+            if effective_check.confirmed:
                 logger.info(
                     "vision confirmed on poll %d, %.1fs into a %.1fs watch window",
                     polls,
@@ -1050,7 +1098,7 @@ def _watch_for_vision(
                 seen = {id(f) for f in first_frames}
                 kept = first_frames + [f for f in frames if id(f) not in seen]
                 return VisionWatch(
-                    check=check,
+                    check=effective_check,
                     frames=tuple(kept),
                     polls=polls,
                     elapsed_s=monotonic() - started,
@@ -1061,8 +1109,8 @@ def _watch_for_vision(
             # this started with: it means the camera and the detector both
             # worked and neither saw an elephant, which is real evidence
             # scored at BASELINE_VISION, not an outage fuse() should drop.
-            if check.reading.available and not best.reading.available:
-                best = check
+            if effective_check.reading.available and not best.reading.available:
+                best = effective_check
 
         now = monotonic()
         if now >= deadline:
@@ -1320,6 +1368,55 @@ def _finish_event_video(
     return None
 
 
+def _deterrence_species(
+    vision_check: VisionCheck, target_labels: tuple[str, ...] = VISION_TARGET_LABELS
+) -> str:
+    """Which species cognition_config.resolve_tier_action() should play content for.
+
+    "Elephant" is the safe, byte-for-byte-unchanged default: under the
+    committed NODE_DETERRENCE_SCOPE default (elephant_only), Boar can never
+    confirm (it is never in target_labels there), so vision_check.species
+    can never contain a confirming label other than "Elephant" and this
+    always returns "Elephant" - the same value every call site passed
+    implicitly before this function existed.
+
+    Only meaningful once NODE_DETERRENCE_SCOPE admits Boar (boar_only or
+    both). Reads vision_check.confirmed rather than raw species membership,
+    for the same reason _watch_for_vision()'s own confirm gate does: a
+    majority-gated label present in .species without having cleared its
+    poll-level streak is not a real confirmation and must not steer content
+    selection either. If both species confirmed on the same event - both
+    animals genuinely in frame at once, only reachable under "both" - this
+    prefers Elephant: its evidence base is the deeper one (Thuppil & Coss
+    2016 vs. the ecological-inference argument ADR 0023 makes for reusing
+    tiger/lion on Boar) and it is the species this device exists for first.
+    An alert with no vision confirmation at all (seismic/acoustic alone)
+    also falls through to "Elephant" - the seismic/acoustic signature this
+    device fuses on was built and tuned for elephant footfall, not boar, so
+    there is no non-vision evidence this function could use to say
+    otherwise.
+
+    Args:
+        vision_check: The watch's final VisionCheck (handle_footfall_event's
+            `vision_check` local).
+        target_labels: The same scope handle_footfall_event resolved the
+            watch against - must agree with what confirmed vision_check in
+            the first place, or a label could be read back as confirming
+            evidence for a scope that never targeted it. Defaults to
+            VISION_TARGET_LABELS, injected rather than read from the module
+            global so it always matches whatever target_labels the caller's
+            own _watch_for_vision() call used.
+    """
+    if not vision_check.confirmed:
+        return "Elephant"
+    confirming = [label for label in vision_check.species if label in target_labels]
+    if "Elephant" in confirming:
+        return "Elephant"
+    if "Boar" in confirming:
+        return "Boar"
+    return "Elephant"
+
+
 def handle_footfall_event(
     schema_version: int,
     probability: float,
@@ -1348,6 +1445,7 @@ def handle_footfall_event(
     bandit_params: BanditParams = cognition_config.DEFAULT_BANDIT_PARAMS,
     rng: random.Random = _DEFAULT_RNG,
     household_proximity: bool = services_config.NODE_HOUSEHOLD_PROXIMITY,
+    target_labels: tuple[str, ...] = VISION_TARGET_LABELS,
 ) -> FootfallOutcome:
     """Sense -> fuse -> decide -> actuate for one report_footfall_event notify.
 
@@ -1496,6 +1594,19 @@ def handle_footfall_event(
             plays a predator growl rather than a siren/firecracker near
             residents (ADR 0016 Decision B). Not sensed - injected here only
             so tests can exercise both site types.
+        target_labels: This node's commissioning-time deterrence scope
+            (services.config.NODE_DETERRENCE_SCOPE, resolved through
+            deterrence_scope_labels() into DETERRENT_TARGET_LABELS).
+            Forwarded to _watch_for_vision() and _deterrence_species() so
+            confirmation, the fused reading and horn/LED content selection
+            all agree on which species this node acts on. Defaults to
+            VISION_TARGET_LABELS - a plain module-level default, not
+            re-read per call, since a live node's scope is fixed for the
+            process's lifetime (see main.py's startup banner). Injected as
+            a parameter, not read from the module global inside
+            _watch_for_vision, for the same reason household_proximity is:
+            so tests can exercise all three scope states without
+            monkeypatching module state.
 
     Returns:
         A FootfallOutcome carrying the fusion result, the decision, the
@@ -1595,6 +1706,7 @@ def handle_footfall_event(
                 trigger_monotonic=trigger_monotonic,
                 watch_s=watch_s,
                 poll_interval_s=vision_watch_poll_interval_s,
+                target_labels=target_labels,
             )
 
     vision_check = watch.check
@@ -1761,7 +1873,12 @@ def handle_footfall_event(
     tier, exploring = select_tier(
         context, experience.action_values(), bandit_params, rng, floor
     )
-    action = cognition_config.resolve_tier_action(tier, rng, household_proximity)
+    action = cognition_config.resolve_tier_action(
+        tier,
+        rng,
+        household_proximity,
+        species=_deterrence_species(vision_check, target_labels),
+    )
     logger.info(
         "deterrence tier %d selected: context=%d floor=%d exploring=%s "
         "gain_pct=%.1f horn_track_id=%d fire_ir=%s",
