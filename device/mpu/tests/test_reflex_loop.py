@@ -145,6 +145,14 @@ class _FakeCamera:
             - exercises "a camera failure must never block actuator firing".
         fail_capture: Same, for capture_burst().
         call_log: Shared cross-fake call-order log, see _FakeDriveHorn.
+        lock_exposure_result: What lock_night_exposure() returns. Not
+            logged to the shared call_log - unlike open/capture_burst/
+            close, its position relative to pulse_ir/drive_horn/drive_led
+            is not part of any existing ordering assertion, and adding it
+            there would shift every log[n] index those tests already
+            check. Recorded on lock_night_exposure_calls instead, the same
+            private-counter convention _FakeVisionDetect.calls uses for
+            bookkeeping that doesn't need cross-fake interleaving proof.
     """
 
     def __init__(
@@ -153,6 +161,7 @@ class _FakeCamera:
         fail_open: bool = False,
         fail_capture: bool = False,
         call_log: list | None = None,
+        lock_exposure_result: bool = True,
     ):
         self._frame_count = frame_count
         self._fail_open = fail_open
@@ -160,6 +169,8 @@ class _FakeCamera:
         self.call_log = call_log if call_log is not None else []
         self.opened = False
         self.captured_frames: list[Frame] = []
+        self._lock_exposure_result = lock_exposure_result
+        self.lock_night_exposure_calls = 0
 
     def open(self):
         self.call_log.append("camera.open")
@@ -176,6 +187,10 @@ class _FakeCamera:
             for i in range(self._frame_count)
         ]
         return self.captured_frames
+
+    def lock_night_exposure(self):
+        self.lock_night_exposure_calls += 1
+        return self._lock_exposure_result
 
     def close(self):
         self.call_log.append("camera.close")
@@ -941,6 +956,91 @@ def test_is_night_is_handed_the_pre_decision_vision_check_frames():
     assert len(seen) == 1
     assert len(seen[0]) == services_config.VISION_CHECK_FRAME_COUNT
     assert all(isinstance(f, Frame) for f in seen[0])
+    experience.close()
+
+
+def test_night_and_firing_ir_locks_exposure_before_the_evidence_burst():
+    """A confirmed night event at an escalated tier locks exposure exactly once.
+
+    docs/qa/night-ir-led-characterisation.md, Finding 4: auto-exposure+IR is
+    the fix's actual target, so this is the one combination that must
+    trigger it - not is_night() alone, not fire_ir alone.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    _escalate_to_tier_2(experience)
+
+    camera = _FakeCamera()
+    outcome, _, _ = _fire(0.9, experience=experience, camera=camera)
+
+    assert outcome.action.tier is Tier.TIER_2
+    assert outcome.ir_ack is True
+    assert camera.lock_night_exposure_calls == 1
+    experience.close()
+
+
+def test_daylight_does_not_lock_exposure():
+    """is_night() False must skip the lock the same way it skips pulse_ir."""
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    _escalate_to_tier_2(experience)
+
+    camera = _FakeCamera()
+    outcome, _, _ = _fire(
+        0.9,
+        experience=experience,
+        camera=camera,
+        is_night=lambda frames: False,
+        detect_vision=_FakeVisionDetect([ELEPHANT]),
+    )
+
+    assert outcome.action.tier is Tier.TIER_2
+    assert outcome.ir_ack is None
+    assert camera.lock_night_exposure_calls == 0
+    experience.close()
+
+
+def test_undetermined_night_does_not_lock_exposure():
+    """is_night() None (unmeasurable burst) must skip the lock, same as pulse_ir."""
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    _escalate_to_tier_2(experience)
+
+    camera = _FakeCamera()
+    outcome, _, _ = _fire(
+        0.9, experience=experience, camera=camera, is_night=lambda frames: None
+    )
+
+    assert outcome.action.tier is Tier.TIER_2
+    assert outcome.ir_ack is None
+    assert camera.lock_night_exposure_calls == 0
+    experience.close()
+
+
+def test_tier_1_never_locks_exposure():
+    """Tier 1 fires no IR, so the lock - gated the same way pulse_ir is - never runs."""
+    camera = _FakeCamera()
+    outcome, _, _ = _fire(0.9, camera=camera, detect_vision=_FakeVisionDetect([ELEPHANT]))
+
+    assert outcome.action is TIER_1
+    assert camera.lock_night_exposure_calls == 0
+
+
+def test_is_night_error_still_locks_exposure_before_the_forced_pulse():
+    """The except-branch forces night=True, and the lock follows the same forced value.
+
+    Counterpart to test_is_night_error_never_blocks_deterrence_and_the_pulse_still_fires:
+    a perception failure must not cost the event its exposure lock either.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    _escalate_to_tier_2(experience)
+
+    def _boom(frames):
+        raise RuntimeError("saturation math blew up")
+
+    camera = _FakeCamera()
+    outcome, kwargs, _ = _fire(0.9, experience=experience, camera=camera, is_night=_boom)
+
+    assert outcome.action.tier is Tier.TIER_2
+    assert kwargs["pulse_ir"].calls == [(1, TIER_2.ir_duration_ms)]
+    assert camera.lock_night_exposure_calls == 1
     experience.close()
 
 

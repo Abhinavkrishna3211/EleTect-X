@@ -46,6 +46,18 @@ _CAP_PROP_FRAME_WIDTH = 3
 _CAP_PROP_FRAME_HEIGHT = 4
 _CAP_PROP_FPS = 5
 _CAP_PROP_FOURCC = 6
+_CAP_PROP_EXPOSURE = 15
+_CAP_PROP_AUTO_EXPOSURE = 21
+
+# UVC's own exposure-mode menu (uvcvideo's auto_exposure control, not a
+# cv2 constant) - confirmed live against this exact camera 3 Sept 2026
+# (v4l2-ctl --list-ctrls /dev/video0): "min=0 max=3 default=3 value=3
+# (Aperture Priority Mode)" is the auto default this driver ships with,
+# and setting cv2.CAP_PROP_AUTO_EXPOSURE to 1 reads back as "(Manual
+# Mode)". These two are the only states this module uses; 0 (unsupported)
+# and 2 (shutter priority) are UVC values this camera never reports.
+_UVC_EXPOSURE_MODE_AUTO = 3
+_UVC_EXPOSURE_MODE_MANUAL = 1
 
 
 class CameraError(RuntimeError):
@@ -269,6 +281,7 @@ class Camera:
                 capture.release()
                 last_error = f"failed to open camera device {self._device!r}"
             else:
+                self._assert_auto_exposure(capture)
                 last_error = self._consume_warmup_frames(capture)
                 if not last_error:
                     self._capture = capture
@@ -294,6 +307,36 @@ class Camera:
                 time.sleep(self._open_retry_backoff_s)
 
         raise CameraError(f"{last_error} (after {self._open_retries} attempt(s))")
+
+    def _assert_auto_exposure(self, capture: _CaptureHandle) -> None:
+        """Best-effort: force the UVC auto-exposure mode at every open().
+
+        Exists because the control lives on the physical device, not on
+        this file handle - it survives close()/release() and persists
+        across whatever the *previous* opener of this camera (another
+        process, a bench test) last left it at. Confirmed live 1-2 Sept
+        2026: a host-side characterisation session locked manual exposure
+        for its own measurements and never reset it, and the device was
+        still sitting in Manual Mode at that stale value more than a day
+        later, surviving an intervening reboot. Asserting the default here
+        - before warmup, so the warmup frames settle under the mode this
+        session actually wants - means every open() starts from a known
+        state regardless of what anything else did to this device.
+
+        Never raises and never blocks open() on failure - the same
+        "camera control failures don't stop capture" discipline
+        lock_night_exposure() and perception/night.py's callers use. A
+        camera that ignores this write still opens and still captures,
+        just possibly under whatever mode it was already in.
+        """
+        try:
+            capture.set(_CAP_PROP_AUTO_EXPOSURE, _UVC_EXPOSURE_MODE_AUTO)
+        except Exception as exc:  # noqa: BLE001 - must never block camera open
+            logger.warning(
+                "camera %s: could not assert auto-exposure at open: %s",
+                self._device,
+                exc,
+            )
 
     def _consume_warmup_frames(self, capture: _CaptureHandle) -> str:
         """Grab and discard `warmup_frames` frames; release and return an error on failure.
@@ -381,6 +424,61 @@ class Camera:
                 break
             frames.append(Frame(image=frame.image, index=i, timestamp_s=frame.timestamp_s))
         return frames
+
+    def lock_night_exposure(self, value: int = config.NIGHT_LOCKED_EXPOSURE) -> bool:
+        """Switch to manual exposure at `value`; verifies the write took.
+
+        docs/qa/night-ir-led-characterisation.md, Finding 4: auto-exposure
+        hunts against the IR pulse and is the dominant source of Boar false
+        positives at night (15/22/28 spurious boxes across three
+        auto-exposure+IR sweeps, maxconf up to 0.408 - vs zero on every
+        locked-exposure run in the same battery). Callers use this right
+        before the IR-lit evidence burst - the capture this actually needs
+        to protect - not at open(), which stays on auto by default (see
+        _assert_auto_exposure) since daytime behaviour is unmeasured under
+        a lock and must not change.
+
+        Read-back verified rather than trusted, same discipline
+        night_char.py used to produce the numbers this method exists to
+        reproduce in production - a `set()` that reports success on a
+        control the device silently ignores is a real, previously
+        documented failure mode on this exact camera+container path (now
+        re-tested 3 Sept 2026 and no longer reproducing, but this method
+        does not assume that stays true on every unit or firmware).
+
+        Returns:
+            True only if both the mode and the value read back as
+            requested. False on services_config.NIGHT_EXPOSURE_LOCK_ENABLED
+            being off, on a write that did not stick, or on any error -
+            callers treat False as "continue on whatever exposure mode the
+            camera already had," never as a reason to skip the capture.
+
+        Raises:
+            CameraError: If called before open() or after close().
+        """
+        capture = self._require_open()
+        if not config.NIGHT_EXPOSURE_LOCK_ENABLED:
+            logger.info("night exposure lock disabled (NIGHT_EXPOSURE_LOCK_ENABLED=False)")
+            return False
+        try:
+            capture.set(_CAP_PROP_AUTO_EXPOSURE, _UVC_EXPOSURE_MODE_MANUAL)
+            capture.set(_CAP_PROP_EXPOSURE, value)
+            mode_ok = int(capture.get(_CAP_PROP_AUTO_EXPOSURE)) == _UVC_EXPOSURE_MODE_MANUAL
+            exposure_ok = int(capture.get(_CAP_PROP_EXPOSURE)) == value
+        except Exception as exc:  # noqa: BLE001 - a camera control failure must not block capture
+            logger.warning("camera %s: night exposure lock raised: %s", self._device, exc)
+            return False
+        if mode_ok and exposure_ok:
+            logger.info("camera %s: night exposure locked at %d", self._device, value)
+            return True
+        logger.warning(
+            "camera %s: night exposure lock did not take (mode_ok=%s exposure_ok=%s) "
+            "- continuing on whatever exposure mode the camera already had",
+            self._device,
+            mode_ok,
+            exposure_ok,
+        )
+        return False
 
     def close(self) -> None:
         """Release the device. Idempotent - safe to call multiple times."""

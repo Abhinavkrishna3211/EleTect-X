@@ -472,6 +472,41 @@ DETERRENT_REQUIRES_VISION_CONFIRMATION = True
 NIGHT_SATURATION_THRESHOLD = 12.0
 
 # ---------------------------------------------------------------------------
+# Night exposure lock (perception/camera.py, services/reflex_loop.py)
+# ---------------------------------------------------------------------------
+# Auto-exposure hunts against the IR pulse: it reacts to the sudden light
+# within a frame or two and pulls gain back down, both erasing most of the
+# illuminator's benefit (+5-7% luma gained vs +29-60% locked) and, worse, is
+# the dominant source of Boar false positives at night - three
+# auto-exposure+IR sweeps threw 15/22/28 spurious Boar boxes, maxconf up to
+# 0.408 (above the 0.2 deployment threshold), where every locked-exposure
+# run in the same battery threw zero
+# (docs/qa/night-ir-led-characterisation.md, Finding 4). Locking exposure
+# right before the IR-lit evidence burst - the only capture this needs to
+# protect; tier 1 never fires IR - removes the AGC hunting that causes both
+# problems.
+#
+# Measured 1-2 Sept 2026, Kothamangalam backyard, real hardware: treeline
+# sharpness gain from the pulse peaks at exposure ~256 (+100.0 Laplacian,
+# roughly 1.3-2.5x the gain at other settings in the ladder), never clips
+# (saturation stayed 0.000 through the whole 32-512 sweep), and produced
+# zero false positives with or without the pulse. Do not exceed ~320
+# (ground-band ghost boxes start appearing above ~384) or drop below ~128
+# (the sensor is noise-limited by exposure 32). 256 is the coarsest useful
+# step actually tested, not a pinned optimum - the true best setpoint may
+# sit anywhere in ~224-320.
+NIGHT_LOCKED_EXPOSURE = 256
+
+# Independent kill switch for the whole feature - this changes camera
+# behaviour for every species, and the only field verification so far is a
+# static, empty scene (Finding 4's own caveat: motion blur on a moving
+# animal at this exposure is unmeasured). If it ever needs pulling without
+# a redeploy, this is the one flag that does it - same env-first idiom as
+# SAFE_MODE (reflex_loop.py), read once so startup can honestly log which
+# mode the run is in.
+NIGHT_EXPOSURE_LOCK_ENABLED = os.environ.get("ELETECT_NIGHT_EXPOSURE_LOCK", "1") != "0"
+
+# ---------------------------------------------------------------------------
 # Which species this node acts on (services/reflex_loop.py)
 # ---------------------------------------------------------------------------
 # ETX-V is a two-class detector - perception/detector.py's module docstring
