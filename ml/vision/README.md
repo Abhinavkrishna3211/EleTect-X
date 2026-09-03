@@ -3073,20 +3073,31 @@ gap this file's other sections describe remain untouched. This section's numbers
 consumption-layer fix, not a retrain — the model itself is exactly as accurate (or inaccurate) as it
 was on 30 Aug.
 
-**A second, independent cause was found by a different session, and is recorded here by cross-
-reference rather than duplicated or chased further** — `docs/qa/night-ir-led-characterisation.md`, a
-real board-run characterization of camera control (not model weights), found auto-exposure + IR to be
+**A second, independent cause was found by camera-level characterization, and is now implemented as
+a fix for the active camera path (3 Sept)** — `docs/qa/night-ir-led-characterisation.md`, a real
+board-run characterization of camera control (not model weights), found auto-exposure + IR to be
 the *only* configuration across its whole test battery to produce a meaningful false-positive
 population (15/22/28 spurious Boar boxes across three runs, confidence up to 0.408 — above the 0.2
-deployment threshold), while locked exposure gave zero false positives across the same battery. That
-session's own written recommendation: "auto-exposure at night should be considered a bug for this
-pipeline." This is a plausible mechanism for this section's own unexplained per-chunk swing
-(1.2%–73.9%, table above) — dappled light and AGC hunting produce exactly the kind of intermittent,
-non-monotonic signal this section flagged as "a hypothesis worth testing next, not a conclusion." Not
-confirmed causal against this specific log — just the leading candidate, and not implemented here: the
-camera-control code is a separate session's, and a real blocker is already on record there — the
-container's camera path does not accept exposure writes and sits frozen at a fixed value, unlike the
-host V4L2 path. See `docs/KNOWN_GAPS.md`'s matching cross-reference entry.
+deployment threshold), while locked exposure (≈256) gave zero false positives across the same
+battery. That session's own written recommendation: "auto-exposure at night should be considered a
+bug for this pipeline." This is a plausible mechanism for this section's own unexplained per-chunk
+swing (1.2%–73.9%, table above) — dappled light and AGC hunting produce exactly the kind of
+intermittent, non-monotonic signal this section flagged as "a hypothesis worth testing next, not a
+conclusion." Not confirmed causal against this specific log — just the leading candidate.
+**Implemented 3 Sept**: `perception/camera.py`'s `Camera.lock_night_exposure()` locks manual exposure
+at `services/config.NIGHT_LOCKED_EXPOSURE` (256) right before the IR-lit evidence burst on any event
+that is both night and firing IR, verified by read-back, behind an independent
+`NIGHT_EXPOSURE_LOCK_ENABLED` kill switch (default on) since motion blur on a moving animal and
+daytime behaviour under the lock remain unmeasured. The document's own claim that "the container's
+camera path does not accept exposure writes and sits frozen at a fixed value" did **not** reproduce
+on live re-test 3 Sept 2026 against the real board — both the auto-exposure and exposure writes
+succeeded with a verified read-back, recorded as a re-test correction, not a claim the original
+observation was wrong when made. **Not implemented for the GStreamer/event-video path**
+(`perception/video.py`, still `EVENT_VIDEO_ENABLED=False` by default) — its per-event pipeline has no
+persistent capture handle to lock late, so `EventVideoRecorder.lock_night_exposure()` is an honest
+no-op today. This section's numbers still describe the 30 Aug run under auto-exposure, unchanged by
+this fix; whether the lock actually moves the field FP rate has not been re-measured with a fresh
+live run. See `docs/KNOWN_GAPS.md`'s matching, more detailed entry.
 
 <!-- LIVE_SYNC_PLACEHOLDER -->
 
