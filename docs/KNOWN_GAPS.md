@@ -2087,3 +2087,52 @@ argument for light is "unpredictable, simulates human presence" — a steady glo
 version) is future work: it needs `led.cpp` `pattern_id` timing logic, a host-side test, a reflash,
 and a re-verification of the one actuation path that is currently proven working. Not started, not
 scoped for the trial. Status: **open**, named near-term post-trial work.
+
+## The Arducam B0490's onboard auto-IR illuminator limits the screen-based bench rig to daylight-scope detection validation (3 Sept)
+
+The camera module has a built-in 940 nm IR illuminator with automatic IR-cut-filter switching, driven
+by a **passive photoresistor on the camera module itself** — not exposed to software in any way
+(`docs/decisions/0001-usb-camera-imx462.md:10`, `docs/VISION_MODEL_BUILD_PROMPT.md:400`). This is
+separate from the project's own external 850 nm MOSFET-driven IR illuminator used for real field
+deterrence, which is unaffected and already cleanly characterised at range
+(`docs/qa/night-ir-led-characterisation.md`, no clipping in any run).
+
+The onboard IR fires automatically whenever the module's own photoresistor calls the scene dark
+enough — including inside a screen-based bench rig with the room lights off. At close range against a
+glossy screen this produces a monochrome (zero-saturation) washout that persists regardless of exposure
+setting or camera angle, since the LEDs are coaxial with the lens and tilting the camera doesn't change
+their geometry relative to the scene. Confirmed by exposure-sweep (saturation held at ~0 across the
+whole ladder — real illumination, not a clipping artifact) and by turning the room light on (saturation
+jumped to 215–248 across the same ladder, hotspot gone entirely).
+
+**Consequence:** the rig cannot be used with the room dark. Any bench-rig run intended to probe
+detection behaviour has to be lit — it validates daylight-scope model behaviour only. Night-time
+detection behaviour must keep relying on the separate physical night-IR characterisation at real range
+rather than this rig. There is no software fix; the photoresistor is not controllable from the host.
+Status: **open, permanent hardware limitation of the bench rig** — not a deployment blocker (the real
+field camera's night behaviour is validated elsewhere), just a scope note for anyone reaching for this
+rig to test night behaviour in the future.
+
+## An overnight bench-rig scoring run's own detection-accuracy numbers read as near-random/inverted — this is bench-rig domain shift, not a model regression (3 Sept)
+
+A 3.64 h, 2,314-record overnight run of `etx_matrix.py` against the screen-based bench rig (auto-IR
+issue above already cleared by keeping the room lit; zero errors, single stable `boot_id`, latency mean
+205.7 ms / median 204.2 ms) produced detection numbers that look badly broken taken at face value: at
+threshold 0.5, Elephant hit-rate ~7.8%, with mean detector confidence on true-Elephant frames actually
+*lower* than on true-non-Elephant frames.
+
+This is very likely bench-rig **domain shift**, not a real model regression. Re-shooting a screen
+introduces moiré, glare, colour-space differences and the exposure/IR effects documented in the entry
+above — any of which can drive a genuinely decent model to near-random or inverted scores on rig data
+without that reflecting real-world performance at all. Cross-checked against the deployed `yolo_attn2`
+checkpoint's actual held-out evaluation in `ml/vision/README.md`: precision ~97–98% on both classes,
+recall 0.835 (Elephant) / 0.586–0.66 (Boar) on real (non-rig) held-out images — a materially healthier
+and internally consistent picture that the rig numbers do not match.
+
+**Do not quote this run's accuracy numbers as real model quality.** The rig is useful for exercising
+the harness, timing, and reboot-resilience infrastructure (all of which it validated cleanly), but its
+own detection-rate output on screen-reshot images is not comparable to the real held-out eval and
+should not be cited as evidence of the model regressing or improving. The genuine, already-tracked gap
+is the entry above this one (`≥92%-per-class-recall bar` not met on real held-out data) — this run
+neither confirms nor worsens it. Status: **closed** as an investigation (root cause understood); the
+underlying recall gap stays **open**, tracked separately, unchanged by this finding.
