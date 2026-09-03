@@ -455,14 +455,31 @@ EVENT_VIDEO_ENABLED = False
 # listing of captures shows finished footage only.
 EVENT_VIDEO_SCRATCH_DIR = CAPTURE_DIR / ".scratch"
 
-# Matroska, not MP4. An MP4's moov atom is written when the file is closed,
-# so a recording cut short - which on this board means a 5V brown-out, a
-# documented and observed failure (docs/KNOWN_GAPS.md, 2 Sept) - leaves a
-# file no player will open. Matroska is written incrementally and a
-# truncated .mkv still plays up to the point it was cut. Given that the
-# whole point of this feature is footage of a rare event, "playable up to
-# the crash" beats "nothing at all" decisively.
-EVENT_VIDEO_SUFFIX = ".mkv"
+# A raw H.264 Annex-B elementary stream, not a Matroska or MP4 container.
+# The original design called for Matroska specifically because an MP4's
+# moov atom is written when the file is closed, so a recording cut short -
+# which on this board means a 5V brown-out, a documented and observed
+# failure (docs/KNOWN_GAPS.md, 2 Sept) - leaves a file no player will
+# open. That reasoning turned out to prove too little: on real hardware,
+# matroskamux can't be used at all. v4l2h264enc's src pad only ever emits
+# byte-stream H.264; matroskamux's sink only accepts avc/avc3. Bridging
+# the two needs h264parse, which lives in gstreamer1.0-plugins-bad -
+# confirmed absent from the production container and uninstallable there
+# (no installation candidate in the pinned Debian snapshot repo, and the
+# container user has no root). jpegparse, upstream of the decode, is
+# missing from the same package for the same reason, but turned out to be
+# unnecessary: jpegdec accepts v4l2src's MJPEG buffers directly.
+#
+# Dropping the muxer is not a downgrade of the truncation-resilience
+# argument, it's a stronger version of it: an elementary stream has no
+# header or index to corrupt in the first place, so a brown-out mid-write
+# leaves a valid, playable stream missing only its trailing frames -
+# "playable up to the crash" without even needing incremental-write
+# semantics from a container format to get there. Validated end-to-end on
+# the real board (6s bench recording, decoded cleanly via OpenCV/FFmpeg on
+# a separate machine) - on USB-C/hub power, not yet under VIN; see
+# docs/KNOWN_GAPS.md for the still-open VIN-power camera question.
+EVENT_VIDEO_SUFFIX = ".h264"
 
 # Upper bound on how long a recording may run before the keep-or-discard
 # decision has to have been made (ADR 0020 Decision B3's "~15-20s"). The
@@ -495,34 +512,52 @@ EVENT_VIDEO_CONFIRM_WINDOW_S = 60.0
 # review backs 45s over 30s or 60s, same as CAPTURE_POST_FIRE_TAIL_S.
 EVENT_VIDEO_RETREAT_TAIL_S = 45.0
 
-# Recording resolution and frame rate, deliberately below the camera's
-# CAMERA_FRAME_WIDTH/HEIGHT stills resolution. The recorder decodes MJPEG
-# in software before encoding H.264, and 1080p30 decode-plus-encode on four
-# A53 cores would compete with the vision inference running off the same
-# pipeline; 720p15 is a large reduction in that cost for footage whose job
-# is to show an elephant approaching and leaving, not to resolve detail.
-# The camera is free to negotiate the nearest mode it actually supports,
-# exactly as perception/camera.py's own CameraInfo readback documents.
-# INVENTED - no encode-load measurement on this board backs these numbers.
+# Recording resolution and frame rate. 720p rather than the camera's
+# CAMERA_FRAME_WIDTH/HEIGHT stills resolution, for the same reason as
+# before: the recorder decodes MJPEG in software before encoding H.264,
+# and 1080p decode-plus-encode on four A53 cores would compete with the
+# vision inference running off the same pipeline. The framerate is not a
+# design choice, though - it is measured. GStreamer's v4l2src negotiates
+# exact discrete caps and rejects anything the sensor doesn't advertise
+# (unlike OpenCV's V4L2 backend elsewhere in this codebase, which snaps
+# silently to the nearest supported mode - the two are not interchangeable
+# assumptions). Swept on the real board: at 1280x720, 5/10/15/20/25fps all
+# fail not-negotiated; only 30fps links. A broader sweep across several
+# resolutions found no combination that offers 15fps at all - 30fps is
+# this sensor's only mode at any usable size, not a fallback from one.
+# 720p30 therefore costs roughly double the software JPEG-decode work the
+# original 720p15 figure assumed; no encode-load measurement on this
+# board backs the resulting number, so headroom is unverified either way.
 EVENT_VIDEO_WIDTH = 1280
 EVENT_VIDEO_HEIGHT = 720
-EVENT_VIDEO_FRAMERATE = 15
+EVENT_VIDEO_FRAMERATE = 30
 
 # H.264 target bitrate. ADR 0020 sizes a 60-90s event clip at 10-20MB;
 # 2 Mbps lands a 60s clip at ~15MB, inside that range. Kept as an explicit
 # constant rather than left to the encoder's default so the storage
 # arithmetic in ADR 0020 stays traceable to a number in the code.
+# NOT CONFIRMED TAKING EFFECT: a 6s bench recording at this setting
+# produced a ~24.8MB file (~33 Mbps effective, ~16x over target).
+# extra-controls on v4l2h264enc silently drops unrecognised control
+# names rather than erroring, so "video_bitrate" is suspected wrong for
+# this board's Venus encoder rather than the encoder ignoring the value
+# outright; the real control name hasn't been enumerated (v4l2-ctl is not
+# present in the production container). See docs/KNOWN_GAPS.md. Until
+# this is resolved, size storage and EVENT_VIDEO_RETREAT_TAIL_S against
+# the observed rate, not this constant.
 EVENT_VIDEO_BITRATE_BPS = 2_000_000
 
 # How long to wait for the pipeline to flush and finish the file after
-# end-of-stream is sent. A Matroska file that never gets its EOS is still
-# playable (see EVENT_VIDEO_SUFFIX above), so this timeout bounds the wait
-# rather than risking the loop hanging on a stuck encoder - a stuck
-# pipeline must not hold the reflex loop open indefinitely. INVENTED.
+# end-of-stream is sent. The recording is a raw H.264 Annex-B elementary
+# stream (see EVENT_VIDEO_SUFFIX above) with no container index to
+# finalise, so a stuck EOS costs nothing beyond whatever the encoder
+# itself has buffered - but a stuck pipeline still must not hold the
+# reflex loop open indefinitely, so this timeout bounds the wait rather
+# than trusting the encoder to always report done. INVENTED.
 EVENT_VIDEO_STOP_TIMEOUT_S = 5.0
 
 # How long a single frame pull off the recording pipeline may block. Sized
-# generously against EVENT_VIDEO_FRAMERATE's ~67ms frame interval so a
+# generously against EVENT_VIDEO_FRAMERATE's ~33ms frame interval so a
 # momentary encoder stall does not read as a dead camera, and bounded so a
 # genuinely dead pipeline degrades to "no frames" (which the reflex loop
 # already handles as vision-unavailable) instead of blocking the event.

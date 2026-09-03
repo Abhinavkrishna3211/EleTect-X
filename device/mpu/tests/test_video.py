@@ -70,8 +70,8 @@ class _FakePipeline:
         self.stopped += 1
         if self.stop_raises is not None:
             raise self.stop_raises
-        # A real encoder has written the muxed clip out by now.
-        self.path.write_bytes(b"fake matroska bytes")
+        # A real encoder has flushed the elementary stream out by now.
+        self.path.write_bytes(b"fake h264 bytes")
 
 
 class _FakeFactory:
@@ -122,7 +122,7 @@ def test_description_tees_the_stream_to_both_an_encoder_and_an_appsink(tmp_path)
     is asserted here rather than left to a live run to discover.
     """
     description = build_pipeline_description(
-        "/dev/video0", tmp_path / "e.mkv", width=1280, height=720, framerate=15,
+        "/dev/video0", tmp_path / "e.h264", width=1280, height=720, framerate=30,
         bitrate_bps=2_000_000,
     )
 
@@ -132,34 +132,42 @@ def test_description_tees_the_stream_to_both_an_encoder_and_an_appsink(tmp_path)
     assert f"appsink name={APPSINK_NAME}" in description
 
 
-def test_description_muxes_to_matroska_not_mp4(tmp_path):
-    """Container choice is a survivability decision, not a preference.
+def test_description_writes_a_raw_elementary_stream_with_no_muxer(tmp_path):
+    """No container, and that is a survivability decision, not an omission.
 
-    MP4 writes its moov atom at close, so a brown-out mid-record leaves a
-    file no player will open. Matroska stays playable up to the point the
-    power went. On a board with a documented 5V brown-out history
-    (docs/KNOWN_GAPS.md) that is the difference between footage and
-    nothing.
+    ADR 0020 originally called for Matroska over MP4 on the same grounds
+    this test now checks a stronger version of: an MP4's moov atom is
+    written at close, so a brown-out mid-record leaves a file no player
+    will open. Matroska turned out to be unreachable on real hardware -
+    v4l2h264enc only emits byte-stream H.264, matroskamux only accepts
+    avc/avc3, and the element that bridges them (h264parse) is missing
+    from the production container with no way to install it. A raw
+    elementary stream has no header or index to write at close at all, so
+    a brown-out - a documented, observed failure on this board
+    (docs/KNOWN_GAPS.md) - leaves it playable up to the point the power
+    went, same as Matroska was meant to guarantee, with nothing to corrupt.
     """
     description = build_pipeline_description(
-        "/dev/video0", tmp_path / "e.mkv", width=1280, height=720, framerate=15,
+        "/dev/video0", tmp_path / "e.h264", width=1280, height=720, framerate=30,
         bitrate_bps=2_000_000,
     )
 
-    assert "matroskamux" in description
+    assert "matroskamux" not in description
     assert "mp4mux" not in description
+    assert "h264parse" not in description
+    assert "! filesink" in description
 
 
 def test_description_carries_the_configured_geometry_and_bitrate(tmp_path):
     """Config values must reach the pipeline, not just sit in the module."""
     description = build_pipeline_description(
-        "/dev/video0", tmp_path / "e.mkv", width=640, height=480, framerate=10,
+        "/dev/video0", tmp_path / "e.h264", width=640, height=480, framerate=10,
         bitrate_bps=750_000,
     )
 
     assert "width=640,height=480,framerate=10/1" in description
     assert "video_bitrate=750000" in description
-    assert _location_from(description).endswith("e.mkv")
+    assert _location_from(description).endswith("e.h264")
 
 
 def test_appsink_branch_drops_frames_rather_than_stalling_the_encoder(tmp_path):
@@ -171,7 +179,7 @@ def test_appsink_branch_drops_frames_rather_than_stalling_the_encoder(tmp_path):
     recording is the thing that must not be starved.
     """
     description = build_pipeline_description(
-        "/dev/video0", tmp_path / "e.mkv", width=1280, height=720, framerate=15,
+        "/dev/video0", tmp_path / "e.h264", width=1280, height=720, framerate=30,
         bitrate_bps=2_000_000,
     )
 
@@ -396,7 +404,7 @@ def test_commit_moves_the_finished_recording_into_the_capture_dir(tmp_path):
 
     assert committed is not None
     assert committed.parent == tmp_path / "captures"
-    assert committed.name.endswith("_alert1.mkv")
+    assert committed.name.endswith("_alert1.h264")
     assert list((tmp_path / "captures" / ".scratch").iterdir()) == []
 
 
@@ -410,7 +418,7 @@ def test_commit_closes_a_still_running_pipeline_first(tmp_path):
 
     assert factory.pipelines[0].stopped == 1
     assert committed is not None
-    assert committed.read_bytes() == b"fake matroska bytes"
+    assert committed.read_bytes() == b"fake h264 bytes"
 
 
 def test_discard_removes_the_recording_and_files_nothing(tmp_path):
