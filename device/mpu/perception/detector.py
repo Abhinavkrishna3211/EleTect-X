@@ -14,7 +14,9 @@ the same-named Python SDK) that already loads the trained .eim artifact;
 its `--run-http-server` flag turns that into a plain HTTP endpoint reachable
 from stdlib `urllib.request` alone. Confirmed live 28 Aug against the real
 board: `GET /api/info` returns model metadata (labels ["Boar", "Elephant"],
-96x96x3 input, squash resize, deployed threshold min_score 0.5), and
+96x96x3 input, squash resize, deployed threshold min_score 0.05 - re-confirmed
+3 Sept 2026 against the current champion no_attn_relu/medium deploy; was 0.5
+when this docstring was first written, before the 30 Aug retrain), and
 `POST /api/image` with a multipart JPEG correctly classified a held-out
 Boar image at confidence 0.777 in ~20ms.
 
@@ -72,8 +74,8 @@ class Detection:
             module.
         confidence: The model's reported score for this box, in (0, 1].
             Edge Impulse only reports boxes that already clear the
-            deployed threshold (min_score 0.5 for ETX-V, per its own
-            /api/info) - a confidence below that never produces a
+            deployed threshold (min_score 0.05 for ETX-V, per its own
+            /api/info, re-confirmed 3 Sept 2026) - a confidence below that never produces a
             Detection at all. See services/reflex_loop.py's
             _vision_check() for what "no Detection at all" means for
             the fused log-odds it feeds.

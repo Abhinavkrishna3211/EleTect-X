@@ -1,25 +1,55 @@
-# Two-class FOMO vision model — Elephant + Boar (proof of concept)
+# Three-class object-detection vision model — Elephant + Boar + Background
 
-Edge Impulse project **1094260** (`EleTect-X-Vision`). Project ID only is recorded here; the API
-key is not in the repo and must be supplied through `EI_API_KEY` at run time.
+Edge Impulse project **1097972** (`ETX-V`). This was project 1094260 (`EleTect-X-Vision`) at the
+proof-of-concept stage; the project was recreated once the corpus grew past the original two-class
+FOMO scope (see below). Project ID only is recorded here; the API key is not in the repo and must be
+supplied through `EI_API_KEY` at run time.
 
-**Read the caveats section before quoting either number anywhere.** This is a genuine FOMO object
-detector trained on two real, openly-licensed datasets with real bounding boxes — and it is also
-trained entirely on daytime colour wildlife photography, while the deployment target is a
-night-IR camera. Both halves of that sentence have to travel together.
+**Read the caveats section before quoting either number anywhere.** The deployed champion is a
+**YOLO-Pro (`no_attn_relu`, `medium` sizing)** object detector, not the original FOMO proof-of-concept
+— trained on real, openly-licensed camera-trap and wildlife-photography datasets with real
+annotator-drawn bounding boxes, plus a small amount of the project's own board captures and synthetic
+pseudo-IR augmentation — and it is still trained mostly on daytime colour wildlife photography, while
+the deployment target is a night-IR camera. Both halves of that sentence have to travel together.
 
 ## Dataset
 
-| Class | Source | Version | License | Images | Boxes |
-|---|---|---|---|---|---|
-| Elephant | `roboflow-universe-projects/elephant-detection-cxnt1` | v2 (`resized640`) | CC BY 4.0 | 3,280 | 4,475 |
-| Boar | `trackabox-4ejy9/wild-boar-a1flm` | v1 | CC BY 4.0 | 1,901 | 3,003 |
-| Boar (top-up) | `boarwatch/wild-boar-deterrent-pzq5t` | v1 | CC BY 4.0 | 1,379 of 8,857 | 2,097 |
-| **Boar total** | | | | **3,280** | **5,100** |
+**Corrected 3 Sept 2026 — this table was stale since the corpus grew from 3 to 7 Boar sources and
+gained 2 more Elephant sources. Verified counts below are read straight from
+`ml/vision/dataset_manifest.json`, the source of truth; treat this table as a snapshot, not a
+substitute for it.**
 
-**Why it is real:** all three pulled live from Roboflow's COCO export API
-(`scripts/edge_impulse_upload_vision.py`), full images with real annotator-drawn bounding boxes,
-not synthesized or scraped-and-guessed. Citations, verbatim from each Universe page:
+| Class | Source | License | Images | Boxes |
+|---|---|---|---|---|
+| Elephant | `roboflow-universe-projects/elephant-detection-cxnt1/2` | CC BY 4.0 | 1,251 | 1,265 |
+| Elephant | `customdataset-aucsj/asian-elephants-dataset/1` | CC BY 4.0 | 2,358 | 4,308 |
+| Elephant | `wcs-elephas-maximus` | CDLA-Permissive-1.0 | 194 | 227 |
+| Elephant | `wild-boar-fmkcg/night-ojblh/1` (relabelled) | CC BY 4.0 | 73 | 56 |
+| Elephant (synthetic) | `pseudo-ir-elephant` | derived from the real sources above | 218 | 348 |
+| **Elephant total** | *(5 sources)* | | **4,094** | **6,204** |
+| Boar | `trackabox-4ejy9/wild-boar-a1flm/1` | CC BY 4.0 | 1,556 | 2,117 |
+| Boar | `boarwatch/wild-boar-deterrent-pzq5t/1` | CC BY 4.0 | 1,636 | 2,182 |
+| Boar | `roboflow-100/trail-camera/2` (relabelled) | CC BY 4.0 | 1,311 | 1,398 |
+| Boar | `wcs-sus-scrofa` | CDLA-Permissive-1.0 | 827 | 1,228 |
+| Boar | `pig-rinoz/wild-pig-at-night/1` (relabelled) | CC BY 4.0 | 64 | 125 |
+| Boar | `swg-eurasian-wild-pig` | CDLA-Permissive-2.0 | 1,800 | 2,373 |
+| Boar (synthetic) | `pseudo-ir-boar` | derived from the real sources above | 200 | 303 |
+| **Boar total** | *(7 sources)* | | **7,394** | **9,726** |
+| Background | `swg-empty` | CDLA-Permissive-2.0 | 2,398 | — |
+| Background | `board-captures-day1` | own capture | 26 | — |
+| Background | `board-captures-night1` | own capture | 207 | — |
+| **Background total** | *(3 sources)* | | **2,631** | — |
+
+Only 64 of the 7,394 Boar images are real night/IR camera-trap imagery
+(`pig-rinoz/wild-pig-at-night`) — 0.87%. The remaining night/IR coverage is 200 synthetic
+`pseudo-ir-boar` images. See `ml/vision/boar-representation-audit.md` for the full per-source
+condition breakdown this gap motivated.
+
+**Why the original three are real:** the first three sources listed were pulled live from Roboflow's
+COCO export API (`scripts/edge_impulse_upload_vision.py`), full images with real annotator-drawn
+bounding boxes, not synthesized or scraped-and-guessed. Citations, verbatim from each Universe page
+(citations for sources added after the original three are not yet transcribed here — see each
+source's own Universe/registry page):
 
 ```bibtex
 @misc{ elephant-detection-cxnt1_dataset,
