@@ -67,13 +67,40 @@ pipeline shape and services/config.py's constants:
   links at any resolution tested. See EVENT_VIDEO_FRAMERATE's comment in
   services/config.py.
 
+The bitrate overshoot above is now root-caused and fixed (3 Sept, same
+session): enumerating /dev/video4's real V4L2 controls found the driver
+defaults to Variable Bitrate mode, where `video_bitrate` is only a soft
+average and the QP range actually governs output. `extra-controls` now
+also sets `video_bitrate_mode=1` (Constant Bitrate). Re-verify with a real
+recording once the flag is on to confirm file size lands near target.
+
+New finding this same session, not yet root-caused and a real risk to
+event footage: a 4-stage buffer-counting probe (raw MJPEG capture straight
+off `v4l2src`, through `jpegdec`, through `videoconvert`, through the full
+hardware H.264 encode) measured only ~3.8 fps of real throughput at every
+stage alike, against the 30fps this pipeline negotiates and the sensor's
+own `VIDIOC_ENUM_FRAMEINTERVALS` advertises as its only mode at every
+resolution checked. Identical fps at all four stages rules out decode/
+convert/encode cost - the bottleneck is the camera's own capture rate, not
+this module. Leading hypothesis, unconfirmed: auto-exposure throttling the
+frame rate in low ambient light (the camera's own `Exposure, Dynamic
+Framerate` control defaults off, which cuts against this, so it is a
+hypothesis, not a finding). The decisive test - force manual exposure,
+re-measure, restore - was not run: it changes live camera hardware state
+on the production board, which this session's tooling would not do without
+a human confirming first. If real, this matters: a raw H.264 stream has no
+per-frame timestamps, so a stretch of real time recorded at ~3.8fps plays
+back as a shorter clip at the expected 30fps, not as slow motion - an
+event's footage could end up representing far fewer real seconds than its
+configured duration implies, in exactly the low-light conditions a night
+encounter would have. See docs/KNOWN_GAPS.md for tracking; needs the same
+board, in front of a human, as the VIN check below.
+
 Still open, and still the reason the flag stays off: the camera has not
 been proven to enumerate under the field build's VIN power topology
 (docs/KNOWN_GAPS.md flags that as blocking the entire camera path) - every
-check above ran on USB-C/hub power, and the encoder's bitrate control is
-suspected wrong for this board (observed output ran ~16x over the
-configured target; see EVENT_VIDEO_BITRATE_BPS's comment). Both are cheap
-checks with the board in front of a human; neither is done yet.
+check above ran on USB-C/hub power. That is a cheap check with the board
+in front of a human; not done yet.
 """
 
 from __future__ import annotations
@@ -161,6 +188,20 @@ def build_pipeline_description(
       plugins-bad package as `jpegparse` above). See services/config.py's
       EVENT_VIDEO_SUFFIX for why the elementary stream is, if anything, a
       better fit for the truncation-resilience goal than Matroska was.
+    - `extra-controls` sets two V4L2 controls, not one - `video_bitrate_mode`
+      as well as `video_bitrate`. Enumerated this board's real encoder
+      controls (raw ioctl against /dev/video4, "qcom-venus-encoder" -
+      v4l2-ctl is not present in the container) and found why the bitrate
+      ran ~16x over target: the driver's default `video_bitrate_mode` is 0
+      ("Variable Bitrate"), where `video_bitrate` is only a soft average and
+      actual output is governed by the QP range instead (default I/P/B QP
+      26/28/30 is permissive). `video_bitrate_mode=1` selects "Constant
+      Bitrate", where `video_bitrate` is the enforced target. Confirmed by
+      name against the driver's own control-name string, not guessed -
+      GStreamer's extra-controls matches a structure field's key against
+      each control's lowercased, underscore-joined `name`, and "Video
+      Bitrate Mode" / "Video Bitrate" are exactly `video_bitrate_mode` /
+      `video_bitrate`.
     - `filesink sync=false` - write as fast as the encoder produces; there
       is no live playback to pace against.
 
@@ -182,7 +223,7 @@ def build_pipeline_description(
         f" ! tee name={_TEE_NAME}"
         f" {_TEE_NAME}. ! queue max-size-buffers=8 leaky=downstream"
         f" ! videoconvert ! video/x-raw,format=NV12"
-        f' ! v4l2h264enc extra-controls="controls,video_bitrate={bitrate_bps}"'
+        f' ! v4l2h264enc extra-controls="controls,video_bitrate_mode=1,video_bitrate={bitrate_bps}"'
         f" ! filesink location={scratch_path.as_posix()} sync=false"
         f" {_TEE_NAME}. ! queue max-size-buffers=2 leaky=downstream"
         f" ! videoconvert ! video/x-raw,format=BGR"
