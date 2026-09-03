@@ -355,6 +355,46 @@ def test_burst_rejects_impossible_arguments(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# lock_night_exposure() - CameraProtocol contract, not yet implemented here
+# ---------------------------------------------------------------------------
+
+
+def test_lock_night_exposure_returns_false(tmp_path):
+    """Unimplemented on the GStreamer path - see the method's own docstring for why.
+
+    Must still satisfy CameraProtocol (reflex_loop calls it unconditionally
+    on any night+IR event) rather than raise AttributeError, and must
+    answer False - the same "continue on whatever exposure mode the camera
+    already had" signal perception.camera.Camera.lock_night_exposure gives
+    on a real failure - never True, which would claim a lock that did not
+    happen.
+    """
+    recorder = _recorder(tmp_path, _FakeFactory(), warmup_frames=0)
+    recorder.open()
+
+    assert recorder.lock_night_exposure() is False
+    assert recorder.lock_night_exposure(256) is False  # accepts the same signature as Camera's
+
+
+def test_lock_night_exposure_before_open_raises(tmp_path):
+    """Same before-open/after-close contract as capture_frame/capture_burst."""
+    recorder = _recorder(tmp_path)
+
+    with pytest.raises(CameraError):
+        recorder.lock_night_exposure()
+
+
+def test_lock_night_exposure_after_close_raises(tmp_path):
+    """The pipeline is really gone after close() - locking against it must raise, not no-op."""
+    recorder = _recorder(tmp_path, _FakeFactory(), warmup_frames=0)
+    recorder.open()
+    recorder.close()
+
+    with pytest.raises(CameraError):
+        recorder.lock_night_exposure()
+
+
+# ---------------------------------------------------------------------------
 # close()
 # ---------------------------------------------------------------------------
 
