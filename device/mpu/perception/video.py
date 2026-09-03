@@ -45,18 +45,35 @@ host-test harness). Every test in tests/test_video.py injects a fake
 pipeline factory through the same seam perception/camera.py's
 `capture_factory` provides.
 
-**UNVERIFIED against real hardware, and that is why
-services/config.py's EVENT_VIDEO_ENABLED defaults to False.** GStreamer
-itself is confirmed present on the board (docs/KNOWN_GAPS.md, 28 Aug:
-`gstreamer1.0-tools`, `-plugins-good`, `-base`, `-libcamera`, already
-driving the Edge Impulse runner's live camera path), but the specific
-element chain below - and in particular whether `v4l2h264enc` exposes the
-QRB2210's Venus encoder to userspace here - has never been run. Neither has
-the camera itself been proven to enumerate under the field build's VIN power
-topology (docs/KNOWN_GAPS.md flags that as blocking the entire camera path).
-Both are cheap live checks with the board in front of a human; neither has
-been done, and nothing in this module should be read as evidence that it
-works until they are.
+**Verified on real hardware, on USB-C/hub power - not yet under VIN, and
+that gap is why services/config.py's EVENT_VIDEO_ENABLED still defaults to
+False.** The element chain below was run for real against the production
+container's actual GStreamer install (`eletect-x-main-1`, 3 Sept): a 6s
+dual-branch recording produced zero pipeline errors, and the resulting
+file was pulled to a separate machine and decoded cleanly frame-by-frame
+via OpenCV/FFmpeg. Two real problems surfaced and are reflected in the
+pipeline shape and services/config.py's constants:
+
+- `gstreamer1.0-plugins-bad` (which carries `jpegparse` and `h264parse`)
+  is not installed in the container and cannot be - no installation
+  candidate in the pinned Debian snapshot repo, and the container user has
+  no root. `jpegparse` turned out to be unneeded (`jpegdec` takes
+  `v4l2src`'s MJPEG buffers directly); `h264parse` was load-bearing for
+  `matroskamux`, which only accepts avc/avc3 while `v4l2h264enc` only ever
+  emits byte-stream - so the fix is to drop the muxer, not route around
+  `h264parse`. See EVENT_VIDEO_SUFFIX's comment in services/config.py.
+- `v4l2src` requires exact discrete-caps negotiation and has no mode at
+  the originally configured 720p15 - swept on the real sensor, only 30fps
+  links at any resolution tested. See EVENT_VIDEO_FRAMERATE's comment in
+  services/config.py.
+
+Still open, and still the reason the flag stays off: the camera has not
+been proven to enumerate under the field build's VIN power topology
+(docs/KNOWN_GAPS.md flags that as blocking the entire camera path) - every
+check above ran on USB-C/hub power, and the encoder's bitrate control is
+suspected wrong for this board (observed output ran ~16x over the
+configured target; see EVENT_VIDEO_BITRATE_BPS's comment). Both are cheap
+checks with the board in front of a human; neither is done yet.
 """
 
 from __future__ import annotations
@@ -119,18 +136,31 @@ def build_pipeline_description(
     - `v4l2src ! image/jpeg,...` - the camera is requested in MJPG for the
       same bandwidth reason services/config.py's CAMERA_PIXEL_FORMAT gives:
       a 1080p-class UVC sensor will not sustain a useful frame rate in
-      uncompressed YUYV over USB2.
-    - `jpegparse ! jpegdec` - decoded once, before the tee, so the two
-      branches share the cost instead of each decoding the same frames.
-      Software decode is a real CPU cost on four A53s, which is why
-      EVENT_VIDEO_WIDTH/HEIGHT/FRAMERATE are set below the stills
-      resolution.
+      uncompressed YUYV over USB2. No `jpegparse` in front of the decode -
+      unlike the JPEG-burst path elsewhere in this codebase, this is not a
+      style choice: `jpegparse` lives in gstreamer1.0-plugins-bad, which
+      is absent from the production container and uninstallable there (no
+      root, no candidate in the pinned apt snapshot). Confirmed on real
+      hardware that `jpegdec` takes `v4l2src`'s MJPEG buffers directly with
+      no parser in front of it.
+    - `jpegdec` - decoded once, before the tee, so the two branches share
+      the cost instead of each decoding the same frames. Software decode is
+      a real CPU cost on four A53s, which is why EVENT_VIDEO_WIDTH/HEIGHT
+      are set below the stills resolution (EVENT_VIDEO_FRAMERATE could not
+      be, in the end - see its comment in services/config.py).
     - `tee` - branch one encodes and writes the file; branch two hands BGR
       frames to the vision check. Both queues are `leaky=downstream`: if the
       reflex loop is slow to pull a frame, the pipeline must drop that frame
       and keep recording, never stall the encoder and corrupt the timeline.
-    - `matroskamux` - not MP4, see services/config.py's EVENT_VIDEO_SUFFIX:
-      a recording cut short by a brown-out stays playable.
+    - No muxer - `v4l2h264enc`'s output goes straight to `filesink` as a raw
+      H.264 Annex-B elementary stream. Not the original design: ADR 0020
+      called for Matroska, but `matroskamux` cannot be reached from this
+      encoder at all on real hardware (`v4l2h264enc` only ever emits
+      byte-stream H.264; `matroskamux` only accepts avc/avc3; the element
+      that bridges them, `h264parse`, is in the same unavailable
+      plugins-bad package as `jpegparse` above). See services/config.py's
+      EVENT_VIDEO_SUFFIX for why the elementary stream is, if anything, a
+      better fit for the truncation-resilience goal than Matroska was.
     - `filesink sync=false` - write as fast as the encoder produces; there
       is no live playback to pace against.
 
@@ -148,12 +178,11 @@ def build_pipeline_description(
     return (
         f"v4l2src device={device} io-mode=2"
         f" ! image/jpeg,width={width},height={height},framerate={framerate}/1"
-        f" ! jpegparse ! jpegdec"
+        f" ! jpegdec"
         f" ! tee name={_TEE_NAME}"
         f" {_TEE_NAME}. ! queue max-size-buffers=8 leaky=downstream"
         f" ! videoconvert ! video/x-raw,format=NV12"
         f' ! v4l2h264enc extra-controls="controls,video_bitrate={bitrate_bps}"'
-        f" ! h264parse ! matroskamux"
         f" ! filesink location={scratch_path.as_posix()} sync=false"
         f" {_TEE_NAME}. ! queue max-size-buffers=2 leaky=downstream"
         f" ! videoconvert ! video/x-raw,format=BGR"
@@ -217,13 +246,14 @@ class _GstPipeline:
             buffer.unmap(mapping)
 
     def stop(self, timeout_s: float) -> None:
-        """Send EOS, wait up to `timeout_s` for the muxer to finish, then go to NULL.
+        """Send EOS, wait up to `timeout_s` for the encoder to finish, then go to NULL.
 
         Idempotent. The wait is bounded rather than open-ended because a
         stuck encoder must not hold the reflex loop open indefinitely - and
-        a Matroska file that never received its EOS is still playable
-        (services/config.py's EVENT_VIDEO_SUFFIX), so timing out here
-        costs the tail of a clip, not the clip.
+        a raw elementary stream that never received its EOS is still
+        playable up to whatever it last flushed (services/config.py's
+        EVENT_VIDEO_SUFFIX), so timing out here costs the tail of a clip,
+        not the clip.
         """
         if self._stopped:
             return
