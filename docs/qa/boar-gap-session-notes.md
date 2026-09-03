@@ -452,3 +452,104 @@ arXiv 2511.15622) remains the lead sourcing candidate, blocked on two
 unchecked items: confirming *Sus scrofa* is actually in its 99-species
 table, and reading its actual redistribution licence rather than trusting
 site copy. Neither check was run this session.
+
+## Exposure lock — implemented, not just written up (3 Sept, later)
+
+The plan's own constraint above ("camera-control code belongs to the other
+session") stopped holding: the other session was no longer active, and the
+user explicitly authorized implementing the fix here, plus starting
+Workstream 2 ahead of its planned post-ship sequencing. Both decisions are
+the user's, not inferred. This section supersedes the "closed, write-up
+only" framing above for the exposure-lock item specifically; the KNOWN_GAPS
+and README cross-references were rewritten in place (dated-append
+convention still followed — nothing above was deleted, only the live entry
+was updated to its current state) rather than left contradicting this.
+
+**Live re-test before writing any code.** Before touching `camera.py`,
+re-ran the exact scenario `night-ir-led-characterisation.md` documents as
+blocked ("the container's camera path does not accept exposure writes, and
+sits frozen at 156") — same container, same device, `docker exec` as the
+real `arduino` app user, no `-u` override. Result: `cv2.CAP_PROP_AUTO_EXPOSURE`
+(1, Manual) and `cv2.CAP_PROP_EXPOSURE` (256) both `set()` successfully,
+and read back as 1.0/256.0, with a subsequent frame read succeeding. This
+does not reproduce the documented finding — recorded here as a re-test
+correction, not a claim the original write-up was wrong when it was made.
+
+**Unrelated live bug found and fixed during that same check.** The camera
+was already sitting in Manual Mode at exposure 2000 — not the documented
+auto default — almost certainly a leftover from the 1-2 Sept
+`night_char.py` characterisation session that was never reset, and it had
+survived an intervening reboot. Reset live to auto-exposure (`value=3`) via
+the same `docker exec` path, verified two ways: the in-container read-back
+(3.0) and an independent host-side `v4l2-ctl -d /dev/video0 --list-ctrls`
+check (`auto_exposure ... value=3 (Aperture Priority Mode)`). This is
+exactly the class of bug `_assert_auto_exposure()` (below) now prevents
+from recurring silently.
+
+**What was built.**
+
+- `services/config.py`: `NIGHT_LOCKED_EXPOSURE = 256` (Finding 4's own
+  ladder — treeline sharpness gain peaks here, zero clipping through the
+  32-512 sweep) and `NIGHT_EXPOSURE_LOCK_ENABLED` (`ELETECT_NIGHT_EXPOSURE_LOCK`,
+  default on) — an independent kill switch, since the only field
+  verification is a static, empty scene; motion blur on a moving animal and
+  daytime behaviour under a lock are both still unmeasured.
+- `perception/camera.py`: `Camera._assert_auto_exposure()` runs at every
+  `open()`, forcing the auto default before warmup — the direct fix for the
+  stale-state bug just found. `Camera.lock_night_exposure(value=256)`
+  switches to manual mode and verifies the write by read-back rather than
+  trusting `set()`'s return value; never raises, returns `False` on a
+  disabled flag, a write that didn't stick, or any error, and callers
+  treat `False` as "continue on whatever exposure mode the camera already
+  had."
+- `services/reflex_loop.py`: `CameraProtocol` gained `lock_night_exposure()`.
+  `handle_footfall_event`'s IR-pulse gate now calls
+  `camera.lock_night_exposure()` right before the IR thread starts and
+  before the evidence burst — the exact night+fire_ir combination Finding 4
+  identifies as the false-positive source. `camera.open()` is guaranteed to
+  have already succeeded whenever this runs.
+- `perception/video.py`: `EventVideoRecorder.lock_night_exposure()` added
+  to satisfy the same Protocol, but as an honest no-op — this class rebuilds
+  its GStreamer pipeline fresh from a `Gst.parse_launch` string on every
+  event, with no persistent capture handle a later `set()` could reach.
+  A real fix would mean either baking exposure into `v4l2src`'s own
+  `extra-controls` at pipeline-build time (locks the *whole* recording, not
+  just the evidence burst — an unevaluated trade-off) or a live
+  element-property change on an already-PLAYING pipeline (unverified on
+  this hardware). Neither was attempted; both need their own hardware
+  verification this session did not do. Harmless today since
+  `EVENT_VIDEO_ENABLED` defaults `False` and nothing opens this class in
+  production yet.
+
+**Tests and regression bar.** `tests/test_camera.py`: extended `_FakeCapture`
+with exposure/auto-exposure state (default auto=3/exposure=156, matching
+this camera's real documented defaults), plus knobs for a write that
+reports success but doesn't stick and a write that raises — 9 new tests
+covering `_assert_auto_exposure` (asserted at open, and that a raising
+write doesn't block open) and `lock_night_exposure` (success+readback,
+config default, silent-failure readback, raising control, disabled via
+kill switch, before-open/after-close). `tests/test_video.py`: 3 new tests
+for `EventVideoRecorder.lock_night_exposure()` — always `False`, and the
+same before-open/after-close contract as its other methods.
+`tests/test_reflex_loop.py`: `_FakeCamera` gained `lock_night_exposure()`
+(private call counter, not the shared `call_log` — its position isn't part
+of any existing ordering assertion, and logging it there would have shifted
+every `log[n]` index 14 existing tests already check); 5 new tests assert
+the lock fires exactly on night+fire_ir (including the is_night()-raised
+path, which forces night=True), and does not fire on daylight,
+undetermined night, or tier 1 (no IR).
+
+Full bar: `ruff check .` clean across `device/mpu`; `pytest` 415 passed, 1
+skipped (same pre-existing skip as before this work) — the whole suite,
+including every watch-mechanics/ordering test, needed zero edits beyond the
+fake completing the Protocol contract, which is the same "no leaked
+behaviour" signal Workstream 1's N=1 Elephant no-op provides.
+
+**What this is not.** Implementing the mechanism is not the same as a fresh
+measured field number: the "locked exposure suppresses Boar FPs" result
+still rests on the original 1-2 Sept `night_char.py` battery, not a new run
+against this code path. No live night characterisation battery was re-run
+this session — the live camera checks above verified the V4L2 API surface
+works, not the FP-suppression outcome. That remains true until someone
+re-runs a battery like Finding 4's against production code with the lock
+active.
