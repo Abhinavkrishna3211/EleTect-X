@@ -2216,7 +2216,7 @@ Status: **open** (fps-throughput risk, re-verification of the bitrate fix on rea
 VIN-power camera check) with the two original hardware-blocking bugs and the bitrate-mode root
 cause **fixed**.
 
-## Sudden power loss recovers cleanly today; an in-process crash while powered does not (3 Sept)
+## Sudden power loss and in-process crash recovery, both checked (3 Sept)
 
 Asked and checked directly, because a field trial that goes dark silently after a fault is as bad
 as one that never worked. Two different failure modes, two different answers:
@@ -2239,13 +2239,30 @@ SQLite's default rollback-journal crash safety applies with no application code 
 transaction torn by a mid-write power cut. `main.py` also unconditionally clears orphaned video
 scratch files left by a run that died mid-recording, on every startup, specifically for this case.
 
-**An in-process crash while the board stays powered is a real, separate gap, already named
-above (2 Sept brown-out entry: "no documented Linux hardware watchdog — use Monit for app
-auto-restart + alerts").** `main.py` runs as PID 1 inside `eletect-x-main-1` with the container's
-own `RestartPolicy` set to `no` and no exception handling anywhere in its top-level module code —
-so an unhandled exception anywhere in the wiring, or in the final `while True: time.sleep(1)`,
-would exit PID 1, exit the container, and leave the deterrence system dark until the next reboot or
-a manual `arduino-app-cli app restart`. This has not been exercised live (killing PID 1 in the
-production container was deliberately not done without asking first) and is not yet fixed — the
-remedy named in the brown-out entry (a `Restart=on-failure` supervisor, or Monit) still stands as
-the concrete next step if this needs closing before the field trial. Status: **open**.
+**An in-process crash while the board stays powered — fixed, 3 Sept, two layers.** `main.py`
+runs as PID 1 inside `eletect-x-main-1` with no exception handling anywhere in its top-level module
+code, so an unhandled exception anywhere in the wiring, or in the final `while True:
+time.sleep(1)`, still exits PID 1 and exits the container. What changed is what happens next.
+
+Layer 1, immediate: the container's own `RestartPolicy`, which was `no` (Docker's default,
+confirmed via `docker inspect` before the fix), is now `unless-stopped` — applied live with
+`docker update --restart=unless-stopped eletect-x-main-1`. This alone makes the Docker daemon bring
+the container straight back up on any exit, crash or OOM included, with no supervisor process
+needed for this specific failure mode.
+
+Layer 2, durability: that live fix is not persistent on its own — `~/ArduinoApps/eletect-x/.cache/
+app-compose.yaml`, which App Lab regenerates on every redeploy, carries no `restart:` policy of its
+own, so a future redeploy would silently revert Layer 1. `scripts/eletect-x-watchdog.sh` closes
+this: installed on the board at `~/bin/eletect-x-watchdog.sh` and run from the `arduino` user's own
+crontab every 5 minutes (`crontab -l`, no sudo — this account already has the needed `docker` group
+membership), it reads the app's real status via `arduino-app-cli app list --format json` rather
+than assuming a fixed container name, re-applies `unless-stopped` if it finds the policy has
+drifted, and — only after seeing the app down for two consecutive ticks (a 5-minute grace period,
+so it doesn't race a legitimate in-progress redeploy) — restarts it with `arduino-app-cli app
+restart`. Verified end to end on the real board: a simulated policy drift
+(`docker update --restart=no`) was detected and self-healed on the very next tick, logged to
+`~/.local/state/eletect-x-watchdog/watchdog.log`.
+
+Neither layer touches actuator state or reflashes anything, consistent with the standing
+"camera-only/SSH-only work is unrestricted, actuator fires and reflashes are not" rule for
+unattended work on this board. Status: **fixed**.
