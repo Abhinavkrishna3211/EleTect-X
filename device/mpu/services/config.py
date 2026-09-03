@@ -302,6 +302,63 @@ VISION_WATCH_POLL_INTERVAL_S = 1.0
 # normal USB event (perception/camera.py); three in a row is a fault.
 VISION_WATCH_MAX_EMPTY_POLLS = 3
 
+# Consecutive watch polls a species label must appear on, in a row, before
+# it is admitted into a VisionWatch's `species` set. Per-label rather than
+# global because only Boar has the problem this exists to fix: a live 2-hour
+# board run measured a 31.53% per-frame Boar false-positive rate against
+# zero Elephant false positives in the same run (ml/vision/README.md's
+# "30 Aug - 2-hour live monitoring" entry) - single-poll admission for Boar
+# means most of that noise would land in `species` were anything ever gated
+# on it. Elephant is not listed and defaults to 1 (see required() in
+# reflex_loop.py), so this is a no-op for Elephant: ADR 0022's
+# confirm-and-exit latency and the existing watch-mechanics tests are
+# unaffected.
+#
+# This gates entry into `species` only, not `VisionCheck.confirmed` - Boar
+# is in neither DETERRENT_TARGET_LABELS nor EVENT_VIDEO_TARGET_LABELS today,
+# so nothing currently reads `confirmed` for a Boar detection, and confirmed
+# stays byte-for-byte what it always was. A species that later gains an
+# entry in either of those two lists must extend the same streak gate to
+# its confirmation path too, or a single spurious poll bypasses this
+# constant entirely - see services/reflex_loop.py's _watch_for_vision().
+#
+# Costs +1 poll of latency (VISION_WATCH_POLL_INTERVAL_S, ~1.0s) before Boar
+# enters `species`; Elephant costs +0. Measured, not assumed - the real
+# before/after false-positive numbers this bought are in
+# docs/qa/boar-gap-session-notes.md.
+VISION_SPECIES_CONSECUTIVE_POLLS: dict[str, int] = {"Boar": 2}
+
+# Labels that must appear on a strict majority of a burst's
+# VISION_CHECK_FRAME_COUNT frames - not merely one of them - before
+# _vision_check() (services/reflex_loop.py) admits them into `species` or
+# lets them count toward `confirmed`. Per-label, the same shape as
+# VISION_SPECIES_CONSECUTIVE_POLLS immediately above, and for the same
+# reason: only Boar has the problem this exists to fix.
+#
+# The replay this constant is built on is in
+# docs/qa/boar-gap-session-notes.md. The poll-level, production-faithful
+# Boar false-positive rate was 43.64% under this module's original
+# flatten-the-burst-and-OR aggregation (a single spurious box on one frame
+# of three scored identically to the same box on all three) - *worse* than
+# the 31.53% raw-frame rate it was built from, and the
+# VISION_SPECIES_CONSECUTIVE_POLLS debounce above barely dented it
+# (43.64% -> 40.48%). Requiring a majority within the burst fixed the
+# actual mechanism (43.64% -> 30.70% alone, -> 27.54% combined with the
+# poll debounce), because it is the OR itself, not an absent poll
+# debounce, that was amplifying the noise.
+#
+# Elephant is deliberately left off this list, not merely defaulted onto it
+# by omission. Elephant's measured recall (0.906, docs/KNOWN_GAPS.md) is
+# already below the >=92% field-readiness bar, and majority-of-N trades
+# recall for precision - the wrong direction for the one class where a
+# missed real detection, not a false one, is the safety-relevant failure.
+# Elephant had zero false positives in the same 2-hour run that measured
+# Boar's problem, so there is no precision problem here to trade against.
+# Boar's problem is precision, not recall, so this is a clean win scoped to
+# the class that actually has it, leaving Elephant's OR-across-the-burst
+# path - and ADR 0022's confirm-and-exit latency - untouched.
+VISION_SPECIES_BURST_MAJORITY_LABELS: tuple[str, ...] = ("Boar",)
+
 # ADR 0022 Decision B: the deterrent fires on a vision confirmation, not on
 # the fused decision alone.
 #

@@ -660,6 +660,17 @@ class VisionCheck:
     species: tuple[str, ...] = ()
 
 
+def _requires_burst_majority(label: str) -> bool:
+    """Whether `label` needs a strict majority of a burst's frames, not just one.
+
+    Thin wrapper around services_config.VISION_SPECIES_BURST_MAJORITY_LABELS,
+    the sibling lookup to _required_consecutive_polls() just below -
+    same reasoning, same per-label shape, different axis of the same
+    problem (within one burst, rather than across polls).
+    """
+    return label in services_config.VISION_SPECIES_BURST_MAJORITY_LABELS
+
+
 def _vision_check(
     detect_vision: VisionDetectFn,
     frames: list[Frame],
@@ -678,15 +689,49 @@ def _vision_check(
       perception.detector.DetectionError): logged and treated identically -
       available=False. A detector outage must not block or bias the alert
       decision any more than a dark lens would.
-    - detect_vision() succeeds: only detections whose label is in
-      target_labels count.
-      If at least one qualifies, log-odds is logit() of the *strongest*
-      match's own reported confidence (the same direct, non-invented
-      transformation _confidence_log_odds() already uses for
-      seismic/acoustic). If none qualify - including the case where
-      detect_vision() found real boxes, just none labeled with a target -
-      the reading is still available=True, scored at
-      cognition.config.BASELINE_VISION.
+    - detect_vision() succeeds: whether a label counts for anything at all -
+      species membership, confirmation, the fused reading - depends on
+      services_config.VISION_SPECIES_BURST_MAJORITY_LABELS
+      (_requires_burst_majority()). For a listed label, it must appear on
+      **more than half** of this burst's frames; for every other label -
+      the default, including Elephant - one frame is enough, exactly as
+      before this gate existed. Only detections whose label both qualifies
+      this way and is in target_labels count as a match. If at least one
+      qualifies, log-odds is logit() of the *strongest* qualifying match's
+      own reported confidence (the same direct, non-invented transformation
+      _confidence_log_odds() already uses for seismic/acoustic). If none
+      qualify - including the case where detect_vision() found real boxes,
+      just none that were both target-labeled and qualified - the reading
+      is still available=True, scored at cognition.config.BASELINE_VISION.
+
+      The majority gate is not the original design; it was added on
+      3 Sept 2026, scoped to Boar only, after a real 2-hour board run
+      showed the previous flat OR-across-the-burst reading (any qualifying
+      box on any one frame, for every label alike) actively amplifies
+      Boar false positives rather than filtering them: a poll-level Boar
+      false-positive rate of 43.64%, *worse* than the 31.53% raw-frame rate
+      it was built from, because a single spurious box on one frame of a
+      3-frame burst was scored identically to the same box appearing on
+      all three. Requiring a majority recovered nearly all of that loss on
+      its own (down to 30.70%), and combines with
+      VISION_SPECIES_CONSECUTIVE_POLLS' poll-level debounce (which this
+      function has no part in - that lives in _watch_for_vision) to reach
+      27.54% - see docs/qa/boar-gap-session-notes.md for the full replay.
+      This is a real, measured accuracy fix for Boar specifically, not a
+      code-cleanliness one - a test that constructs a burst with "Boar" on
+      only one of several frames must see it excluded from both species
+      and confirmation.
+
+      Elephant is deliberately left on the one-frame-is-enough default,
+      not majority-gated too. Elephant's measured recall (0.906,
+      docs/KNOWN_GAPS.md) is already below the field-readiness bar, the
+      same run that found Boar's 31.53% false-positive rate found *zero*
+      Elephant false positives, and a missed real elephant is the
+      safety-relevant failure this system exists to avoid - so there is no
+      precision problem on Elephant to trade recall against. A test that
+      constructs a burst with "Elephant" on only one of several frames
+      must still see it included, unchanged from every pre-3-Sept-2026
+      test that already asserts this.
 
       That baseline choice is deliberate, not a default: Edge Impulse only
       ever reports a box once it already clears the deployed model's own
@@ -719,17 +764,48 @@ def _vision_check(
         return VisionCheck(ModalityReading(Modality.VISION, 0.0, available=False), False)
 
     try:
-        detections: list[Detection] = detect_vision([frame.image for frame in frames])
+        detections_by_frame: list[list[Detection]] = detect_vision(
+            [frame.image for frame in frames]
+        )
     except DetectionError as exc:
         logger.warning("vision detect failed, continuing without vision evidence: %s", exc)
         return VisionCheck(ModalityReading(Modality.VISION, 0.0, available=False), False)
 
+    # Per-label burst gate - see this function's own docstring for why.
+    # A majority-gated label needs "more than half" ("half or more" is not
+    # enough - a tie does not count); every other label needs only one
+    # frame, exactly the flat-OR behaviour this function had before the
+    # gate existed, byte-for-byte, including on a single-frame burst where
+    # "more than half" and "at least one" are the same threshold anyway.
+    burst_size = len(detections_by_frame)
+    label_frame_counts: dict[str, int] = {}
+    for frame_detections in detections_by_frame:
+        for label in dict.fromkeys(d.label for d in frame_detections):
+            label_frame_counts[label] = label_frame_counts.get(label, 0) + 1
+    qualifying_labels = {
+        label
+        for label, count in label_frame_counts.items()
+        if count >= (burst_size // 2 + 1 if _requires_burst_majority(label) else 1)
+    }
+
     # Order-preserving dedupe: the log and the video gate both read this,
     # and a stable order makes two events with the same cast compare equal
     # in a field log instead of differing by detector ordering.
-    species = tuple(dict.fromkeys(d.label for d in detections))
+    species = tuple(
+        dict.fromkeys(
+            d.label
+            for frame_detections in detections_by_frame
+            for d in frame_detections
+            if d.label in qualifying_labels
+        )
+    )
 
-    matches = [d for d in detections if d.label in target_labels]
+    matches = [
+        d
+        for frame_detections in detections_by_frame
+        for d in frame_detections
+        if d.label in target_labels and d.label in qualifying_labels
+    ]
     if not matches:
         return VisionCheck(
             ModalityReading(Modality.VISION, cognition_config.BASELINE_VISION, available=True),
@@ -836,6 +912,17 @@ def _watch_length_s(
     return base_s
 
 
+def _required_consecutive_polls(label: str) -> int:
+    """Consecutive watch polls `label` must appear on before it is admitted.
+
+    Thin wrapper around services_config.VISION_SPECIES_CONSECUTIVE_POLLS so
+    the default (1 - admit on first sight) lives in one place rather than
+    being repeated at every call site. See that constant's own comment for
+    why this exists and what it does and does not gate.
+    """
+    return services_config.VISION_SPECIES_CONSECUTIVE_POLLS.get(label, 1)
+
+
 def _watch_for_vision(
     camera: CameraProtocol,
     detect_vision: VisionDetectFn,
@@ -905,7 +992,16 @@ def _watch_for_vision(
     empty_polls = 0
     # dict rather than set: insertion-ordered, so the union stays in
     # first-seen order across polls the way one pass's own list does.
+    #
+    # A label enters seen_species only once it has been seen on
+    # VISION_SPECIES_CONSECUTIVE_POLLS[label] (default 1) consecutive polls
+    # - see _required_consecutive_polls(). species_streaks tracks the
+    # running per-label consecutive count independently of seen_species so
+    # a label can be dropped from a streak (a gap poll resets it to 0)
+    # without ever being removed from seen_species once admitted: the
+    # streak gate controls entry, not membership.
     seen_species: dict[str, None] = {}
+    species_streaks: dict[str, int] = {}
 
     while True:
         poll_started = monotonic()
@@ -928,7 +1024,13 @@ def _watch_for_vision(
             if not first_frames:
                 first_frames = frames
             check = _vision_check(detect_vision, frames)
-            seen_species.update(dict.fromkeys(check.species))
+            for label in list(species_streaks):
+                if label not in check.species:
+                    species_streaks[label] = 0
+            for label in check.species:
+                species_streaks[label] = species_streaks.get(label, 0) + 1
+                if species_streaks[label] >= _required_consecutive_polls(label):
+                    seen_species.setdefault(label, None)
             if check.confirmed:
                 logger.info(
                     "vision confirmed on poll %d, %.1fs into a %.1fs watch window",
