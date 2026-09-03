@@ -553,3 +553,42 @@ this session — the live camera checks above verified the V4L2 API surface
 works, not the FP-suppression outcome. That remains true until someone
 re-runs a battery like Finding 4's against production code with the lock
 active.
+
+## Workstream 2 — Boar representation audit (4 Sept)
+
+Docs-only per plan, no retrain — a per-source characterization and sourcing plan, `ml/vision/
+boar-representation-audit.md`. Confirmed all 7 Boar-source counts against `dataset_manifest.json`
+directly (1,556/1,636/1,311/827/64/1,800/200 = 7,394, matching both the plan's figures and
+`README.md`'s Dataset table) before writing anything.
+
+**The real finding: the plan's own 0.87% real-night/IR-Boar-imagery headline number does not survive
+a read of `DATASETS`' own sourcing notes, and needed correcting, not just transcribing.** That figure
+(64/7,394, `pig-rinoz/wild-pig-at-night` only) was an honest read of the manifest's real/synthetic
+split, but the manifest has no lighting/IR field at all — it silently equated "the only source named
+for night" with "the only source containing night imagery." `trail-camera-v2`'s own `DATASETS` entry
+documents it as "day + IR-night," with a 14-image visual sample finding 8/14 (57%) were real night/IR
+trigger frames (timestamps 12:18 AM–11:07 PM) — never split into its own IR field, so it rode in
+uncredited as plain Boar count. Extrapolating that sample rate across the source's 1,311 images gives
+a corrected estimate of ~814 real night/IR images, ~11% of 7,394 — a real correction, not a rounding
+difference, and one this audit is the first pass to have actually made. Two more sources
+(`swg-eurasian-wild-pig`, `wcs-sus-scrofa`) show additional real but unquantified night/IR content in
+their own prior spot-checks, so ~11% is treated as a floor, not a settled number. Corrected in place
+in `docs/KNOWN_GAPS.md` and `ml/vision/README.md`'s Dataset section (both previously stated 0.87%
+flatly); this file's earlier entries never asserted that number, so nothing here needed correcting.
+
+Also folded in: a cross-class contrast showing Elephant's own largest source
+(`asian-elephants-dataset-v1`) has the identical undercount problem (a 29 Aug spot-check found real
+night/IR frames uncredited there too) — the blind spot is the audit method (no source has a lighting
+field), not specific to Boar. A proposed `conditions` schema (domain / lighting / ir_confirmed /
+sample_verified_n+of / angle / distance / occlusion) is written up for `DATASETS` and
+`dataset_manifest.json`, not backfilled this pass. SA-FARI (arXiv 2511.15622) is recorded as the lead
+sourcing candidate at *candidate, not sourced* status — both blocking checks (species-table
+confirmation, licence terms) still need a logged-in Hugging Face session, not attempted this session.
+Freeze-backbone and augmentation-strength are recorded as named next trials, confirmed unreachable
+from `edge_impulse_train_vision.py`'s current CLI without adding a flag first.
+
+**What this is not.** No training job ran. The corrected ~11% figure is itself an extrapolation from a
+14-image sample in one source, not a full re-audit of all 7,394 images against the proposed schema —
+that full audit is named as future work in the document, not attempted here. The currently deployed
+checkpoint's real numbers (0.852 Boar / 0.906 Elephant / 0.166 background FP) are unchanged by this
+workstream; this is characterization, not a retrain.

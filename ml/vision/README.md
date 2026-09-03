@@ -40,10 +40,16 @@ substitute for it.**
 | Background | `board-captures-night1` | own capture | 207 | — |
 | **Background total** | *(3 sources)* | | **2,631** | — |
 
-Only 64 of the 7,394 Boar images are real night/IR camera-trap imagery
-(`pig-rinoz/wild-pig-at-night`) — 0.87%. The remaining night/IR coverage is 200 synthetic
-`pseudo-ir-boar` images. See `ml/vision/boar-representation-audit.md` for the full per-source
-condition breakdown this gap motivated.
+**Corrected 4 Sept 2026** — only 64 of the 7,394 Boar images are explicitly *named* as real night/IR
+camera-trap imagery (`pig-rinoz/wild-pig-at-night`), but that undercounts the true figure:
+`trail-camera-v2` (1,311 images) is documented in its own `DATASETS` entry as "day + IR-night," and a
+14-image visual sample found 57% were real night/IR trigger frames — extrapolating that rate across
+the source gives a corrected estimate of roughly 814 real night/IR images, ~11% of 7,394, not 0.87%.
+Two more sources (`swg-eurasian-wild-pig`, `wcs-sus-scrofa`) show real but unquantified additional
+night/IR content in their own spot-checks, so 11% is a floor, not a ceiling. Beyond the real imagery,
+200 synthetic `pseudo-ir-boar` images add further pseudo-IR coverage. See
+`ml/vision/boar-representation-audit.md` for the full per-source condition breakdown and the reasoning
+behind the correction.
 
 **Why the original three are real:** the first three sources listed were pulled live from Roboflow's
 COCO export API (`scripts/edge_impulse_upload_vision.py`), full images with real annotator-drawn
@@ -3068,10 +3074,12 @@ with the frame-level number. Elephant stayed at 0% false positives through every
 
 Next step (2) — true-negative training data from this exact scene — was **not done this session**;
 Workstream 2 (a Boar representation audit and sourcing plan) is docs-only per plan and deliberately
-deferred past the 5 Sept ship date, so the underlying model weights and the 0.87%-real-IR-Boar-imagery
-gap this file's other sections describe remain untouched. This section's numbers describe a
-consumption-layer fix, not a retrain — the model itself is exactly as accurate (or inaccurate) as it
-was on 30 Aug.
+deferred past the 5 Sept ship date, so the underlying model weights remain untouched. This section's
+numbers describe a consumption-layer fix, not a retrain — the model itself is exactly as accurate (or
+inaccurate) as it was on 30 Aug. Workstream 2 has since been completed (4 Sept, `ml/vision/
+boar-representation-audit.md`) and corrected the real-IR-Boar-imagery gap this file's other sections
+describe from an assumed 0.87% to an estimated ~11% — see that document and the Dataset section above
+for the correction; the gap is smaller than first assumed but still real.
 
 **A second, independent cause was found by camera-level characterization, and is now implemented as
 a fix for the active camera path (3 Sept)** — `docs/qa/night-ir-led-characterisation.md`, a real
