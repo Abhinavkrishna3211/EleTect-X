@@ -839,22 +839,46 @@ criteria — see each entry's status.
   `TRIAL_READINESS_PLAN.md`'s §D. Status: open, interim mitigation shipped, real fix is ADR 0021 —
   not a blocker for the 5 Sept trial since the trial ships both flags at their safe defaults, but a
   real gap for anyone flipping either flag on a field node without this session's context.
-- **The Arducam B0490's auto-exposure/AGC path is a likely contributor to the Boar false-positive
-  rate above, and to the 2-hour run's unexplained per-chunk swing — found by a different session,
-  cross-referenced here rather than duplicated (3 Sept).** `docs/qa/night-ir-led-characterisation.md`
-  is an independent board run pointing at camera control, not model weights: auto-exposure + IR was
-  the *only* configuration in that whole characterisation battery to produce a meaningful false-
-  positive population (15/22/28 spurious Boar boxes across three runs, `maxconf` up to 0.408 — above
-  the 0.2 deployment threshold), while locked exposure gave zero false positives across the same
+- **The Arducam B0490's auto-exposure/AGC path was a likely contributor to the Boar false-positive
+  rate above, and to the 2-hour run's unexplained per-chunk swing — now implemented as a fix for the
+  `perception/camera.py` path (3 Sept).** `docs/qa/night-ir-led-characterisation.md` is an
+  independent board run pointing at camera control, not model weights: auto-exposure + IR was the
+  *only* configuration in that whole characterisation battery to produce a meaningful false-positive
+  population (15/22/28 spurious Boar boxes across three runs, `maxconf` up to 0.408 — above the 0.2
+  deployment threshold), while locked exposure (≈256) gave zero false positives across the same
   battery. That session's own recommendation is on record: "auto-exposure at night should be
-  considered a bug for this pipeline." The deployed pipeline still runs AGC. This is a plausible
-  mechanism for this entry's own unexplained 1.2%-73.9% per-chunk false-positive swing in the 2-hour
-  log, which `ml/vision/README.md` explicitly leaves as "a hypothesis worth testing next, not a
-  conclusion" — not confirmed causal here, just recorded as the lead candidate. **Not implemented in
-  this session** — the camera-control code belongs to a separate session/track; a real
-  implementation blocker is already on record there too: the host V4L2 exposure-write path works,
-  but the container's camera path does not and sits frozen at a fixed exposure value, so whoever
-  picks this up hits that first. Status: open, cross-referenced only.
+  considered a bug for this pipeline." **Implemented 3 Sept**: `Camera.lock_night_exposure()`
+  switches to manual mode at `services/config.NIGHT_LOCKED_EXPOSURE` (256) with a verified read-back,
+  called from `services/reflex_loop.py` right before the IR-lit evidence burst on any event that is
+  both night and firing IR — the exact combination Finding 4 identifies. `Camera.open()` now also
+  asserts the auto default on every open (`_assert_auto_exposure`), guarding against exactly the
+  stale-state bug this fix's own live testing turned up (below). Gated by
+  `NIGHT_EXPOSURE_LOCK_ENABLED` (`ELETECT_NIGHT_EXPOSURE_LOCK`, default on) as an independent kill
+  switch, since the only field verification so far is a static, empty scene — motion blur on a moving
+  animal and daytime behaviour under the lock are both still unmeasured, unchanged from Finding 4's
+  own caveat. Host-tested (`tests/test_camera.py`, `tests/test_reflex_loop.py`); not re-run as a live
+  night characterisation battery this session, so the FP-suppression outcome itself still rests on
+  the original 1-2 Sept measurement, not a fresh one against this code path.
+  **A documented blocker in that file did not reproduce on re-test**: it stated the container's
+  camera path does not accept exposure writes and sits frozen at 156. Re-tested live on the real
+  board 3 Sept 2026 (same container, same device, running as the actual app user) and both the
+  auto-exposure and exposure writes succeeded, with read-back confirming the requested values — this
+  is recorded as a re-test correction, not a claim that the original observation was wrong at the
+  time it was made. That same live check also turned up an unrelated, real bug: the camera was
+  stuck in Manual Mode at exposure 2000 — stale state left over from earlier characterisation
+  testing that had never been reset, surviving an intervening reboot — fixed live and verified via
+  two independent read-back paths (in-container and host-side `v4l2-ctl`). `_assert_auto_exposure`
+  now prevents this class of stale-state bug from recurring silently.
+  **Not implemented for the GStreamer/event-video path** (`perception/video.py`'s
+  `EventVideoRecorder`, used only when `EVENT_VIDEO_ENABLED=True`, still `False` by default): its
+  pipeline is rebuilt fresh per event from a `Gst.parse_launch` string with no persistent capture
+  handle to call a late `set()` against, so the fix would need either baking exposure into
+  `v4l2src`'s own `extra-controls` property at pipeline-build time (affecting the whole recording,
+  not just the evidence burst) or a live element-property change on an already-PLAYING pipeline —
+  both unverified on this hardware. `EventVideoRecorder.lock_night_exposure()` exists to satisfy
+  `CameraProtocol` but is an honest no-op that logs and returns `False`; harmless today since nothing
+  calls `open()` on this class in production yet, but tracked here rather than left implicit. Status:
+  implemented and host-tested for the active `Camera` path; open for the `EventVideoRecorder` path.
 - **ADR 0001 §6's two fusion limitations are accepted approximations, not resolved.** Correlated
   noise across modalities (rain/fog degrading seismic SNR and vision IR contrast together) and the
   MCAR assumption behind availability-gated dropout (vision being unavailable due to fog is
@@ -2295,7 +2319,13 @@ an event's footage could represent far fewer real seconds than its configured du
 worst-case exactly in the low-light conditions a real night encounter would have. This is a real
 risk to the contest's own footage goal and should be resolved (or at minimum, exposure-locked per
 the night characterisation record's own recommendation — `docs/qa/night-ir-led-characterisation.md`,
-Finding 4) before `EVENT_VIDEO_ENABLED` is ever flipped on for a live trial night.
+Finding 4) before `EVENT_VIDEO_ENABLED` is ever flipped on for a live trial night. **Cross-reference,
+3 Sept:** that exposure lock now exists for `perception/camera.py`'s active path (see the Boar
+false-positive entry above) but is an explicit no-op for this GStreamer path — see that same entry
+for why (no persistent capture handle to lock against mid-recording). So the "at minimum,
+exposure-locked" mitigation named here is still unavailable on this path specifically, not just
+untested; both this throttle question and the exposure lock need real work before
+`EVENT_VIDEO_ENABLED` goes live.
 
 - Every check above ran on **USB-C/hub power, not VIN.** The field build is VIN-powered, and
   whether the camera enumerates at all under that topology is a separate, still-open question (see
