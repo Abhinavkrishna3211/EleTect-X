@@ -103,7 +103,7 @@ class VisionDetectFn(Protocol):
     a test fake needs no real HTTP server.
     """
 
-    def __call__(self, images: list[Any]) -> list[Detection]:
+    def __call__(self, images: list[Any]) -> list[list[Detection]]:
         """Run detection across a burst of already-captured frame images.
 
         Args:
@@ -111,14 +111,27 @@ class VisionDetectFn(Protocol):
                 from CameraProtocol.capture_burst().
 
         Returns:
-            Every Detection found across every image, in no particular
-            aggregate order - a caller that wants "the strongest match
-            across the burst" (services/reflex_loop.py's _vision_check())
-            does its own max over the result. A single image that fails to
-            encode/POST/parse is logged and skipped, not fatal to the
-            whole burst; DetectionError is raised only when every image in
-            a non-empty burst failed, meaning nothing at all could be
-            checked this event.
+            One list per input image, same length and order as `images` -
+            per-frame attribution the caller needs to do its own per-label
+            within-burst gate (services/reflex_loop.py's _vision_check(),
+            which requires a majority-gated label - Boar, per
+            services/config.py's VISION_SPECIES_BURST_MAJORITY_LABELS - to
+            appear on more than half the burst's frames before it counts
+            for anything; every other label, Elephant included, still only
+            needs one frame). Until 3 Sept 2026 this returned every
+            Detection flattened into one list with no frame boundary,
+            which meant a single spurious box on one frame of a burst
+            looked identical to the same box appearing on every frame -
+            that OR-shaped aggregation measured a 43.64% Boar
+            false-positive rate at the poll level in a real 2-hour board
+            run, worse than the 31.53% raw-frame rate it started from
+            (docs/qa/boar-gap-session-notes.md); this per-frame return is
+            what makes the per-label gate possible. A single image that
+            fails to encode/POST/parse contributes an empty list at its
+            own index rather than being dropped, so the per-label frame
+            count downstream stays accurate; DetectionError is raised only
+            when every image in a non-empty burst failed, meaning nothing
+            at all could be checked this event.
         """
         ...
 
@@ -149,21 +162,22 @@ class HttpVisionDetector:
         self._base_url = base_url.rstrip("/")
         self._timeout_s = timeout_s
 
-    def __call__(self, images: list[Any]) -> list[Detection]:
+    def __call__(self, images: list[Any]) -> list[list[Detection]]:
         """Implements VisionDetectFn - see that Protocol's own docstring."""
-        detections: list[Detection] = []
+        per_frame: list[list[Detection]] = []
         failures = 0
         for image in images:
             try:
-                detections.extend(self._detect_one(image))
+                per_frame.append(self._detect_one(image))
             except DetectionError as exc:
                 failures += 1
                 logger.warning("vision detect failed for one frame: %s", exc)
+                per_frame.append([])
         if images and failures == len(images):
             raise DetectionError(
                 f"all {len(images)} frame(s) in this burst failed detection"
             )
-        return detections
+        return per_frame
 
     def _detect_one(self, image: Any) -> list[Detection]:
         # Function-local, matching perception/camera.py's own discipline -
