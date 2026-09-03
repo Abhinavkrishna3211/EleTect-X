@@ -2173,23 +2173,48 @@ brown-out mid-write (a documented, observed failure on this board, see the brown
 leaves a valid, playable stream missing only its trailing frames. Host suite green (362 passed, 1
 skipped) and `ruff check` clean against the changed files.
 
-**Still open, and still why `EVENT_VIDEO_ENABLED` stays False:**
+**Bitrate control — fixed, 3 Sept, same session as this entry's update.** `EVENT_VIDEO_BITRATE_BPS
+= 2_000_000` (2 Mbps) should produce roughly 1.5MB over 6s; the observed output was 24.8MB over 6s
+(~33 Mbps effective, ~16x over target). Root cause was not a wrong control name — a raw ioctl
+enumeration of `/dev/video4`'s real V4L2 controls (`v4l2-ctl` is not present in the container)
+confirmed `video_bitrate` is exactly right by name. The real cause: the driver's
+`video_bitrate_mode` control defaults to 0 ("Variable Bitrate"), where `video_bitrate` is only a
+soft average and the encoder's QP range (default I/P/B 26/28/30, fairly permissive) actually governs
+output. `perception/video.py`'s `extra-controls` now also sets `video_bitrate_mode=1` ("Constant
+Bitrate"), confirmed against the driver's own control-name string via `VIDIOC_QUERYMENU`, not
+guessed. **Not yet re-verified with a real recording** — the fix is a standalone scratch-pipeline
+result (measured ~0.5 Mbps effective at the fixed setting, under target — safe direction), not yet
+re-run through `perception/video.py` itself on real hardware. Do that before trusting the storage
+arithmetic above or `EVENT_VIDEO_RETREAT_TAIL_S` against this rate.
 
-- The encoder's bitrate control does not appear to take effect. `EVENT_VIDEO_BITRATE_BPS =
-  2_000_000` (2 Mbps) should produce roughly 1.5MB over 6s; the observed output was 24.8MB over 6s
-  (~33 Mbps effective, ~16x over target). `v4l2h264enc`'s `extra-controls` silently drops
-  unrecognised V4L2 control names rather than erroring, so `video_bitrate` is suspected wrong for
-  this board's Venus encoder rather than genuinely ignored — not yet confirmed, since `v4l2-ctl` is
-  not present in the production container to enumerate the encoder's real controls. Real storage
-  consequence: at the observed rate a 45s extended watch-window event (`EVENT_VIDEO_RETREAT_TAIL_S`)
-  would run roughly 180+MB against ~15GB free on `/home/arduino`.
+**New finding, same pass, unresolved: real camera throughput measured at ~3.8 fps, not the 30 fps
+this pipeline negotiates.** A 4-stage buffer-counting probe (raw MJPEG off `v4l2src`, through
+`jpegdec`, through `videoconvert`, through the full hardware H.264 encode) measured ~3.81 fps
+identically at every stage over a 6s window — ruling out decode/convert/encode cost, the bottleneck
+is the camera's own capture rate. `VIDIOC_ENUM_FRAMEINTERVALS` at 1280×720, 640×480 and 320×240 each
+report exactly one DISCRETE mode, 30fps — so this isn't a caps-negotiation fallback, the driver
+genuinely claims 30fps at every size tested and doesn't deliver it. Leading hypothesis, unconfirmed:
+auto-exposure throttling frame rate in low ambient light (a known behavior on cheap UVC sensors) —
+though the camera's own `Exposure, Dynamic Framerate` control defaults off, which cuts against this.
+The decisive test (force manual exposure, re-measure, restore) was not run: it is a live camera
+hardware-state change on the production board and needs a human present to confirm and watch it,
+same discipline as every other physical-state change this engagement makes. **Real consequence if
+the hypothesis holds:** the raw H.264 elementary stream has no per-frame timestamps, so time
+recorded at ~3.8fps plays back as a *shorter* clip at the expected 30fps rather than slow motion —
+an event's footage could represent far fewer real seconds than its configured duration implies,
+worst-case exactly in the low-light conditions a real night encounter would have. This is a real
+risk to the contest's own footage goal and should be resolved (or at minimum, exposure-locked per
+the night characterisation record's own recommendation — `docs/qa/night-ir-led-characterisation.md`,
+Finding 4) before `EVENT_VIDEO_ENABLED` is ever flipped on for a live trial night.
+
 - Every check above ran on **USB-C/hub power, not VIN.** The field build is VIN-powered, and
   whether the camera enumerates at all under that topology is a separate, still-open question (see
   the VIN/brown-out entries above) — the video feature and the pre-existing JPEG-burst path both
   rest on it.
 
-Status: **open** (bitrate control, VIN-power camera check) with the two hardware-blocking bugs
-above **fixed and verified**.
+Status: **open** (fps-throughput risk, re-verification of the bitrate fix on real hardware,
+VIN-power camera check) with the two original hardware-blocking bugs and the bitrate-mode root
+cause **fixed**.
 
 ## Sudden power loss recovers cleanly today; an in-process crash while powered does not (3 Sept)
 

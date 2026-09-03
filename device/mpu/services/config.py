@@ -536,15 +536,17 @@ EVENT_VIDEO_FRAMERATE = 30
 # 2 Mbps lands a 60s clip at ~15MB, inside that range. Kept as an explicit
 # constant rather than left to the encoder's default so the storage
 # arithmetic in ADR 0020 stays traceable to a number in the code.
-# NOT CONFIRMED TAKING EFFECT: a 6s bench recording at this setting
-# produced a ~24.8MB file (~33 Mbps effective, ~16x over target).
-# extra-controls on v4l2h264enc silently drops unrecognised control
-# names rather than erroring, so "video_bitrate" is suspected wrong for
-# this board's Venus encoder rather than the encoder ignoring the value
-# outright; the real control name hasn't been enumerated (v4l2-ctl is not
-# present in the production container). See docs/KNOWN_GAPS.md. Until
-# this is resolved, size storage and EVENT_VIDEO_RETREAT_TAIL_S against
-# the observed rate, not this constant.
+# ROOT-CAUSED 3 Sept: a 6s bench recording at this setting first produced
+# a ~24.8MB file (~33 Mbps effective, ~16x over target). Not a wrong
+# control name - enumerated /dev/video4's real V4L2 controls (raw ioctl,
+# v4l2-ctl is not present in the container) and "video_bitrate" is exactly
+# right by name. The driver's `video_bitrate_mode` control defaults to 0
+# ("Variable Bitrate"), where this value is only a soft average and the
+# encoder's QP range actually governs output instead. perception/video.py
+# now also sets `video_bitrate_mode=1` ("Constant Bitrate") in
+# extra-controls so this constant is enforced rather than advisory. Not
+# yet re-verified with a real recording - do that before trusting the
+# storage arithmetic below or EVENT_VIDEO_RETREAT_TAIL_S against this rate.
 EVENT_VIDEO_BITRATE_BPS = 2_000_000
 
 # How long to wait for the pipeline to flush and finish the file after

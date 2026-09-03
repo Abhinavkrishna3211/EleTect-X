@@ -166,6 +166,7 @@ def test_description_carries_the_configured_geometry_and_bitrate(tmp_path):
     )
 
     assert "width=640,height=480,framerate=10/1" in description
+    assert "video_bitrate_mode=1" in description
     assert "video_bitrate=750000" in description
     assert _location_from(description).endswith("e.h264")
 
