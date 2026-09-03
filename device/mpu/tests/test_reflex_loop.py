@@ -2302,6 +2302,88 @@ def test_a_majority_rejected_boar_reading_contributes_no_positive_evidence():
     assert check.reading.log_odds == pytest.approx(cognition_config.BASELINE_VISION)
 
 
+# --- confirmation-path streak gate (target_labels) --------------------------
+#
+# Workstream 3: _vision_check()'s per-poll check.confirmed is not enough on
+# its own once a majority-gated label (Boar) sits on target_labels - the
+# confirming label must also have cleared its own across-polls
+# VISION_SPECIES_CONSECUTIVE_POLLS streak, or a single spurious poll would
+# exit the watch early and feed fuse() positive log-odds off one burst.
+# Exercised through _watch_for_vision()'s target_labels override directly,
+# since Boar is not in the default VISION_TARGET_LABELS.
+
+
+def test_a_single_spurious_boar_poll_does_not_confirm_even_with_boar_targeted():
+    """One majority-qualifying Boar poll must not confirm on its own.
+
+    Boar's within-burst majority gate is satisfied here (2 of 3 frames) -
+    this isolates the second, across-polls gate Workstream 3 adds: even a
+    burst-majority Boar reading needs VISION_SPECIES_CONSECUTIVE_POLLS
+    consecutive polls before the watch may confirm on it.
+    """
+    camera = _FakeCamera()
+    detect = _ScriptedVisionDetect([[[BOAR], [BOAR], []]])
+
+    watch, _ = _watch(camera, detect, 0.0, target_labels=("Boar",))
+
+    assert watch.polls == 1
+    assert watch.confirmed_on_poll is None
+    assert watch.check.confirmed is False
+
+
+def test_a_streak_rejected_boar_confirmation_downgrades_to_baseline():
+    """The rejected poll must contribute BASELINE_VISION, not the raw confidence.
+
+    Carrying the detector's own confidence through here would let one
+    spurious Boar poll push positive log-odds into fuse() even though the
+    watch never actually confirmed - exactly the bypass this gate exists to
+    close.
+    """
+    camera = _FakeCamera()
+    detect = _ScriptedVisionDetect([[[BOAR], [BOAR], []]])
+
+    watch, _ = _watch(camera, detect, 0.0, target_labels=("Boar",))
+
+    assert watch.check.reading.available is True
+    assert watch.check.reading.log_odds == pytest.approx(cognition_config.BASELINE_VISION)
+
+
+def test_two_consecutive_majority_boar_polls_confirm_on_the_second():
+    """Once Boar's own streak is met, confirmation fires exactly like any other label.
+
+    Same script as the species-debounce streak test above, but with Boar on
+    target_labels this time, so this exercises the confirm-and-exit path
+    itself rather than only species membership.
+    """
+    camera = _FakeCamera()
+    detect = _ScriptedVisionDetect([[[BOAR], [BOAR], []]])
+
+    watch, _ = _watch(camera, detect, 1.0, poll_interval_s=1.0, target_labels=("Boar",))
+
+    assert watch.polls == 2
+    assert watch.confirmed_on_poll == 2
+    assert watch.check.confirmed is True
+
+
+def test_elephant_still_confirms_on_the_first_poll_when_boar_is_also_targeted():
+    """The regression guard: adding Boar to target_labels must cost Elephant nothing.
+
+    Elephant's required streak is 1, so under the "both" scope it must
+    still confirm and exit on the very first poll, exactly as it does
+    under the elephant_only default.
+    """
+    camera = _FakeCamera()
+    detect = _ScriptedVisionDetect([[ELEPHANT]])
+
+    watch, _ = _watch(
+        camera, detect, 45.0, poll_interval_s=1.0, target_labels=("Elephant", "Boar")
+    )
+
+    assert watch.polls == 1
+    assert watch.confirmed_on_poll == 1
+    assert watch.check.confirmed is True
+
+
 # --- _vision_could_see ------------------------------------------------------
 
 
@@ -2632,3 +2714,200 @@ def test_a_boar_only_event_discards_its_video_by_default():
 
     assert outcome.decision.alert is False
     assert video.committed == []
+
+
+# --- end-to-end tri-state scope (ADR 0023, NODE_DETERRENCE_SCOPE) -----------
+#
+# The full pipeline, through _fire()/handle_footfall_event(), for each of the
+# three states target_labels can express. probability=0.05, sta_lta_ratio=1.2
+# is the same weak-seismic combination test_event_video_is_discarded_when_
+# neither_gate_is_satisfied and test_a_boar_detection_is_not_a_confirmation
+# already establish as insufficient to alert on its own - so any alert seen
+# here is genuinely earned by a confirmed vision reading's own confidence
+# (ELEPHANT and BOAR are both high-confidence fixtures, see their own
+# comments above), not by seismic. That is what makes "no drive_horn call"
+# and "drive_horn fires" meaningful assertions rather than foregone
+# conclusions either way.
+
+
+def test_a_single_spurious_boar_poll_fires_nothing_even_under_boar_only():
+    """The bypass Workstream 3 exists to close, asserted at the actuator.
+
+    One majority-qualifying Boar poll, then nothing - the script's last
+    entry (empty) repeats for the rest of the free-running window, so the
+    streak never reaches 2 and the watch never confirms. No horn, no LED,
+    no kept video, and the fused decision itself carries no positive vision
+    evidence - the streak-rejected poll was downgraded to BASELINE_VISION.
+    """
+    log: list = []
+    video = _FakeEventVideo()
+    detect = _ScriptedVisionDetect([[BOAR], []])
+
+    outcome, _, log = _fire(
+        probability=0.05,
+        sta_lta_ratio=1.2,
+        detect_vision=detect,
+        target_labels=("Boar",),
+        event_video=video,
+        vision_watch_base_s=0.05,
+        vision_watch_poll_interval_s=0.0,
+        call_log=log,
+    )
+
+    assert outcome.vision_confirmed is False
+    assert outcome.decision.alert is False
+    assert "drive_horn" not in log
+    assert "drive_led" not in log
+    assert video.committed == []
+    assert video.discarded == 1
+
+
+def test_two_consecutive_boar_polls_fire_the_deterrent_and_keep_the_video():
+    """Once Boar's own streak is met, it is treated exactly like any other confirmation.
+
+    Same probability/sta_lta_ratio as the spurious-poll test above - the
+    only difference is a detector that keeps finding Boar, so the streak
+    clears on the second poll and the watch confirms and exits.
+    """
+    log: list = []
+    video = _FakeEventVideo()
+
+    outcome, _, log = _fire(
+        probability=0.05,
+        sta_lta_ratio=1.2,
+        detect_vision=_FakeVisionDetect([BOAR]),
+        target_labels=("Boar",),
+        event_video=video,
+        vision_watch_base_s=0.05,
+        vision_watch_poll_interval_s=0.0,
+        call_log=log,
+    )
+
+    assert outcome.vision_confirmed is True
+    assert outcome.decision.alert is True
+    assert "drive_horn" in log
+    assert "drive_led" in log
+    assert video.committed != []
+    assert video.discarded == 0
+
+
+def test_elephant_still_fires_on_the_first_poll_under_the_both_scope():
+    """The regression guard: Boar sharing target_labels costs Elephant nothing.
+
+    Elephant's required streak is 1, so under "both" it must still confirm
+    and fire on the very first poll - the same single-poll window _fire()
+    already defaults to for every non-watch-specific test in this file.
+    """
+    log: list = []
+
+    outcome, _, log = _fire(
+        probability=0.05,
+        sta_lta_ratio=1.2,
+        detect_vision=_FakeVisionDetect([ELEPHANT]),
+        target_labels=("Elephant", "Boar"),
+        call_log=log,
+    )
+
+    assert outcome.vision_confirmed is True
+    assert outcome.vision_polls == 1
+    assert outcome.decision.alert is True
+    assert "drive_horn" in log
+
+
+def test_boar_fires_nothing_under_the_shipped_elephant_only_default_at_any_streak_length():
+    """The default scope, checked at the actuator rather than only at the video.
+
+    Two consecutive Boar polls satisfy Boar's own streak - the same script
+    that fires everything in the boar_only test above - but target_labels
+    stays the shipped ("Elephant",) default, so Boar can never be a
+    confirming label regardless of how long it is sustained.
+    """
+    log: list = []
+    video = _FakeEventVideo()
+
+    outcome, _, log = _fire(
+        probability=0.05,
+        sta_lta_ratio=1.2,
+        detect_vision=_FakeVisionDetect([BOAR]),
+        event_video=video,
+        vision_watch_base_s=0.05,
+        vision_watch_poll_interval_s=0.0,
+        call_log=log,
+    )
+
+    assert outcome.vision_confirmed is False
+    assert outcome.decision.alert is False
+    assert "drive_horn" not in log
+    assert "drive_led" not in log
+    assert video.committed == []
+
+
+# --- _deterrence_species (ADR 0023) ------------------------------------------
+#
+# Which species cognition_config.resolve_tier_action() plays content for.
+# Exercised directly against the pure function rather than through
+# handle_footfall_event() - species selection only meaningfully diverges
+# from "Elephant" once target_labels admits Boar (a NODE_DETERRENCE_SCOPE
+# state), so the Boar-reachable cases pass an explicit target_labels
+# argument, the same as any other _watch_for_vision()/handle_footfall_event()
+# caller exercising a non-default scope would.
+
+
+def _check(*, confirmed: bool, species: tuple[str, ...]) -> reflex_loop.VisionCheck:
+    reading = reflex_loop.ModalityReading(Modality.VISION, 0.0, available=True)
+    return reflex_loop.VisionCheck(reading, confirmed, species)
+
+
+def test_an_unconfirmed_check_defaults_to_elephant():
+    """No vision confirmation - seismic/acoustic alone - has no species evidence to use.
+
+    The seismic/acoustic signature this device fuses on was built and tuned
+    for elephant footfall, not boar, so there is nothing here that could
+    say otherwise, whatever watch.species happens to carry.
+    """
+    check = _check(confirmed=False, species=("Boar",))
+
+    assert reflex_loop._deterrence_species(check, target_labels=("Boar",)) == "Elephant"
+
+
+def test_a_confirmed_elephant_check_selects_elephant():
+    """The default, byte-for-byte-unchanged case: every node ships elephant_only."""
+    check = _check(confirmed=True, species=("Elephant",))
+
+    assert reflex_loop._deterrence_species(check) == "Elephant"
+
+
+def test_a_confirmed_boar_check_selects_boar_once_boar_is_targeted():
+    """Only reachable once NODE_DETERRENCE_SCOPE (boar_only or both) admits Boar."""
+    check = _check(confirmed=True, species=("Boar",))
+
+    assert (
+        reflex_loop._deterrence_species(check, target_labels=("Elephant", "Boar"))
+        == "Boar"
+    )
+
+
+def test_a_confirmed_boar_species_under_the_default_scope_still_falls_back_to_elephant():
+    """Boar in .species without Boar in target_labels cannot happen from real code.
+
+    _vision_check() output - confirmed=True there requires a target-label
+    match - but the fallback must stay the safe default if it ever does.
+    """
+    check = _check(confirmed=True, species=("Boar",))
+
+    assert reflex_loop._deterrence_species(check, target_labels=("Elephant",)) == "Elephant"
+
+
+def test_both_species_confirmed_at_once_prefers_elephant():
+    """Both animals genuinely in frame together, only reachable under "both".
+
+    Elephant wins the tie-break: the deeper evidence base (Thuppil & Coss
+    2016 vs. ADR 0023's ecological-inference argument for reusing tiger/lion
+    on Boar) and the species this device exists for first.
+    """
+    check = _check(confirmed=True, species=("Boar", "Elephant"))
+
+    assert (
+        reflex_loop._deterrence_species(check, target_labels=("Elephant", "Boar"))
+        == "Elephant"
+    )
