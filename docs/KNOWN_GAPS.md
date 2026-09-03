@@ -815,6 +815,25 @@ criteria — see each entry's status.
     and `docs/research/boar-deterrence-behavioral-science.md`. Status: the flag and its host-side
     logic are built and fully tested (398 passed, 1 skipped; `ruff` clean) but **not yet committed**
     as of this entry — commit is the next scheduled action, still separate from `596b432`.
+    **4 Sept update — Workstream 2 (the Boar representation audit) is complete, docs-only, no
+    retrain.** `ml/vision/boar-representation-audit.md` corrects an assumed real-night/IR-Boar-imagery
+    figure of 0.87% (64/7,394, counting only the one source explicitly named for night) up to an
+    estimated ~11% (~814/7,394) once `trail-camera-v2`'s own documented "day + IR-night" content is
+    accounted for — a 14-image visual sample of that 1,311-image source found 57% were real night/IR
+    trigger frames, extrapolated across the source. Two further sources
+    (`swg-eurasian-wild-pig`, `wcs-sus-scrofa`) show additional real but unquantified night/IR content
+    in their own spot-checks, so ~11% is a floor. The corrected figure changes the scale of the gap,
+    not its existence — night/IR coverage is still well short of proportional for a night-IR
+    deployment target. The audit also finds the domain-match lever (folding in `trail-camera-v2`) is
+    the one that has already produced a real, measured gain — 0.863 Boar recall at the deployed
+    threshold-0.05 operating point, the best of the whole engagement — while further model capacity
+    stopped helping Boar two capacity steps before it stopped helping Elephant, arguing for more
+    domain-matched night/IR sourcing over either volume or capacity as the next lever. SA-FARI
+    (Conservation X Labs × Meta, arXiv 2511.15622) is recorded as the lead sourcing candidate, status
+    *candidate, not sourced* — two checks (species-table confirmation, licence terms) remain open and
+    need a logged-in Hugging Face session. A `conditions` metadata schema is proposed for
+    `dataset_manifest.json`/`DATASETS` (domain, lighting, IR-confirmed, sample-verified-n/of, angle,
+    distance, occlusion) but not backfilled onto existing sources this pass.
 - **A deployment-day config-delivery gap affects every `NODE_`-prefixed site attribute, not just the
   new one (3 Sept).** Checked what actually setting a per-node commissioning constant requires on
   the real board: `NODE_HOUSEHOLD_PROXIMITY` (existing) and `NODE_DETERRENCE_SCOPE` (new, above) are
