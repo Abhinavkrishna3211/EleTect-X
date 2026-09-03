@@ -1,25 +1,30 @@
-"""Configure and train the two-class FOMO impulse in the EleTect-X-Vision project.
+"""Configure and train the three-class object-detection impulse in the EleTect-X-Vision project.
 
 Companion to scripts/edge_impulse_upload_vision.py, which must have run first -
 this script only configures and trains against whatever data is already in the
 project. It builds the impulse (image input -> image DSP -> object detection),
-selects a FOMO model variant, generates features, trains, and then runs a model
-test over the held-out set, printing the per-class numbers Edge Impulse actually
-returns.
+selects a model family/variant/sizing (see --family/--yolo-variant/--yolo-sizing
+below - the deployed champion is `--family yolo-pro --yolo-variant no_attn_relu
+--yolo-sizing medium`, not FOMO; FOMO is one of the families this script can
+still target, but it was not the winner), generates features, trains, and then
+runs a model test over the held-out set, printing the per-class numbers Edge
+Impulse actually returns.
 
 Nothing here is hardcoded from documentation that might have drifted. The
 available blocks and the available object-detection model variants are read back
 from the live API (/impulse/blocks, /training/keras/{learnId}/metadata) and the
-FOMO variant is picked from what that call reports, so a renamed model shows up
-as a clear failure rather than a silent fallback to a non-FOMO architecture.
+model variant is picked from what that call reports, so a renamed model shows up
+as a clear failure rather than a silent fallback to an unintended architecture.
 
 Two things worth knowing before reading the output:
 
-  - FOMO is a centroid detector, not a classifier. Edge Impulse's model-testing
+  - Object detectors here are not classifiers. Edge Impulse's model-testing
     job reports per-class F1 with precision/recall and a confusion matrix, not
     "accuracy". Report what it returns, and report Elephant and Boar separately -
-    the two classes have different dataset sizes (3,280 vs 1,901 images) and a
-    per-class gap is expected.
+    the two classes have different dataset sizes (4,094 Elephant / 7,394 Boar,
+    across 5 and 7 sources respectively - the ratio has inverted since this was
+    first written) and a per-class gap is expected. The project is a three-label
+    problem (Elephant, Boar, and Background at 2,631 images), not two.
   - The reported number is a held-out result on general daytime/colour wildlife
     photography. It says nothing about night IR field performance. See
     ml/vision/README.md for the full caveat list before quoting it anywhere.
@@ -27,8 +32,8 @@ Two things worth knowing before reading the output:
 Usage (run from a machine with normal internet access, not a sandboxed one):
 
     set EI_API_KEY=ei_...
-    set EI_PROJECT_ID=1094260
-    python scripts\\edge_impulse_train_vision.py
+    set EI_PROJECT_ID=1097972
+    python scripts\\edge_impulse_train_vision.py --family yolo-pro --yolo-variant no_attn_relu --yolo-sizing medium
 
 Requires only the standard library - no pip install needed.
 """

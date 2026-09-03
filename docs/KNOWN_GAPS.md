@@ -748,6 +748,18 @@ criteria — see each entry's status.
     field alert runs on seismic alone with no visible symptom beyond a log warning. Medium-high
     severity for the 2 Sept trial: worth an explicit pre-trial check that the runner is actually up,
     not just that the code path exists.
+    **3 Sept update — closed.** Confirmed on the board that this had already happened: the runner
+    was down after a 07:04 reboot with nothing bringing it back. Fixed with two independent
+    supervision layers rather than one, since the failure modes differ — a systemd `--user` unit
+    (`deployment/install/eletect-x-vision-runner.service`, `Restart=always`, sudo-free, following the
+    board's existing `exposure-ladder.service` precedent) for process death, plus a port-1337
+    liveness probe added to the existing `scripts/eletect-x-watchdog.sh` cron job (the one already
+    supervising the App Lab container) for the hung-but-alive case a `Restart=always` unit cannot
+    see on its own. Both verified on hardware: `kill -9` on the runner process → respawns and
+    answers `/api/info` within the unit's `RestartSec`; a forced past-grace hung state → the
+    watchdog restarts the unit via `systemctl` and it comes back within its normal ~15 s cold-load
+    window. Neither the existing crontab entry nor the container-supervision logic in that script
+    was touched.
   - *The pre-decision vision check runs before any deterrence tier is selected, so `pulse_ir()`
     (which only fires for tiers 2/3, after `decide()`) never illuminates it.* At night this check
     will typically see a dark frame and detect nothing, which gracefully degrades to the neutral
@@ -1917,6 +1929,15 @@ including the `large` write-up.
 **Revised next-step recommendation**: the Boar/Elephant domain-match Roboflow sourcing named below
 (§3c-2) is now the clear priority — it targets exactly the class (Boar) where capacity has plateaued,
 rather than continuing to spend compute on a lever that has stopped moving that class's number.
+
+**30 Aug update — current deployed champion.** `no_attn_relu` / `medium` sizing at threshold 0.05:
+**Boar recall 0.852, Elephant recall 0.906**, background false-positive rate 0.166. Still short of the
+92% bar on both classes (6.8 pts Boar, 1.4 pts Elephant) but the best checkpoint found to date and the
+one currently deployed on the board as `etx_cpu_final_0830.eim` (project 1097972, re-confirmed live via
+`/api/info` on 3 Sept 2026). See `ml/vision/README.md`'s "30 Aug" entries for the full architecture/
+threshold search that produced it. This is also the checkpoint the 2-hour live run (31.53% Boar
+false-positive frame rate at threshold 0.05) and Workstream 1's consecutive-poll debounce were both
+measured against — see `docs/qa/boar-gap-session-notes.md`.
 
 
 **31 Aug update — LED deterrent wings produce no camera-detectable change at foliage range.** A
