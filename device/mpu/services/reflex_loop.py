@@ -17,9 +17,31 @@ inject recording fakes instead (tests/test_reflex_loop.py, mirroring
 tests/test_fusion.py's pattern of asserting on a returned result, not on log
 output).
 
-Event order for a real (non-safe_mode) footfall event: camera.open() ->
-capture_burst(VISION_CHECK_FRAME_COUNT frames) -> detect_vision() -> build
-the VISION reading -> fuse() -> decide(). Camera and vision now run before
+Event order for a real (non-safe_mode) footfall event: record the trigger
+-> camera.open() -> a bounded vision *watch* (ADR 0022: repeated
+capture_burst(VISION_CHECK_FRAME_COUNT) + detect_vision() passes, spaced
+VISION_WATCH_POLL_INTERVAL_S apart, exiting the moment one confirms) ->
+build the VISION reading -> fuse() -> decide().
+
+The watch replaced a single burst because the two sensors do not see the
+same distance. The geophone's field-validated footfall range is 140m (ADR
+0008); the camera's is a small fraction of that. At the instant of the
+trigger the animal is typically still far outside the frame, so one burst
+taken two seconds later reports "no elephant" about an elephant that is
+simply not there yet, and the event decides on seismic alone every time.
+How long the watch runs is _watch_length_s()'s call: a short window for an
+ordinary trigger, and ADR 0008's own worst-case lead time (45s) for one
+that has either repeated inside the habituation window - this device's
+closest available signal for "the footfall event is still happening" - or
+already cleared the alert threshold on seismic evidence alone.
+
+Acoustic is deliberately not wired into this path, and for the first field
+trial is not wired at all: the trial runs seismic + vision only. A footfall
+notify carries no acoustic reading, main.py does not register
+report_acoustic_event, and handle_acoustic_event() below stays complete and
+tested for when it is turned on. The footfall path reports ACOUSTIC
+unavailable, which fuse() drops rather than scores - so the absent modality
+costs nothing and biases nothing. Camera and vision now run before
 the alert gate, not after it - this is the "seismic wakes vision" ordering
 the field trial requires, and the reason a footfall event now opens the
 camera at all when it does not end up alerting. If decide() says no alert,
@@ -205,6 +227,7 @@ import os
 import random
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -259,13 +282,19 @@ SAFE_MODE = os.environ.get("ELETECT_SAFE_MODE", "1") != "0"
 # closed by adding this constant - see docs/KNOWN_GAPS.md.
 ALERT_PROBABILITY_THRESHOLD = 0.5
 
-# Which of the deployed model's classes counts as elephant-presence
-# evidence for the VISION modality. ETX-V is a two-class detector
-# (["Boar", "Elephant"], perception/detector.py's module docstring) - only
-# an "Elephant" detection feeds fuse(); a "Boar" detection is real signal
-# but for a different question (which deterrent tier is even appropriate),
-# not this one. See module docstring on vision wiring.
-VISION_TARGET_LABEL = "Elephant"
+# Which of the deployed model's classes count as target-presence evidence
+# for the VISION modality, and which are merely worth filming. Both are
+# tuples and both are configured in services/config.py, which carries the
+# full rationale and the three field configurations; the aliases here exist
+# so this module reads against one name rather than a dotted path repeated
+# a dozen times.
+#
+# A detection whose label is in VISION_TARGET_LABELS feeds fuse() and can
+# confirm an event. One whose label is only in VISION_VIDEO_LABELS is real
+# signal that gets logged and filmed but never fires an actuator - which is
+# exactly what "record boar, deter elephants" means in practice.
+VISION_TARGET_LABELS = services_config.DETERRENT_TARGET_LABELS
+VISION_VIDEO_LABELS = services_config.EVENT_VIDEO_TARGET_LABELS
 
 # ---------------------------------------------------------------------------
 # Deterrence action selection
@@ -488,6 +517,19 @@ class FootfallOutcome:
             if no frame was captured. Instrumentation only - see
             docs/KNOWN_GAPS.md on why this loop measures this instead of
             running a continuous rolling pre-event buffer.
+        suppressed_by_vision: True when decide() said alert and the
+            deterrent was held anyway because the camera looked and found no
+            elephant (ADR 0022 Decision B). Distinct from a plain no-alert
+            event: the seismic evidence *was* sufficient, and vision
+            overruled it. False whenever vision was blind - see
+            _vision_could_see.
+        vision_polls: How many detection passes the watch window ran
+            (ADR 0022). 1 is the pre-watch behaviour and the safe_mode
+            value; higher means the window actually kept looking.
+        vision_watch_s: The window length _watch_length_s() granted this
+            trigger, before any early exit. 0.0 under safe_mode. Reported
+            so a field log can show which triggers earned the long look and
+            whether the long look was what found the elephant.
         vision_confirmed: True only if the pre-decision vision check
             returned at least one detection labeled VISION_TARGET_LABEL.
             Distinct from `fusion` reporting VISION as used: a check that
@@ -517,6 +559,9 @@ class FootfallOutcome:
     trigger_to_first_frame_s: float | None
     vision_confirmed: bool
     video_path: Path | None
+    vision_polls: int = 1
+    vision_watch_s: float = 0.0
+    suppressed_by_vision: bool = False
 
 
 @dataclass(frozen=True)
@@ -597,19 +642,28 @@ class VisionCheck:
     Attributes:
         reading: The VISION ModalityReading handed to fuse().
         confirmed: True only when the detector returned at least one
-            detection labeled VISION_TARGET_LABEL. False covers all three
-            of "no frames", "the detector failed", and "boxes found, none
-            of them an elephant" - none of those is a confirmation.
+            detection whose label is in VISION_TARGET_LABELS. False covers
+            all three of "no frames", "the detector failed", and "boxes
+            found, none of them a target" - none of those is a
+            confirmation.
+        species: Every distinct label this pass saw, in first-seen order,
+            whether or not it counts as a target. Carried because the
+            question "should this event's video be kept" is not the same
+            question as "should the horn fire" once boar is configured for
+            one and not the other, and re-running the detector to answer
+            the second one would be both slower and capable of
+            disagreeing with the first.
     """
 
     reading: ModalityReading
     confirmed: bool
+    species: tuple[str, ...] = ()
 
 
 def _vision_check(
     detect_vision: VisionDetectFn,
     frames: list[Frame],
-    target_label: str = VISION_TARGET_LABEL,
+    target_labels: tuple[str, ...] = VISION_TARGET_LABELS,
 ) -> VisionCheck:
     """Convert a vision-check burst into one VISION ModalityReading; never raises.
 
@@ -624,12 +678,13 @@ def _vision_check(
       perception.detector.DetectionError): logged and treated identically -
       available=False. A detector outage must not block or bias the alert
       decision any more than a dark lens would.
-    - detect_vision() succeeds: only detections labeled target_label count.
+    - detect_vision() succeeds: only detections whose label is in
+      target_labels count.
       If at least one qualifies, log-odds is logit() of the *strongest*
       match's own reported confidence (the same direct, non-invented
       transformation _confidence_log_odds() already uses for
       seismic/acoustic). If none qualify - including the case where
-      detect_vision() found real boxes, just none labeled target_label -
+      detect_vision() found real boxes, just none labeled with a target -
       the reading is still available=True, scored at
       cognition.config.BASELINE_VISION.
 
@@ -650,8 +705,9 @@ def _vision_check(
         detect_vision: Callable matching perception.detector.VisionDetectFn.
         frames: The vision-check burst - Frame objects, not raw images;
             this function extracts .image itself so callers never have to.
-        target_label: Which class counts as elephant-presence evidence.
-            Defaults to VISION_TARGET_LABEL.
+        target_labels: Which of the model's classes count as
+            target-presence evidence. Defaults to VISION_TARGET_LABELS,
+            i.e. services.config.DETERRENT_TARGET_LABELS.
 
     Returns:
         A VisionCheck carrying the ModalityReading for Modality.VISION and
@@ -668,18 +724,368 @@ def _vision_check(
         logger.warning("vision detect failed, continuing without vision evidence: %s", exc)
         return VisionCheck(ModalityReading(Modality.VISION, 0.0, available=False), False)
 
-    matches = [d for d in detections if d.label == target_label]
+    # Order-preserving dedupe: the log and the video gate both read this,
+    # and a stable order makes two events with the same cast compare equal
+    # in a field log instead of differing by detector ordering.
+    species = tuple(dict.fromkeys(d.label for d in detections))
+
+    matches = [d for d in detections if d.label in target_labels]
     if not matches:
         return VisionCheck(
             ModalityReading(Modality.VISION, cognition_config.BASELINE_VISION, available=True),
             False,
+            species,
         )
 
     best_confidence = max(d.confidence for d in matches)
     return VisionCheck(
         ModalityReading(Modality.VISION, _confidence_log_odds(best_confidence), available=True),
         True,
+        species,
     )
+
+
+@dataclass(frozen=True)
+class VisionWatch:
+    """What one bounded watch window produced (ADR 0022).
+
+    Attributes:
+        check: The strongest VisionCheck any poll in the window produced -
+            a confirmation if one ever happened, otherwise the best
+            available reading, otherwise the unavailable one. This is the
+            reading handed to fuse().
+        frames: The frames worth keeping from the window - the first poll's
+            burst (which dates the event and which the night decision
+            reads) plus, when the watch confirmed, the burst that actually
+            confirmed. Deliberately not every frame the window captured: a
+            45s watch at one poll per second is over a hundred 720p frames,
+            several hundred megabytes held live, when only two bursts of it
+            are ever used.
+        polls: How many detection passes ran. Always at least one, so a
+            zero-length window behaves exactly like the single pre-ADR-0022
+            burst.
+        elapsed_s: Monotonic seconds from the first poll to the last.
+        confirmed_on_poll: 1-based index of the poll that confirmed, or
+            None if none did. Logged rather than acted on - it is the one
+            number that says whether the window length is earning its cost,
+            and there is no field data behind that length yet.
+        species: Every distinct label seen across the *whole* window, in
+            first-seen order - not just the labels on `check`. The union
+            matters: a boar that walks through on poll 2 and is gone by the
+            poll that ends the watch is still a boar this node saw, and
+            under the "record boar, deter elephants" configuration that
+            sighting is the entire reason the recording is worth keeping.
+    """
+
+    check: VisionCheck
+    frames: tuple[Frame, ...]
+    polls: int
+    elapsed_s: float
+    confirmed_on_poll: int | None
+    species: tuple[str, ...] = ()
+
+    @property
+    def reading_available(self) -> bool:
+        """Whether any poll produced a reading fuse() will actually score."""
+        return self.check.reading.available
+
+
+def _watch_length_s(
+    *,
+    repeat_count: int,
+    seismic_alone_alerts: bool,
+    base_s: float = services_config.VISION_WATCH_BASE_S,
+    extended_s: float = services_config.VISION_WATCH_EXTENDED_S,
+) -> float:
+    """Decide how long this trigger has earned the camera for (ADR 0022).
+
+    Two conditions extend the window, and both are values already computed
+    for other reasons, so neither costs a sensor read:
+
+    - `repeat_count > 0`: another qualifying trigger arrived at this node
+      within HABITUATION_WINDOW_S. That is the closest thing this device
+      has to "the footfall event is still happening" - the encounter is
+      live, something is moving out there, and it is worth staying on the
+      camera rather than glancing once and sleeping. It is the same signal
+      escalation_floor() already trusts to raise the deterrence tier.
+    - `seismic_alone_alerts`: the geophone evidence on its own already
+      clears the alert threshold, so this event is going to fire whether or
+      not vision ever confirms. Given that, the only question left is *when*
+      to fire it, and firing with the animal in frame is both better
+      deterrence (the horn goes off at boundary range rather than at the
+      140m the geophone reaches) and the only way the event produces usable
+      footage. See ADR 0022 - that is a real reversal of ADR 0020, not a
+      refinement of it.
+
+    Everything else - a lone, weak, unrepeated trigger - gets base_s. That
+    is the wind-and-cattle case, and it is the one that has to stay cheap.
+
+    Args:
+        repeat_count: Triggers inside the habituation window before this
+            one, as returned by ExperienceStore.record_trigger().
+        seismic_alone_alerts: Whether decide() says alert on the seismic
+            reading alone, with vision reported unavailable.
+        base_s: Window for a trigger that qualifies for neither condition.
+        extended_s: Window for one that qualifies for either.
+
+    Returns:
+        Seconds to watch. Never less than base_s.
+    """
+    if repeat_count > 0 or seismic_alone_alerts:
+        return max(base_s, extended_s)
+    return base_s
+
+
+def _watch_for_vision(
+    camera: CameraProtocol,
+    detect_vision: VisionDetectFn,
+    *,
+    trigger_monotonic: float,
+    watch_s: float,
+    poll_interval_s: float = services_config.VISION_WATCH_POLL_INTERVAL_S,
+    frame_count: int = services_config.VISION_CHECK_FRAME_COUNT,
+    max_empty_polls: int = services_config.VISION_WATCH_MAX_EMPTY_POLLS,
+    monotonic: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> VisionWatch:
+    """Poll vision repeatedly until it confirms or the window closes; never raises.
+
+    Replaces the single pre-decision burst. The reason is in
+    services/config.py's VISION_WATCH_BASE_S comment and in ADR 0022: the
+    geophone reaches 140m and the camera does not, so at the instant of the
+    trigger the animal is usually nowhere near the frame, and one glance two
+    seconds later answers a question nobody asked.
+
+    Three ways out, in priority order:
+
+    1. **A confirmation.** Returns immediately, without sleeping out the
+       rest of the window. This is the case the function exists for: the
+       caller fires the deterrence sequence at this moment, which is the
+       moment the elephant is actually in frame.
+    2. **The window closes.** Returns the strongest reading seen. The caller
+       then decides on seismic alone, exactly as it did before this function
+       existed - a watch that finds nothing costs time, never a changed
+       decision.
+    3. **`max_empty_polls` consecutive polls return no frames.** The camera
+       has stopped delivering, and there is nothing to gain by holding the
+       actuators behind it for the rest of the window. Logged, then treated
+       as case 2 with whatever was seen before the failure.
+
+    At least one poll always runs, whatever `watch_s` is, so `watch_s=0.0`
+    reproduces the old single-burst behaviour rather than skipping vision.
+
+    `monotonic` and `sleep` are injected for the same reason the RNG is: a
+    test needs to drive a 45-second window deterministically in
+    milliseconds, and patching the clock module-wide would be a worse seam.
+
+    Args:
+        camera: An already-opened CameraProtocol.
+        detect_vision: Callable matching perception.detector.VisionDetectFn.
+        trigger_monotonic: When this event's handling began - the reference
+            point for the logged first-frame latency.
+        watch_s: How long to keep polling, measured from the first poll.
+        poll_interval_s: Start-to-start spacing between polls. A poll that
+            overruns is not compensated for; the next simply starts late.
+        frame_count: Frames per poll, handed to capture_burst().
+        max_empty_polls: Consecutive empty polls that end the watch.
+        monotonic: Clock source. Injected for tests.
+        sleep: Sleep function. Injected for tests.
+
+    Returns:
+        A VisionWatch. `check` is never None - a window in which every poll
+        failed still reports the unavailable reading _vision_check() builds
+        for an empty burst, which fuse() drops rather than scores.
+    """
+    started = monotonic()
+    deadline = started + max(watch_s, 0.0)
+
+    first_frames: list[Frame] = []
+    best = VisionCheck(ModalityReading(Modality.VISION, 0.0, available=False), False)
+    polls = 0
+    empty_polls = 0
+    # dict rather than set: insertion-ordered, so the union stays in
+    # first-seen order across polls the way one pass's own list does.
+    seen_species: dict[str, None] = {}
+
+    while True:
+        poll_started = monotonic()
+        polls += 1
+        frames = _capture_burst(camera, trigger_monotonic, count=frame_count)
+
+        if not frames:
+            empty_polls += 1
+            if empty_polls >= max_empty_polls:
+                logger.warning(
+                    "vision watch abandoned after %d consecutive empty polls "
+                    "(%.1fs into a %.1fs window) - proceeding on seismic alone",
+                    empty_polls,
+                    poll_started - started,
+                    watch_s,
+                )
+                break
+        else:
+            empty_polls = 0
+            if not first_frames:
+                first_frames = frames
+            check = _vision_check(detect_vision, frames)
+            seen_species.update(dict.fromkeys(check.species))
+            if check.confirmed:
+                logger.info(
+                    "vision confirmed on poll %d, %.1fs into a %.1fs watch window",
+                    polls,
+                    monotonic() - started,
+                    watch_s,
+                )
+                # Identity, never equality. Frame is a frozen dataclass
+                # whose .image is a numpy ndarray in production, so
+                # `f not in first_frames` would compare arrays elementwise
+                # and then call bool() on the result - ValueError, raised
+                # at the exact instant vision confirms an elephant. A
+                # confirmation on the first poll happens to survive it
+                # (list.__contains__ tries `is` before `==`); a
+                # confirmation on any later poll, which is the case this
+                # whole function exists for, would not.
+                seen = {id(f) for f in first_frames}
+                kept = first_frames + [f for f in frames if id(f) not in seen]
+                return VisionWatch(
+                    check=check,
+                    frames=tuple(kept),
+                    polls=polls,
+                    elapsed_s=monotonic() - started,
+                    confirmed_on_poll=polls,
+                    species=tuple(seen_species),
+                )
+            # An available-but-unconfirmed reading beats the unavailable one
+            # this started with: it means the camera and the detector both
+            # worked and neither saw an elephant, which is real evidence
+            # scored at BASELINE_VISION, not an outage fuse() should drop.
+            if check.reading.available and not best.reading.available:
+                best = check
+
+        now = monotonic()
+        if now >= deadline:
+            break
+        # Start-to-start pacing: a poll that overran its slot goes straight
+        # into the next rather than adding its overrun to the window.
+        remaining_to_next = poll_interval_s - (now - poll_started)
+        if remaining_to_next > 0:
+            sleep(min(remaining_to_next, deadline - now))
+
+    elapsed_s = monotonic() - started
+    if polls > 1:
+        logger.info(
+            "vision watch closed unconfirmed after %d polls over %.1fs (window %.1fs)",
+            polls,
+            elapsed_s,
+            watch_s,
+        )
+    return VisionWatch(
+        check=best,
+        frames=tuple(first_frames),
+        polls=polls,
+        elapsed_s=elapsed_s,
+        confirmed_on_poll=None,
+        species=tuple(seen_species),
+    )
+
+
+def _worth_filming(watch: VisionWatch) -> bool:
+    """Whether this event saw something services.config says to keep footage of.
+
+    Separate from `confirmed` because the two lists are deliberately allowed
+    to differ. Under the "record boar, deter elephants" configuration a boar
+    sighting is not a confirmation - it must not fire the horn, must not
+    feed fuse() as target evidence - but it is precisely the footage worth
+    keeping, because it is the evidence for whether boar deterrence is worth
+    building at all.
+
+    Reads the watch's union rather than the winning check's own species, so
+    an animal that appeared on one poll and was gone by the last still
+    counts. See VisionWatch.species.
+
+    Args:
+        watch: The completed watch window.
+
+    Returns:
+        True if any label seen anywhere in the window is in
+        VISION_VIDEO_LABELS.
+    """
+    return any(label in VISION_VIDEO_LABELS for label in watch.species)
+
+
+def _vision_could_see(
+    watch: VisionWatch,
+    night_of_event: Callable[[], bool | None],
+    *,
+    illuminated: bool = False,
+) -> bool:
+    """Whether this event's vision had a real chance of seeing an elephant.
+
+    The distinction ADR 0022 Decision B turns on, and the reason that
+    decision is safe at all: "the camera looked and there was nothing there"
+    and "the camera could not look" are opposite pieces of evidence, and
+    only the first of them is a reason not to fire the deterrent.
+
+    Three ways vision can be blind, all of which report False here and all
+    of which hand the decision back to seismic alone:
+
+    - **The camera or the detector failed.** _vision_check() already reports
+      that as available=False, for both the no-frames case and the
+      DetectionError case. Nothing on this board supervises the
+      edge-impulse-linux-runner process (docs/KNOWN_GAPS.md), so a dead
+      inference server is a real and currently symptomless failure - gating
+      the horn on its output without this check would turn it into a silent
+      total loss of deterrence.
+    - **No frames at all.** Covered by the same available=False, but stated
+      separately because it is the camera-never-opened case rather than a
+      mid-event fault.
+    - **Night, with the illuminator not yet fired.** This is the one that
+      actually matters in the field and the one that is easiest to miss: at
+      night the camera works perfectly and returns dark frames, so vision
+      reports available=True and confirmed=False - "I looked, nothing
+      there" - about an elephant it physically cannot see. pulse_ir() only
+      fires for tiers 2 and 3, after decide() has already run
+      (docs/KNOWN_GAPS.md, the 29-30 Aug entry), so during the watch the
+      illuminator is off and this is every night event. Left unhandled, a
+      confirmation-gated deterrent would go quiet from dusk to dawn, which
+      is when almost all raiding happens. Treating it as blindness rather
+      than as absence is what keeps ADR 0022 Decision B from silently
+      disabling the system every night.
+
+    frames_are_night() returning None - no frame in the burst could be
+    measured - is treated as night here, not as day. The conservative
+    direction for this particular question is the one that keeps the
+    deterrent firing.
+
+    Args:
+        watch: The completed watch window.
+        night_of_event: Zero-argument reader for this event's day/night
+            answer. Zero-argument rather than the NightDecideFn itself so
+            the caller owns both *when* the image work happens - this
+            function is the last operand of a short-circuiting condition,
+            and a confirmed event never pays for it - and the fact that it
+            happens only once, shared with the pulse_ir gate that asks the
+            same question about the same frames later in the event.
+        illuminated: True if the IR illuminator was firing during the
+            watch. Always False today; the parameter exists so the
+            proactive-illumination work docs/KNOWN_GAPS.md tracks has an
+            obvious place to land rather than having to re-derive this
+            logic.
+
+    Returns:
+        True only if the camera and detector both worked and the scene was
+        one the model could actually have classified.
+    """
+    if not watch.reading_available or not watch.frames:
+        return False
+    if illuminated:
+        return True
+    try:
+        night = night_of_event()
+    except Exception as exc:  # noqa: BLE001 - a night heuristic must not crash the event
+        logger.warning("night check failed, treating vision as blind: %s", exc)
+        return False
+    return night is False
 
 
 def _open_camera(camera: CameraProtocol) -> bool:
@@ -831,6 +1237,12 @@ def handle_footfall_event(
     threshold: float = ALERT_PROBABILITY_THRESHOLD,
     capture_post_fire_tail_s: float = CAPTURE_POST_FIRE_TAIL_S,
     video_retreat_tail_s: float = services_config.EVENT_VIDEO_RETREAT_TAIL_S,
+    vision_watch_base_s: float = services_config.VISION_WATCH_BASE_S,
+    vision_watch_extended_s: float = services_config.VISION_WATCH_EXTENDED_S,
+    vision_watch_poll_interval_s: float = services_config.VISION_WATCH_POLL_INTERVAL_S,
+    require_vision_confirmation: bool = (
+        services_config.DETERRENT_REQUIRES_VISION_CONFIRMATION
+    ),
     bandit_params: BanditParams = cognition_config.DEFAULT_BANDIT_PARAMS,
     rng: random.Random = _DEFAULT_RNG,
     household_proximity: bool = services_config.NODE_HOUSEHOLD_PROXIMITY,
@@ -847,21 +1259,33 @@ def handle_footfall_event(
     detect_vision() call and a fixed CAPTURE_POST_FIRE_TAIL_S tail, or not at
     all when safe_mode is true.
 
-    Outside safe_mode, camera.open() and one capture_burst() +
-    detect_vision() call happen on every footfall event this handler
-    receives, alert or not - vision now runs *before* fuse()/decide(), not
-    only after an alert already fired on other evidence (module docstring's
-    "seismic wakes vision" ordering). If decide() says no alert, the camera
-    closes immediately and nothing else happens. If it says alert: [pulse_ir()
-    on its own thread, concurrent with a second capture_burst() for the
-    illuminated evidence footage, skipped entirely on tier 1] -> drive_horn()
-    -> drive_led() -> sleep(CAPTURE_POST_FIRE_TAIL_S) -> camera.close() ->
-    save_frames() with both bursts combined. The camera opens once at the top
-    of the event and is only ever closed, once, whichever exit the event
-    takes (module docstring). safe_mode=True skips the camera and vision
-    check entirely - see module docstring for the honest cost of that. A
-    camera or vision-detection failure at any point is logged and never
-    allowed to suppress or delay the actuator calls that follow it.
+    Outside safe_mode, camera.open() and a bounded *watch* -
+    _watch_for_vision(), repeated capture_burst() + detect_vision() passes
+    rather than the single burst this handler ran before ADR 0022 - happen
+    on every footfall event, alert or not. Vision runs *before*
+    fuse()/decide(), not only after an alert already fired on other evidence
+    (module docstring's "seismic wakes vision" ordering). The watch returns
+    the instant vision confirms, so on a confirmed event the deterrence
+    sequence fires with the animal actually in frame. If decide() says no
+    alert, the camera closes immediately and nothing else happens. If it
+    says alert: [pulse_ir() on its own thread, concurrent with a second
+    capture_burst() for the illuminated evidence footage, skipped entirely
+    on tier 1] -> drive_horn() -> drive_led() -> sleep(the tail) ->
+    camera.close() -> save_frames() with both bursts combined. The camera
+    opens once at the top of the event and is only ever closed, once,
+    whichever exit the event takes (module docstring). safe_mode=True skips
+    the camera and the watch entirely - see module docstring for the honest
+    cost of that. A camera or vision-detection failure at any point is
+    logged and never allowed to suppress the actuator calls that follow it.
+
+    The one thing ADR 0022 does change about that guarantee is *delay*: a
+    trigger whose seismic evidence would alert on its own now waits for the
+    watch to confirm or expire before firing, up to vision_watch_extended_s.
+    That is a deliberate reversal of ADR 0020's "actuators are never delayed
+    behind the confirm window", argued in ADR 0022 and bounded by ADR 0008's
+    own worst-case lead time so the expiry fire still beats a fast-moving
+    animal to the boundary. A failure never delays anything: the watch
+    abandons after VISION_WATCH_MAX_EMPTY_POLLS empty polls.
 
     Which tier fires is the bandit's choice, made after decide() and before
     any actuator call. The trigger is recorded and any pending attempt
@@ -940,6 +1364,23 @@ def handle_footfall_event(
             here because it is a real cost, not a footnote - a footfall
             notify arriving inside the tail waits. Overridable so tests
             don't have to sleep for real.
+        vision_watch_base_s: How long the pre-decision vision watch runs for
+            an ordinary trigger (ADR 0022,
+            services.config.VISION_WATCH_BASE_S). 0.0 collapses the watch
+            back to the single burst this handler did before that ADR - the
+            watch always runs at least one poll - which is both the escape
+            hatch and how most tests here keep running in milliseconds.
+        vision_watch_extended_s: How long it runs for a trigger that earned
+            a longer look - a repeat inside the habituation window, or
+            seismic evidence that clears `threshold` on its own. See
+            _watch_length_s.
+        vision_watch_poll_interval_s: Start-to-start spacing between watch
+            polls. See _watch_for_vision.
+        require_vision_confirmation: ADR 0022 Decision B. When True (the
+            default), a decide()-says-alert event still holds the horn and
+            LEDs unless the watch confirmed an elephant *or* vision was
+            blind (_vision_could_see). False restores the pre-ADR-0022
+            behaviour of firing on the fused decision alone.
         bandit_params: Hyperparameters for selection and reward. Defaults to
             cognition.config.DEFAULT_BANDIT_PARAMS.
         rng: Source of the epsilon-greedy exploration draw. Defaults to a
@@ -972,51 +1413,99 @@ def handle_footfall_event(
     # meaningful regardless of which burst actually produced the first frame.
     trigger_monotonic = time.monotonic()
 
-    # Seismic wakes vision, vision (attempts to) confirm the elephant, and
-    # only then does fuse()/decide() run - this is the ordering the 28 Aug
-    # correction requires (module docstring). Gated behind `not safe_mode`
-    # rather than running unconditionally: SAFE_MODE's existing contract is
-    # that it suppresses the camera entirely, not just the actuators
-    # (test_safe_mode_suppresses_all_actuation_and_camera) - preserved here
-    # at the documented cost that a SAFE_MODE log no longer previews exactly
-    # what a live run would have decided (module docstring).
-    camera_opened = False
-    vision_frames: list[Frame] = []
-    if not safe_mode:
-        camera_opened = _open_camera(camera)
-        if camera_opened:
-            vision_frames = _capture_burst(
-                camera, trigger_monotonic, count=services_config.VISION_CHECK_FRAME_COUNT
-            )
-
-    vision_check = _vision_check(detect_vision, vision_frames)
-
-    readings = [
-        ModalityReading(Modality.SEISMIC, _confidence_log_odds(probability), available=True),
-        # Acoustic: no reading in hand on this path. A footfall notify
-        # carries none, and nothing correlates an acoustic event with this
-        # one across time yet - acoustic fuses only on its own event, in
-        # handle_acoustic_event(). See module docstring.
-        ModalityReading(Modality.ACOUSTIC, 0.0, available=False),
-        vision_check.reading,
-    ]
-    fusion_result = fuse(readings, cognition_config.DEFAULT_FUSION_PARAMS)
-    decision = decide(fusion_result, threshold)
-
-    # One wall-clock reading for the whole event, taken before any of the
-    # store calls below. Wall clock rather than monotonic because it has to
-    # stay comparable across the MPU suspend/resume cycles ADR 0008
-    # describes, and a single reading rather than several so the trigger,
-    # the settlement and any recorded attempt all agree on when this event
-    # happened - the reward is a difference between two of these timestamps,
-    # so drift between them would be drift in the reward itself.
+    # One wall-clock reading for the whole event, taken up front. Wall clock
+    # rather than monotonic because it has to stay comparable across the MPU
+    # suspend/resume cycles ADR 0008 describes, and a single reading rather
+    # than several so the trigger, the settlement and any recorded attempt
+    # all agree on when this event happened - the reward is a difference
+    # between two of these timestamps, so drift between them would be drift
+    # in the reward itself.
+    #
+    # Taken *before* the vision watch, not after it as it was before ADR
+    # 0022. Two reasons, both real: repeat_count is one of the two inputs to
+    # how long this trigger gets watched, so it has to exist first; and the
+    # event genuinely happened at the trigger, not up to
+    # VISION_WATCH_EXTENDED_S later, so dating it here makes the habituation
+    # window and the bandit's quiet-time reward more accurate rather than
+    # less.
     event_wall_s = time.time()
     repeat_count = experience.record_trigger(event_wall_s, bandit_params.habituation_window_s)
     settled = experience.settle_pending(event_wall_s, bandit_params)
 
+    seismic_reading = ModalityReading(
+        Modality.SEISMIC, _confidence_log_odds(probability), available=True
+    )
+    # Acoustic: no reading in hand on this path. A footfall notify carries
+    # none, and nothing correlates an acoustic event with this one across
+    # time yet - acoustic fuses only on its own event, in
+    # handle_acoustic_event(). Also deliberately not wired for the first
+    # field trial at all, which is seismic + vision only (see module
+    # docstring). See docs/KNOWN_GAPS.md.
+    acoustic_reading = ModalityReading(Modality.ACOUSTIC, 0.0, available=False)
+
+    # What this event decides on the geophone alone, computed before the
+    # camera is even opened. Two pure function calls on readings that are
+    # already built, so it costs nothing - and it answers the question
+    # _watch_length_s() needs: is this trigger going to fire whatever vision
+    # says? If it is, the only remaining question is *when*, and ADR 0022's
+    # answer is "when the animal is in frame."
+    seismic_alone = decide(
+        fuse(
+            [seismic_reading, acoustic_reading, ModalityReading(Modality.VISION, 0.0, False)],
+            cognition_config.DEFAULT_FUSION_PARAMS,
+        ),
+        threshold,
+    )
+
+    # Seismic wakes vision, vision watches for the elephant across a bounded
+    # window, and only then does the final fuse()/decide() run - the 28 Aug
+    # "seismic wakes vision" ordering (module docstring), widened by ADR 0022
+    # from one burst into a watch because the geophone reaches 140m and the
+    # camera does not. Gated behind `not safe_mode` rather than running
+    # unconditionally: SAFE_MODE's existing contract is that it suppresses
+    # the camera entirely, not just the actuators
+    # (test_safe_mode_suppresses_all_actuation_and_camera) - preserved here
+    # at the documented cost that a SAFE_MODE log no longer previews exactly
+    # what a live run of the same event would have decided (module
+    # docstring).
+    camera_opened = False
+    watch_s = 0.0
+    watch = VisionWatch(
+        check=VisionCheck(ModalityReading(Modality.VISION, 0.0, available=False), False),
+        frames=(),
+        polls=1,
+        elapsed_s=0.0,
+        confirmed_on_poll=None,
+        species=(),
+    )
+    if not safe_mode:
+        camera_opened = _open_camera(camera)
+        if camera_opened:
+            watch_s = _watch_length_s(
+                repeat_count=repeat_count,
+                seismic_alone_alerts=seismic_alone.alert,
+                base_s=vision_watch_base_s,
+                extended_s=vision_watch_extended_s,
+            )
+            watch = _watch_for_vision(
+                camera,
+                detect_vision,
+                trigger_monotonic=trigger_monotonic,
+                watch_s=watch_s,
+                poll_interval_s=vision_watch_poll_interval_s,
+            )
+
+    vision_check = watch.check
+    vision_frames: list[Frame] = list(watch.frames)
+
+    readings = [seismic_reading, acoustic_reading, vision_check.reading]
+    fusion_result = fuse(readings, cognition_config.DEFAULT_FUSION_PARAMS)
+    decision = decide(fusion_result, threshold)
+
     logger.info(
         "footfall event: mcu_probability=%.3f sta_lta_ratio=%.3f fused_P=%.3f "
-        "alert=%s used=%s dropped=%s repeats_in_window=%d feature_vector=%s",
+        "alert=%s used=%s dropped=%s repeats_in_window=%d "
+        "watch=%.1fs/%.1fs polls=%d confirmed_on=%s feature_vector=%s",
         probability,
         sta_lta_ratio,
         fusion_result.probability,
@@ -1024,6 +1513,10 @@ def handle_footfall_event(
         [m.value for m in fusion_result.used],
         [m.value for m in fusion_result.dropped],
         repeat_count,
+        watch.elapsed_s,
+        watch_s,
+        watch.polls,
+        watch.confirmed_on_poll,
         feature_vector,
     )
     if settled is not None:
@@ -1064,9 +1557,71 @@ def handle_footfall_event(
             trigger_to_first_frame_s=trigger_to_first_frame_s,
             vision_confirmed=vision_check.confirmed,
             video_path=video_path,
+            vision_polls=watch.polls,
+            vision_watch_s=watch_s,
+            suppressed_by_vision=suppressed_by_vision,
         )
 
-    if not decision.alert:
+    # is_night() is a real image computation - an HSV conversion over the
+    # whole burst (perception/night.py) - and ADR 0022 gave it a second
+    # caller, the blindness gate immediately below, on top of the pulse_ir
+    # gate much further down. Both ask the same question about the same
+    # frames, so it runs at most once per event and both read that answer.
+    #
+    # Deliberately not caught in here: the two callers want *opposite*
+    # conservative behaviour when the check fails - the blindness gate wants
+    # "assume blind, let seismic fire", the IR gate wants "fire the
+    # illuminator anyway" - so each handles its own failure and this only
+    # guarantees the work is not repeated. Lazy for the same reason: an
+    # event that vision confirmed short-circuits the gate below and never
+    # touches this, which keeps the confirmed path (the common alert case
+    # now) exactly as cheap as it was.
+    _night_answer: list[bool | None] = []
+
+    def _night_of_event() -> bool | None:
+        if not _night_answer:
+            _night_answer.append(is_night(vision_frames))
+        return _night_answer[0]
+
+    # ADR 0022 Decision B: seismic wakes and warns, vision fires.
+    #
+    # A geophone trigger means something heavy moved within 140m (ADR 0008).
+    # It does not mean an elephant is at the boundary, or that it is even
+    # coming this way. Firing the deterrent on that alone spends the horn on
+    # an animal that is still deep in the forest and may never arrive - and
+    # cognition/bandit.py's whole habituation model says the dominant
+    # failure mode of a deterrent is firing where it achieves nothing, which
+    # is exactly what teaches an elephant to ignore it. Holding the fire
+    # until the camera has the animal in frame puts the burst at boundary
+    # range, at something that is demonstrably there.
+    #
+    # The gate is deliberately narrow. It engages only when vision had a
+    # real chance and took it - _vision_could_see() above is the whole
+    # safety argument, and every one of its blind cases falls straight back
+    # to the seismic decision rather than going quiet. What this does *not*
+    # do is suppress anything else: the trigger is still recorded, the
+    # bandit still settles, the event is still logged, and any uplink this
+    # path grows should sit on the seismic decision, not behind this gate.
+    # See docs/KNOWN_GAPS.md - there is no working footfall uplink today, so
+    # "seismic warns" is a half this code cannot yet deliver.
+    suppressed_by_vision = (
+        require_vision_confirmation
+        and decision.alert
+        and not vision_check.confirmed
+        and _vision_could_see(watch, _night_of_event)
+    )
+    if suppressed_by_vision:
+        logger.info(
+            "deterrent held: fused_P=%.3f cleared the threshold but %d vision "
+            "poll(s) over %.1fs found no %s (saw %s) (ADR 0022 Decision B)",
+            fusion_result.probability,
+            watch.polls,
+            watch.elapsed_s,
+            "/".join(VISION_TARGET_LABELS),
+            ", ".join(watch.species) or "nothing",
+        )
+
+    if not decision.alert or suppressed_by_vision:
         # No alert on this evidence: the vision-check burst (if any) is
         # never saved (storage discipline stays "only on alert" - module
         # docstring), but it did happen and did feed fusion, so it is
@@ -1083,7 +1638,13 @@ def handle_footfall_event(
         # did not clear the bar, which is worth more than the disk it costs.
         video_path = _finish_event_video(
             event_video,
-            keep=vision_check.confirmed,
+            # Confirmed OR merely worth filming. The second half is what
+            # makes "record boar, deter elephants" a config change rather
+            # than a code change: a boar-only event takes exactly this
+            # exit - it never confirmed, so it never alerted - and without
+            # _worth_filming() its recording would be discarded here, which
+            # is the one place the footage still exists.
+            keep=vision_check.confirmed or _worth_filming(watch),
             tag=CaptureEventTag(
                 event_timestamp_s=event_wall_s,
                 sta_lta_ratio=sta_lta_ratio,
@@ -1163,7 +1724,7 @@ def handle_footfall_event(
     fire_ir_now = action.fire_ir
     if fire_ir_now:
         try:
-            night = is_night(vision_frames)
+            night = _night_of_event()
         except Exception:  # noqa: BLE001 - perception must never block actuation
             logger.exception("is_night() raised - firing pulse_ir anyway")
             night = True
@@ -1278,6 +1839,8 @@ def handle_footfall_event(
         trigger_to_first_frame_s=trigger_to_first_frame_s,
         vision_confirmed=vision_check.confirmed,
         video_path=video_path,
+        vision_polls=watch.polls,
+        vision_watch_s=watch_s,
     )
 
 

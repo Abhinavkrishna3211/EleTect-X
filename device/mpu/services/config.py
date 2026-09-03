@@ -238,6 +238,101 @@ VISION_INFERENCE_TIMEOUT_S = 2.0
 VISION_CHECK_FRAME_COUNT = 3
 
 # ---------------------------------------------------------------------------
+# Vision watch window (ADR 0022, services/reflex_loop.py)
+# ---------------------------------------------------------------------------
+# A geophone trigger and an elephant in frame are not the same moment, and
+# the gap between them is large. The field-validated footfall detection
+# range is 140m in natural environments (ADR 0008, Wijayakulasooriya et
+# al.), and at a normal walking pace of 1.1-1.7 m/s that leaves 80-140
+# seconds between the trigger and the animal reaching the boundary - the
+# same arithmetic ADR 0008 used to size the wake budget. The camera sees a
+# small fraction of that 140m. So a single VISION_CHECK_FRAME_COUNT burst
+# taken two or three seconds after the trigger is, in most of the cases
+# that matter, looking at an empty frame and correctly reporting "no
+# elephant" about an elephant that is simply still 100m away.
+#
+# The fix is to keep looking for a bounded window instead of glancing once.
+# Two window lengths rather than one, because the cost of watching falls
+# almost entirely on the triggers that turn out to be nothing - cattle,
+# wind, a vehicle on a nearby track - and those should be paid for cheaply.
+
+# What every trigger gets. Sized to be cheap rather than sufficient: at
+# VISION_WATCH_POLL_INTERVAL_S this is roughly eight detection passes
+# against the single pass the loop did before, which is a real improvement
+# for an animal already inside camera range, without committing the battery
+# to a long watch on evidence that has not earned one. INVENTED - no field
+# trigger-rate data exists yet to size the false-alarm cost against. Set
+# this to 0.0 to restore the pre-ADR-0022 behaviour exactly: the watch
+# always runs at least one poll, so a zero window is the old single burst.
+VISION_WATCH_BASE_S = 8.0
+
+# What a trigger that has already earned a longer look gets - see
+# reflex_loop._watch_length_s for the two qualifying conditions (a repeat
+# within the habituation window, or seismic evidence strong enough to clear
+# the alert threshold on its own).
+#
+# 45s is not a guess. ADR 0008 puts the *worst-case* lead time - the same
+# 140m covered at an agitated 2.5-3+ m/s rather than a walking pace - at
+# 45-65 seconds. Capping the watch at the bottom of that band means the
+# fallback fire, the one that happens when the window expires without a
+# vision confirmation, still lands before even a fast-moving animal could
+# have crossed the geophone's own detection range. A longer window would
+# buy more chances at a confirmation and start risking a horn that fires
+# after the elephant is already past the thing it was protecting.
+VISION_WATCH_EXTENDED_S = 45.0
+
+# Interval between watch polls, measured start-of-poll to start-of-poll.
+# The real board classifies at a measured 138ms mean per frame (~5.7 FPS
+# end to end across 123 live frames, 29-30 Aug - ml/vision/README.md), so a
+# VISION_CHECK_FRAME_COUNT=3 poll costs roughly 0.4s of inference and this
+# leaves the rest of each second to the H.264 encoder sharing the same four
+# A53 cores. Polling flat out instead would give about five times the
+# attempts at a target that takes tens of seconds to cross a 95-degree
+# field of view (hardware/cad/enclosure-design-concept.md) - very little
+# extra recall for several times the CPU and the power behind it. INVENTED
+# as a ratio; the 138ms it is sized against is measured.
+VISION_WATCH_POLL_INTERVAL_S = 1.0
+
+# Consecutive polls that return no frames at all before the watch gives up
+# and lets the event proceed on seismic alone. A camera that has stopped
+# delivering is not going to start again inside this window, and holding
+# the deterrence sequence behind a dead device is exactly the failure the
+# reflex loop's "vision must never block actuation" rule exists to prevent.
+# One empty poll is tolerated because a single dropped frame grab is a
+# normal USB event (perception/camera.py); three in a row is a fault.
+VISION_WATCH_MAX_EMPTY_POLLS = 3
+
+# ADR 0022 Decision B: the deterrent fires on a vision confirmation, not on
+# the fused decision alone.
+#
+# A geophone trigger says something heavy moved within 140m. It does not say
+# an elephant is at the boundary, nor that it is coming this way at all.
+# Firing the horn on that alone spends the burst on an animal still deep in
+# the forest, and cognition/bandit.py's habituation model is explicit that a
+# deterrent firing where it achieves nothing is what teaches an animal to
+# ignore it. Waiting for the camera puts the burst at boundary range, at
+# something demonstrably there - and it is also the only way an event
+# produces footage of anything.
+#
+# The gate is narrow by construction and only ever engages when vision
+# actually had a chance: reflex_loop._vision_could_see() sends a failed
+# camera, a dead inference server, and an unilluminated night frame all
+# straight back to the seismic decision. That last case is not a corner -
+# it is every night event until proactive IR illumination is decided
+# (docs/KNOWN_GAPS.md), and without it this constant would silently switch
+# the whole system off from dusk to dawn.
+#
+# What this does NOT gate is warning people. The trigger is still recorded,
+# logged and settled on seismic alone. There is no footfall uplink on this
+# device yet to hold or release (the LoRa module is not joining -
+# docs/KNOWN_GAPS.md), so "seismic warns, vision fires" is today only half
+# implemented, and the implemented half is the fire gate.
+#
+# False restores the pre-ADR-0022 behaviour: fire whenever decide() says
+# alert, whatever the camera saw.
+DETERRENT_REQUIRES_VISION_CONFIRMATION = True
+
+# ---------------------------------------------------------------------------
 # External IR illuminator gating (perception/night.py, services/reflex_loop.py)
 # ---------------------------------------------------------------------------
 # pulse_ir() only helps when the IMX462's IR-cut filter is out (night): in
@@ -255,6 +350,52 @@ VISION_CHECK_FRAME_COUNT = 3
 # S > 30. 12 sits in that gap with margin on both sides. Not a tuned figure
 # beyond that separation - see docs/KNOWN_GAPS.md.
 NIGHT_SATURATION_THRESHOLD = 12.0
+
+# ---------------------------------------------------------------------------
+# Which species this node acts on (services/reflex_loop.py)
+# ---------------------------------------------------------------------------
+# ETX-V is a two-class detector - perception/detector.py's module docstring
+# records the deployed model's labels as ["Boar", "Elephant"] - and the two
+# classes are wanted for different things at different times, so they get
+# two separate lists rather than one switch.
+#
+# DETERRENT_TARGET_LABELS is the heavier of the two. A label in here counts
+# as a vision confirmation, which means it feeds fuse() as positive
+# evidence and, under ADR 0022 Decision B, is what releases the horn. A
+# label NOT in here can still be detected, logged and filmed; it just
+# cannot fire an actuator.
+#
+# EVENT_VIDEO_TARGET_LABELS only decides whether an event's recording is
+# kept instead of discarded. Keeping footage costs disk and nothing else -
+# no horn, no battery, no habituation - so it is the cheap list, and it is
+# the right place to start with a new species.
+#
+# The three configurations worth naming, so the change is one edit:
+#
+#   1. Elephant only (default, and what the first field trial runs):
+#          DETERRENT_TARGET_LABELS = ("Elephant",)
+#          EVENT_VIDEO_TARGET_LABELS = ("Elephant",)
+#   2. Deter elephants, but collect boar footage - the honest next step,
+#      because it produces the evidence for whether boar deterrence is even
+#      worth doing before any horn fires at one:
+#          DETERRENT_TARGET_LABELS = ("Elephant",)
+#          EVENT_VIDEO_TARGET_LABELS = ("Elephant", "Boar")
+#   3. Deter both:
+#          DETERRENT_TARGET_LABELS = ("Elephant", "Boar")
+#          EVENT_VIDEO_TARGET_LABELS = ("Elephant", "Boar")
+#
+# Config 3 carries a real caveat that config 2 does not, and it is not a
+# style objection. The bandit in cognition/bandit.py learns one deterrence
+# policy per node, not one per species, and the habituation window
+# (ADR 0017) counts triggers without asking what caused them. Deterring
+# boar therefore spends the same escalation ladder and the same encounter
+# memory that elephant deterrence depends on: a night of boar visits can
+# walk the node up to tier 3 and leave an elephant arriving at dawn facing
+# an already-habituated response. Nothing here prevents that, and nothing
+# in the ADRs has decided it - so config 3 is a deliberate choice to make
+# with that trade in view, not a free upgrade. See docs/KNOWN_GAPS.md.
+DETERRENT_TARGET_LABELS: tuple[str, ...] = ("Elephant",)
+EVENT_VIDEO_TARGET_LABELS: tuple[str, ...] = ("Elephant",)
 
 # ---------------------------------------------------------------------------
 # Deterrent-event capture storage (perception/storage.py)
@@ -332,7 +473,13 @@ EVENT_VIDEO_SUFFIX = ".mkv"
 # waits on. It is the budget those stages must stay inside, checked as an
 # invariant in tests/test_config.py rather than enforced by a watchdog
 # thread this loop does not need and would have to get right.
-EVENT_VIDEO_CONFIRM_WINDOW_S = 20.0
+#
+# Raised from 20.0 to cover ADR 0022's watch window: the loop now keeps
+# looking for up to VISION_WATCH_EXTENDED_S before it decides, so the
+# budget that decision has to fit inside had to grow with it. The margin
+# above the watch length is the camera-open retries and the final
+# inference call, which tests/test_config.py checks explicitly.
+EVENT_VIDEO_CONFIRM_WINDOW_S = 60.0
 
 # How long to keep recording after the actuator sequence completes on a
 # confirmed event - the retreat tail, ADR 0020 Decision B4's "30-60s from
