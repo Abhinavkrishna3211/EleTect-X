@@ -296,6 +296,17 @@ def _fire(probability=0.9, sta_lta_ratio=6.0, schema_version=1, call_log=None, *
     one means a cold store: no repeats, no learned values, and therefore
     tier 1. A test that needs history across events constructs one store and
     passes it to several _fire() calls.
+
+    One consequence of ADR 0022 Decision B worth stating, because it is not
+    obvious and it is what keeps every actuation test in this file passing
+    unchanged: the default detect_vision finds nothing, so a default event
+    only fires at all because the default is_night says night, and night
+    with no illuminator is *blindness* - vision could not have seen the
+    animal, so the gate stands down and the seismic decision carries the
+    event. Override is_night to daylight and the same default event is
+    correctly held instead. Tests that want the confirmed path - which is
+    the path the field will actually fire on - pass a detector that returns
+    ELEPHANT.
     """
     log = call_log if call_log is not None else []
     kwargs = {
@@ -308,6 +319,15 @@ def _fire(probability=0.9, sta_lta_ratio=6.0, schema_version=1, call_log=None, *
         "save_frames": fakes.pop("save_frames", _FakeSaveFrames(call_log=log)),
         "experience": fakes.pop("experience", ExperienceStore(IN_MEMORY_PATH)),
         "bandit_params": fakes.pop("bandit_params", DETERMINISTIC_PARAMS),
+        # ADR 0022's watch, collapsed to its single-poll floor. Every test in
+        # this file that is not *about* the watch wants exactly one detection
+        # pass and no wall-clock sleeping, which is what a zero-length window
+        # gives (the watch always runs one poll). Popped rather than passed
+        # below so the watch-specific tests can override them like any other
+        # injected default.
+        "vision_watch_base_s": fakes.pop("vision_watch_base_s", 0.0),
+        "vision_watch_extended_s": fakes.pop("vision_watch_extended_s", 0.0),
+        "vision_watch_poll_interval_s": fakes.pop("vision_watch_poll_interval_s", 0.0),
     }
     kwargs.update(fakes)
     outcome = reflex_loop.handle_footfall_event(
@@ -610,7 +630,7 @@ def test_a_qualifying_vision_match_raises_the_fused_probability():
     or fuse() a second time (ENGINEERING_CONVENTIONS.md 4).
     """
     detection = Detection(
-        label=reflex_loop.VISION_TARGET_LABEL,
+        label=reflex_loop.VISION_TARGET_LABELS[0],
         confidence=0.93,
         x=10.0,
         y=10.0,
@@ -631,7 +651,7 @@ def test_a_qualifying_vision_match_raises_the_fused_probability():
 def test_a_non_target_label_detection_still_contributes_nothing():
     """A Boar detection is real signal, but not for the VISION fusion modality.
 
-    ETX-V is a two-class detector; only VISION_TARGET_LABEL ("Elephant")
+    ETX-V is a two-class detector; only a VISION_TARGET_LABELS class ("Elephant")
     counts as elephant-presence evidence here (module docstring, and
     reflex_loop._vision_check()'s own docstring) - a Boar match must not
     move the fused probability at all, the same as finding nothing.
@@ -804,6 +824,13 @@ def test_daylight_vision_check_suppresses_pulse_ir_but_still_fires_horn_and_led(
     pulse_ir() would spend MOSFET duty budget on light no pixel can see. The
     tier still escalated and still owes a horn+LED response - only the IR
     drops out, and the drop is logged, not silent.
+
+    Vision confirms here because after ADR 0022 Decision B that is the only
+    way a *daylight* event reaches the actuators at all: in daylight the
+    camera can see, so an unconfirmed event is held rather than fired. The
+    two gates are independent and this test is about the second one - what
+    an alerting daylight event does with its illuminator - so it has to get
+    past the first.
     """
     experience = ExperienceStore(IN_MEMORY_PATH)
     _escalate_to_tier_2(experience)
@@ -811,7 +838,11 @@ def test_daylight_vision_check_suppresses_pulse_ir_but_still_fires_horn_and_led(
     log: list = []
     with caplog.at_level("INFO"):
         outcome, kwargs, log = _fire(
-            0.9, experience=experience, call_log=log, is_night=lambda frames: False
+            0.9,
+            experience=experience,
+            call_log=log,
+            is_night=lambda frames: False,
+            detect_vision=_FakeVisionDetect([ELEPHANT]),
         )
 
     assert outcome.action.tier is Tier.TIER_2
@@ -909,14 +940,25 @@ def test_is_night_is_handed_the_pre_decision_vision_check_frames():
 
 
 def test_tier_1_never_consults_the_night_gate():
-    """Tier 1 fires no IR by config, so is_night() is irrelevant and uncalled."""
+    """Tier 1 fires no IR by config, so is_night() is irrelevant and uncalled.
+
+    Narrowed by ADR 0022: the night answer now has a second consumer, the
+    blindness check that decides whether an *unconfirmed* event may fire on
+    seismic alone. So the claim this test makes is no longer "is_night() is
+    never called below tier 2" in general - it is that a confirmed event,
+    which is the one the field fires on, short-circuits that check and
+    leaves the pulse_ir gate as the only caller, which tier 1 never reaches.
+    The unconfirmed case is covered by the suppression tests instead.
+    """
     calls: list = []
 
     def _tracking(frames):
         calls.append(frames)
         return True
 
-    outcome, kwargs, _ = _fire(0.9, is_night=_tracking)
+    outcome, kwargs, _ = _fire(
+        0.9, is_night=_tracking, detect_vision=_FakeVisionDetect([ELEPHANT])
+    )
 
     assert outcome.action is TIER_1
     assert outcome.ir_ack is None
@@ -1635,6 +1677,9 @@ def test_the_retreat_tail_replaces_the_post_fire_tail_when_video_is_recording():
                 safe_mode=False,
                 capture_post_fire_tail_s=0.001,
                 video_retreat_tail_s=0.002,
+                vision_watch_base_s=0.0,
+                vision_watch_extended_s=0.0,
+                vision_watch_poll_interval_s=0.0,
                 drive_horn=_FakeDriveHorn(),
                 drive_led=_FakeDriveLed(),
                 pulse_ir=_FakePulseIr(),
@@ -1703,3 +1748,656 @@ def test_no_event_video_leaves_the_loop_exactly_as_it_was():
 
     assert outcome.video_path is None
     assert not any(entry.startswith("video.") for entry in log)
+
+
+# ---------------------------------------------------------------------------
+# ADR 0022 - the bounded vision watch window and the vision-gated deterrent
+# ---------------------------------------------------------------------------
+
+
+class _ScriptedVisionDetect:
+    """A detector whose answer changes from one poll to the next.
+
+    _FakeVisionDetect returns the same thing forever, which cannot express
+    the case ADR 0022 exists for: the frame is empty when the geophone
+    fires and the animal walks into it several seconds later. The script is
+    indexed by call, and its last entry repeats once exhausted so a test
+    only has to describe the interesting prefix.
+
+    Args:
+        script: Per-call results. A list of Detections is returned; an
+            Exception instance is raised instead.
+    """
+
+    def __init__(self, script: list):
+        self._script = list(script)
+        self.calls = 0
+
+    def __call__(self, images):
+        self.calls += 1
+        item = self._script[min(self.calls - 1, len(self._script) - 1)]
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+class _Clock:
+    """A monotonic clock that only moves when the code under test sleeps.
+
+    Lets a 45-second watch window run to completion in microseconds and
+    makes the pacing assertions exact rather than timing-dependent. Polls
+    themselves take zero time, which is the useful simplification: any
+    elapsed time in a watch is then attributable to the sleeps.
+    """
+
+    def __init__(self):
+        self.t = 0.0
+        self.sleeps: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.t
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.t += seconds
+
+
+def _watch(camera, detect, watch_s, **kw):
+    """Run _watch_for_vision on a fake clock; returns (watch, clock)."""
+    clock = _Clock()
+    result = reflex_loop._watch_for_vision(
+        camera,
+        detect,
+        trigger_monotonic=0.0,
+        watch_s=watch_s,
+        poll_interval_s=kw.pop("poll_interval_s", 1.0),
+        monotonic=clock.monotonic,
+        sleep=clock.sleep,
+        **kw,
+    )
+    return result, clock
+
+
+# --- _watch_length_s --------------------------------------------------------
+
+
+def test_an_ordinary_trigger_gets_only_the_base_window():
+    """No repeat and no standalone seismic alert is the wind-and-cattle case.
+
+    It is also the overwhelming majority of triggers, so it is the one that
+    has to stay cheap - a long camera window on every geophone twitch is
+    exactly the always-on power draw ADR 0020 refused.
+    """
+    assert reflex_loop._watch_length_s(
+        repeat_count=0, seismic_alone_alerts=False, base_s=8.0, extended_s=45.0
+    ) == 8.0
+
+
+def test_a_repeat_inside_the_habituation_window_earns_the_long_look():
+    """A repeat is this device's only signal that the event is still happening.
+
+    It is the same evidence escalation_floor() already trusts to raise the
+    deterrence tier, so trusting it to buy more camera time is consistent
+    rather than a new assumption.
+    """
+    assert reflex_loop._watch_length_s(
+        repeat_count=1, seismic_alone_alerts=False, base_s=8.0, extended_s=45.0
+    ) == 45.0
+
+
+def test_seismic_that_would_alert_alone_earns_the_long_look():
+    """If the event is firing regardless, the only question left is when.
+
+    Firing with the animal in frame is both better deterrence and the only
+    way the event produces footage, so this trigger buys the long window.
+    """
+    assert reflex_loop._watch_length_s(
+        repeat_count=0, seismic_alone_alerts=True, base_s=8.0, extended_s=45.0
+    ) == 45.0
+
+
+def test_the_extended_window_can_never_be_shorter_than_the_base():
+    """A misconfiguration must not make a stronger trigger look for less time.
+
+    Nothing validates these two constants against each other at import, so
+    the guard lives here rather than in a comment nobody executes.
+    """
+    assert reflex_loop._watch_length_s(
+        repeat_count=5, seismic_alone_alerts=True, base_s=8.0, extended_s=2.0
+    ) == 8.0
+
+
+# --- _watch_for_vision ------------------------------------------------------
+
+
+def test_a_zero_length_window_runs_exactly_one_poll():
+    """watch_s=0.0 must reproduce the single burst this replaced, exactly.
+
+    This is the escape hatch promised in services/config.py - set
+    VISION_WATCH_BASE_S to 0.0 and the loop behaves as it did before ADR
+    0022 - and it is what keeps most of this file's tests running in
+    milliseconds. If the watch ever skipped its poll instead, vision would
+    silently stop running at all.
+    """
+    camera = _FakeCamera()
+    detect = _FakeVisionDetect()
+
+    watch, clock = _watch(camera, detect, 0.0)
+
+    assert watch.polls == 1
+    assert detect.calls == [detect.calls[0]]
+    assert clock.sleeps == []
+    assert watch.confirmed_on_poll is None
+
+
+def test_the_watch_keeps_polling_until_the_window_closes():
+    """An empty frame is not an answer - it is the question restated.
+
+    The geophone reaches 140m and the camera does not, so at the trigger the
+    animal is usually outside the frame. Polling on is the entire point.
+    """
+    camera = _FakeCamera()
+    detect = _FakeVisionDetect()
+
+    watch, clock = _watch(camera, detect, 5.0, poll_interval_s=1.0)
+
+    assert watch.polls == 6
+    assert clock.sleeps == [1.0] * 5
+    assert watch.elapsed_s == pytest.approx(5.0)
+
+
+def test_a_confirmation_on_a_later_poll_ends_the_watch_immediately():
+    """The moment the animal is in frame is the moment to fire.
+
+    Sleeping out the rest of a 45s window after confirming would put the
+    horn off well after the elephant had walked past, which is the failure
+    this whole feature exists to prevent.
+    """
+    camera = _FakeCamera()
+    detect = _ScriptedVisionDetect([[], [], [ELEPHANT], []])
+
+    watch, clock = _watch(camera, detect, 45.0, poll_interval_s=1.0)
+
+    assert watch.polls == 3
+    assert watch.confirmed_on_poll == 3
+    assert watch.check.confirmed is True
+    assert watch.elapsed_s == pytest.approx(2.0)
+    assert len(clock.sleeps) == 2
+
+
+def test_a_boar_neither_confirms_nor_ends_the_watch():
+    """Boar is real signal for a different question, and must not stop the look.
+
+    Under the default configuration a boar cannot fire the horn; if it also
+    ended the watch, an elephant arriving behind it would never be seen.
+    """
+    camera = _FakeCamera()
+    detect = _ScriptedVisionDetect([[BOAR], [BOAR], [ELEPHANT]])
+
+    watch, _ = _watch(camera, detect, 45.0, poll_interval_s=1.0)
+
+    assert watch.polls == 3
+    assert watch.confirmed_on_poll == 3
+    assert "Boar" in watch.species
+    assert "Elephant" in watch.species
+
+
+def test_the_watch_keeps_the_first_burst_and_the_confirming_burst_only():
+    """Two bursts are used; holding the rest would be hundreds of megabytes.
+
+    A 45s watch at one poll per second is over a hundred 720p frames. The
+    first burst dates the event and feeds the night decision, the confirming
+    burst is the evidence - nothing in between is ever read.
+    """
+    camera = _FakeCamera(frame_count=3)
+    detect = _ScriptedVisionDetect([[], [], [ELEPHANT]])
+
+    watch, _ = _watch(camera, detect, 45.0)
+
+    assert len(watch.frames) == 6
+    # Identity, not value: two bursts of image=None frames can compare equal
+    # if the clock did not tick between them, and the claim here is that both
+    # bursts are present, not that they differ.
+    assert len({id(f) for f in watch.frames}) == 6
+
+
+def test_a_first_poll_confirmation_does_not_duplicate_its_own_frames():
+    """The confirming burst *is* the first burst here; it must be kept once.
+
+    This is the case that hid a real defect: the frames are compared to
+    decide what to keep, and a value comparison on a Frame whose .image is
+    a numpy array raises rather than returning a bool.
+    """
+    camera = _FakeCamera(frame_count=3)
+    detect = _FakeVisionDetect([ELEPHANT])
+
+    watch, _ = _watch(camera, detect, 45.0)
+
+    assert watch.polls == 1
+    assert len(watch.frames) == 3
+
+
+def test_frames_are_compared_by_identity_not_equality():
+    """A Frame carrying a real ndarray must not be value-compared.
+
+    perception.camera.Frame is a frozen dataclass whose .image is a numpy
+    array in production, so `f in frames` runs an elementwise compare and
+    then calls bool() on the result - a ValueError raised at the exact
+    instant vision confirms an elephant on a later poll. A fake image that
+    raises on __eq__ reproduces that without depending on numpy.
+    """
+
+    class _Unequal:
+        def __eq__(self, other):
+            raise AssertionError("Frame.image must never be compared by value")
+
+        __hash__ = None
+
+    class _UnequalCamera(_FakeCamera):
+        def capture_burst(self, count, interval_s):
+            self.call_log.append("camera.capture_burst")
+            return [Frame(image=_Unequal(), index=i, timestamp_s=0.0) for i in range(3)]
+
+    detect = _ScriptedVisionDetect([[], [ELEPHANT]])
+
+    watch, _ = _watch(_UnequalCamera(), detect, 45.0)
+
+    assert watch.confirmed_on_poll == 2
+    assert len(watch.frames) == 6
+
+
+def test_an_unconfirmed_watch_returns_only_the_first_burst():
+    """Nothing was confirmed, so there is no second burst worth carrying."""
+    camera = _FakeCamera(frame_count=3)
+    detect = _FakeVisionDetect()
+
+    watch, _ = _watch(camera, detect, 3.0)
+
+    assert watch.confirmed_on_poll is None
+    assert len(watch.frames) == 3
+
+
+def test_an_available_reading_beats_the_unavailable_one_it_started_with():
+    """"Looked and saw nothing" is evidence; "could not look" is an outage.
+
+    The distinction is what ADR 0022 Decision B's whole safety argument
+    turns on, so the watch must not report a working camera as a failed one
+    just because the last poll happened to come back empty.
+    """
+    camera = _FakeCamera()
+    detect = _FakeVisionDetect()
+
+    watch, _ = _watch(camera, detect, 2.0)
+
+    assert watch.reading_available is True
+    assert watch.check.confirmed is False
+
+
+def test_the_watch_abandons_itself_after_repeated_empty_polls():
+    """A camera that has stopped delivering must not hold the actuators.
+
+    Waiting out a 45s window on a dead camera would delay the deterrent for
+    no possible gain - there is nothing coming.
+    """
+    camera = _FakeCamera(frame_count=0)
+    detect = _FakeVisionDetect()
+
+    watch, clock = _watch(camera, detect, 45.0, max_empty_polls=3)
+
+    assert watch.polls == 3
+    assert watch.reading_available is False
+    assert clock.t < 45.0
+
+
+def test_one_empty_poll_does_not_end_the_watch():
+    """A single dropped burst is a hiccup, not an outage."""
+    camera = _FakeCamera(frame_count=0)
+    detect = _FakeVisionDetect()
+
+    watch, _ = _watch(camera, detect, 45.0, max_empty_polls=5)
+
+    assert watch.polls == 5
+
+
+def test_a_detector_failure_inside_the_watch_never_raises():
+    """A perception failure must degrade the event, never crash it."""
+    camera = _FakeCamera()
+    detect = _ScriptedVisionDetect([DetectionError("inference server down")])
+
+    watch, _ = _watch(camera, detect, 2.0)
+
+    assert watch.reading_available is False
+    assert watch.check.confirmed is False
+
+
+def test_the_watch_never_sleeps_past_its_own_deadline():
+    """The window is a budget the loop must not overrun.
+
+    An overrun here is an actuator delay in the field, and the whole
+    justification for delaying actuators at all is that the delay is
+    bounded by ADR 0008's worst-case lead time.
+    """
+    camera = _FakeCamera()
+    detect = _FakeVisionDetect()
+
+    _, clock = _watch(camera, detect, 2.5, poll_interval_s=1.0)
+
+    assert clock.t <= 2.5
+    assert sum(clock.sleeps) == pytest.approx(2.5)
+
+
+# --- _vision_could_see ------------------------------------------------------
+
+
+def _watch_of(*, available: bool, frames: int, species=()):
+    """Build a VisionWatch directly, for the blindness-gate tests."""
+    reading = reflex_loop.ModalityReading(Modality.VISION, 0.0, available=available)
+    return reflex_loop.VisionWatch(
+        check=reflex_loop.VisionCheck(reading, False, tuple(species)),
+        frames=tuple(Frame(image=None, index=i, timestamp_s=0.0) for i in range(frames)),
+        polls=1,
+        elapsed_s=0.0,
+        confirmed_on_poll=None,
+        species=tuple(species),
+    )
+
+
+def test_a_failed_camera_or_detector_counts_as_blind():
+    """available=False is an outage, and an outage is not an absence.
+
+    Nothing on this board supervises the inference server, so a dead
+    detector is a real and symptomless failure. Reading it as "no elephant
+    there" would turn a silent outage into a silent loss of deterrence.
+    """
+    assert reflex_loop._vision_could_see(
+        _watch_of(available=False, frames=3), lambda: False
+    ) is False
+
+
+def test_no_frames_at_all_counts_as_blind():
+    """The camera never opened; there is nothing to have seen an elephant in."""
+    assert reflex_loop._vision_could_see(
+        _watch_of(available=True, frames=0), lambda: False
+    ) is False
+
+
+def test_night_without_illumination_counts_as_blind():
+    """The single most important case, and the easiest one to get wrong.
+
+    At night the camera works and returns dark frames, so vision reports
+    "I looked, nothing there" about an elephant it physically cannot see.
+    pulse_ir() fires only for tiers 2 and 3, after decide() has already run,
+    so the illuminator is off during every night watch. Read as absence
+    rather than blindness, a confirmation-gated deterrent would go silent
+    from dusk to dawn - which is when almost all raiding happens.
+    """
+    assert reflex_loop._vision_could_see(
+        _watch_of(available=True, frames=3), lambda: True
+    ) is False
+
+
+def test_an_unmeasurable_scene_counts_as_blind():
+    """frames_are_night() returning None resolves toward keeping the horn live.
+
+    The conservative direction differs between the two consumers of this
+    answer, deliberately: the IR gate suppresses the pulse rather than waste
+    it, and this gate assumes blindness rather than go quiet.
+    """
+    assert reflex_loop._vision_could_see(
+        _watch_of(available=True, frames=3), lambda: None
+    ) is False
+
+
+def test_a_raising_night_check_counts_as_blind():
+    """A bug in the night heuristic must not silence the deterrent."""
+
+    def _boom():
+        raise RuntimeError("saturation math blew up")
+
+    assert reflex_loop._vision_could_see(_watch_of(available=True, frames=3), _boom) is False
+
+
+def test_a_lit_daylight_scene_is_the_one_case_vision_could_see():
+    """Camera worked, detector worked, scene was classifiable - and it saw nothing.
+
+    This is the only combination that justifies holding the horn.
+    """
+    assert reflex_loop._vision_could_see(
+        _watch_of(available=True, frames=3), lambda: False
+    ) is True
+
+
+def test_illumination_makes_a_night_scene_visible_again():
+    """The seam the proactive-IR work lands on, asserted so it cannot rot."""
+    assert reflex_loop._vision_could_see(
+        _watch_of(available=True, frames=3), lambda: True, illuminated=True
+    ) is True
+
+
+# --- _worth_filming ---------------------------------------------------------
+
+
+def test_a_target_species_is_always_worth_filming():
+    """Whatever else is configured, the animal that fires the horn is filmed."""
+    assert reflex_loop._worth_filming(_watch_of(available=True, frames=3, species=["Elephant"]))
+
+
+def test_a_video_only_species_is_worth_filming_without_being_a_target(monkeypatch):
+    """"Record boar, deter elephants" has to be a config change, not a code one.
+
+    A boar event never confirms and never alerts, so the no-actuation exit
+    is the only place its footage still exists. If the keep-gate asked only
+    about confirmation, the file would be discarded exactly there.
+    """
+    monkeypatch.setattr(reflex_loop, "VISION_VIDEO_LABELS", ("Elephant", "Boar"))
+
+    assert reflex_loop._worth_filming(_watch_of(available=True, frames=3, species=["Boar"]))
+
+
+def test_a_boar_is_not_worth_filming_under_the_shipped_configuration():
+    """The default is elephant-only, for both deterrence and disk."""
+    assert reflex_loop.VISION_VIDEO_LABELS == ("Elephant",)
+    assert not reflex_loop._worth_filming(_watch_of(available=True, frames=3, species=["Boar"]))
+
+
+def test_an_empty_scene_is_not_worth_filming():
+    """The common case, and the one that keeps the card from filling up."""
+    assert not reflex_loop._worth_filming(_watch_of(available=True, frames=3))
+
+
+# --- handler-level ----------------------------------------------------------
+
+
+def test_an_elephant_found_on_a_later_poll_still_fires_the_deterrent():
+    """The end-to-end case ADR 0022 was written for.
+
+    The frame is empty when the geophone fires and the animal walks into it
+    a few polls later. Before the watch, this event decided on seismic alone
+    and the camera's "no elephant" was an answer about an empty frame.
+    """
+    detect = _ScriptedVisionDetect([[], [], [ELEPHANT]])
+
+    outcome, kwargs, _ = _fire(
+        0.9,
+        detect_vision=detect,
+        vision_watch_base_s=0.05,
+        vision_watch_extended_s=0.05,
+        vision_watch_poll_interval_s=0.0,
+    )
+
+    assert outcome.vision_confirmed is True
+    assert outcome.vision_polls >= 3
+    assert kwargs["drive_horn"].calls != []
+
+
+def test_a_repeat_trigger_is_granted_the_extended_window():
+    """The handler has to pass repeat_count into the length decision.
+
+    Asserted through the outcome rather than by patching, because the wiring
+    between record_trigger() and _watch_length_s() is the part that breaks.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    first, _, _ = _fire(0.05, sta_lta_ratio=3.0, experience=experience)
+    assert first.vision_watch_s == 0.0
+
+    second, _, _ = _fire(
+        0.05,
+        sta_lta_ratio=3.0,
+        experience=experience,
+        detect_vision=_FakeVisionDetect([ELEPHANT]),
+        vision_watch_base_s=0.0,
+        vision_watch_extended_s=0.02,
+        vision_watch_poll_interval_s=0.0,
+    )
+
+    assert second.repeat_count == 1
+    assert second.vision_watch_s == 0.02
+    experience.close()
+
+
+def test_safe_mode_does_no_watching_at_all():
+    """SAFE_MODE's contract is that the camera never runs, watch or no watch."""
+    camera = _FakeCamera()
+    detect = _FakeVisionDetect()
+
+    outcome = reflex_loop.handle_footfall_event(
+        1,
+        0.9,
+        sta_lta_ratio=6.0,
+        feature_vector=[0.0] * 8,
+        safe_mode=True,
+        capture_post_fire_tail_s=0.0,
+        video_retreat_tail_s=0.0,
+        vision_watch_base_s=45.0,
+        vision_watch_extended_s=45.0,
+        camera=camera,
+        detect_vision=detect,
+        drive_horn=_FakeDriveHorn(),
+        drive_led=_FakeDriveLed(),
+        pulse_ir=_FakePulseIr(),
+        is_night=lambda frames: True,
+        save_frames=_FakeSaveFrames(),
+        experience=ExperienceStore(IN_MEMORY_PATH),
+        bandit_params=DETERMINISTIC_PARAMS,
+    )
+
+    assert outcome.vision_watch_s == 0.0
+    assert detect.calls == []
+    assert camera.call_log == []
+
+
+def test_a_daylight_event_that_saw_nothing_holds_the_deterrent(caplog):
+    """ADR 0022 Decision B, in the one situation where it should engage.
+
+    The seismic evidence cleared the threshold on its own, the camera looked
+    in good light across the whole window, and there was no elephant. Firing
+    here spends the horn on an animal that is either not there or still deep
+    in the forest - and cognition/bandit.py's habituation model says that is
+    exactly what teaches an elephant to ignore it.
+    """
+    with caplog.at_level("INFO"):
+        outcome, kwargs, _ = _fire(0.9, is_night=lambda frames: False)
+
+    assert outcome.decision.alert is True
+    assert outcome.suppressed_by_vision is True
+    assert outcome.action is None
+    assert kwargs["drive_horn"].calls == []
+    assert kwargs["drive_led"].calls == []
+    assert any("deterrent held" in r.message for r in caplog.records)
+
+
+def test_a_blind_event_falls_back_to_the_seismic_decision_and_fires():
+    """The safety valve. A dead camera must not become a dead deterrent."""
+    outcome, kwargs, _ = _fire(
+        0.9, camera=_FakeCamera(fail_open=True), is_night=lambda frames: False
+    )
+
+    assert outcome.suppressed_by_vision is False
+    assert kwargs["drive_horn"].calls != []
+
+
+def test_a_night_event_still_fires_on_seismic_alone():
+    """Today this is every night event, and it is why the gate is survivable.
+
+    The illuminator does not fire until after decide(), so the watch runs in
+    the dark on every nocturnal trigger - which is nearly all of them. Until
+    proactive illumination is decided, night falls back to seismic.
+    """
+    outcome, kwargs, _ = _fire(0.9, is_night=lambda frames: True)
+
+    assert outcome.suppressed_by_vision is False
+    assert kwargs["drive_horn"].calls != []
+
+
+def test_the_confirmation_requirement_can_be_turned_off():
+    """The pre-ADR-0022 behaviour has to remain one flag away.
+
+    If the gate ever proves wrong in the field, reverting it must not need a
+    code change and a reflash.
+    """
+    outcome, kwargs, _ = _fire(
+        0.9, is_night=lambda frames: False, require_vision_confirmation=False
+    )
+
+    assert outcome.suppressed_by_vision is False
+    assert kwargs["drive_horn"].calls != []
+
+
+def test_a_held_event_still_records_its_trigger_for_habituation():
+    """Holding the horn must not erase the encounter.
+
+    The trigger is recorded before the watch, so a suppressed event still
+    counts toward the repeat that escalates the next one. Otherwise an
+    animal circling a node in daylight would reset the node's memory of it
+    on every pass.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    held, _, _ = _fire(0.9, experience=experience, is_night=lambda frames: False)
+    assert held.suppressed_by_vision is True
+
+    later, _, _ = _fire(
+        0.9,
+        experience=experience,
+        detect_vision=_FakeVisionDetect([ELEPHANT]),
+        is_night=lambda frames: False,
+    )
+
+    assert later.repeat_count == 1
+    assert later.action.tier is Tier.TIER_2
+    experience.close()
+
+
+def test_a_boar_only_event_keeps_its_video_when_boar_is_configured(monkeypatch):
+    """The whole point of the flag, asserted at the exit the file lives at.
+
+    A boar on a quiet trigger never confirms and never alerts, so it leaves
+    through the no-actuation exit. That is the only place its recording can
+    be kept, and under the default configuration it correctly is not.
+    """
+    monkeypatch.setattr(reflex_loop, "VISION_VIDEO_LABELS", ("Elephant", "Boar"))
+    video = _FakeEventVideo()
+
+    outcome, _, _ = _fire(
+        0.05,
+        sta_lta_ratio=3.0,
+        detect_vision=_FakeVisionDetect([BOAR]),
+        event_video=video,
+    )
+
+    assert outcome.decision.alert is False
+    assert video.committed != []
+
+
+def test_a_boar_only_event_discards_its_video_by_default():
+    """Elephant-only is what ships, and disk is finite."""
+    video = _FakeEventVideo()
+
+    outcome, _, _ = _fire(
+        0.05,
+        sta_lta_ratio=3.0,
+        detect_vision=_FakeVisionDetect([BOAR]),
+        event_video=video,
+    )
+
+    assert outcome.decision.alert is False
+    assert video.committed == []
