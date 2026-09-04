@@ -3226,6 +3226,40 @@ a lighter nudge (no intermediate step exists between `low` and `medium` on this 
 colour augmentation with more real IR data first, rather than alone against a still-daylight-majority
 corpus — noted as a possible follow-up, not run this pass.
 
+## 4 Sept — Trial 3, `spatial-augmentation` one level up (`low` → `medium`), a larger regression than Trial 2
+
+Step 3's second-ranked lever: addresses scale/crop/framing variance rather than the IR gap
+specifically, so the plan's own stated prior for it was lower than Trial 2's. Same config as the
+baseline rerun otherwise, only `spatial-augmentation` changed to `medium` (customParameters
+confirmed from the job log: `..., 'spatial-augmentation': 'medium', 'color-space-augmentation':
+'low', ...`). Job chain: features 53456390 (0.3 min) → training 53456394 (76.2 min) → held-out test
+at the threshold left over from Trial 2's sweep (0.5) → full 5-point threshold sweep, jobs
+53457635…53457866 (4.4–4.8 min each), all `successful=True`. Same test split size as every other
+4 Sept run (1,503/844/974).
+
+**Full sweep, this trial:**
+
+| Threshold | Boar recall | Boar precision | Elephant recall | Elephant precision | Background FP rate |
+|---|---|---|---|---|---|
+| 0.05 | 0.818 | 0.909 | 0.888 | 0.896 | 0.092 |
+| 0.10 | 0.790 | 0.947 | 0.871 | 0.931 | 0.064 |
+| 0.20 | 0.761 | 0.971 | 0.852 | 0.960 | 0.033 |
+| 0.30 | 0.731 | 0.983 | 0.836 | 0.977 | 0.022 |
+| 0.50 | 0.635 | 0.988 | 0.770 | 0.992 | 0.007 |
+
+**At threshold 0.05, against the deployed checkpoint's 0.852 / 0.906 / 0.166: Boar recall −3.4 pt
+(0.818), Elephant recall −1.8 pt (0.888), background FP rate −7.4 pt and better (0.092).** A larger
+regression on Boar than Trial 2's, again well beyond the noise floor. **Trial 3 fails and is not
+adopted.** Also notable: "perfect F1" (predictions that exactly match ground truth, no partial
+credit) collapsed hard on Boar — 20.5% at threshold 0.05 here versus 47.4% for the same checkpoint
+before any augmentation change — pointing at a localization-quality cost, not just a confidence-
+calibration shift, from pushing spatial augmentation up at this sizing. Two levers now tried, two
+regressions, both trading recall for a lower false-positive rate the adoption bar does not credit.
+Trial 4 (`freeze-backbone: true`) is the plan's remaining named lever, run next with the low prior
+the plan itself states — freezing the backbone removes exactly the adaptation a heavily
+domain-shifted target needs — but it is cheap to falsify (fewer trainable parameters, faster to
+train) so worth the one remaining job.
+
 <!-- LIVE_SYNC_PLACEHOLDER -->
 
 ## Reproducing

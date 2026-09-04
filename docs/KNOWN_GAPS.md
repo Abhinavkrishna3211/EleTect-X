@@ -884,6 +884,15 @@ criteria — see each entry's status.
     model away from the still-daylight-majority corpus faster than it helps it generalize to the
     IR/night minority at this corpus's current proportions. Full sweep table in
     `ml/vision/README.md`'s "Trial 2" entry. Trial 3 (spatial-augmentation) is next.
+    **4 Sept update, continued a fifth time — Step 3 Trial 3 (`spatial-augmentation` one level up,
+    `low`→`medium`) is a larger regression than Trial 2.** At threshold 0.05: Boar recall 0.818
+    (−3.4 pt), Elephant recall 0.888 (−1.8 pt), background FP rate 0.092 (−7.4 pt, better) — again
+    well beyond the noise floor and again a real recall loss the FP improvement does not offset.
+    **Not adopted.** "Perfect F1" on Boar collapsed from 47.4% (deployed checkpoint) to 20.5% here,
+    pointing at a localization-quality cost from the augmentation change, not just a confidence
+    shift. Two of Step 3's three named levers have now regressed both classes. Full sweep table in
+    `ml/vision/README.md`'s "Trial 3" entry. Trial 4 (`freeze-backbone: true`) is next — the plan's
+    own stated low-prior, cheap-to-falsify lever.
 - **A deployment-day config-delivery gap affects every `NODE_`-prefixed site attribute, not just the
   new one (3 Sept).** Checked what actually setting a per-node commissioning constant requires on
   the real board: `NODE_HOUSEHOLD_PROXIMITY` (existing) and `NODE_DETERRENCE_SCOPE` (new, above) are
