@@ -863,6 +863,17 @@ criteria — see each entry's status.
     licence-clearance note above: real, clean data, still a small supplement at n=15, not folded into
     the training corpus by this pass — that conversion step (frame extraction, mask-to-box, a
     leakage-safe sampling policy) is separate work not yet started.
+    **4 Sept update, continued a third time — Step 2's baseline rerun and noise-floor check are
+    done; no lever has been tried yet.** Same deployed config rerun unchanged (`no_attn_relu`,
+    `medium`, `--skip-impulse`), full threshold sweep: at threshold 0.05, Boar recall 0.852
+    (exact match to deployed), Elephant recall 0.905 (−0.001), background FP rate 0.160 (−0.006,
+    better). The test split came back identical in size to the deployed run's own (1,503 Boar / 844
+    Elephant / 974 Background) despite the 121 orphan `uv29aug` samples flagged 29 Aug as unresolved
+    — the corpus has not drifted between the two runs. Noise floor for judging any candidate lever
+    against the deployed checkpoint: call it ≤1 point on any of the three numbers, on all three at
+    once. Full sweep table and job ids are in `ml/vision/README.md`'s "4 Sept" entry. Nothing has
+    beaten the deployed checkpoint yet; Step 3's untried levers (color-space-augmentation,
+    spatial-augmentation, freeze-backbone) have not been run this pass.
 - **A deployment-day config-delivery gap affects every `NODE_`-prefixed site attribute, not just the
   new one (3 Sept).** Checked what actually setting a per-node commissioning constant requires on
   the real board: `NODE_HOUSEHOLD_PROXIMITY` (existing) and `NODE_DETERRENCE_SCOPE` (new, above) are
