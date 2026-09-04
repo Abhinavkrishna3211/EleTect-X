@@ -236,7 +236,16 @@ def configure_dsp(project_id, api_key, dsp_id):
     print("  DSP block set to RGB")
 
 
-def select_model(project_id, api_key, family, yolo_variant=None, yolo_sizing="nano"):
+def select_model(
+    project_id,
+    api_key,
+    family,
+    yolo_variant=None,
+    yolo_sizing="nano",
+    freeze_backbone=None,
+    spatial_augmentation=None,
+    color_space_augmentation=None,
+):
     """Pick an object-detection candidate from the project's live transfer-learning-model list.
 
     Read from /transfer-learning-models rather than hardcoding, so a renamed variant
@@ -304,7 +313,40 @@ def select_model(project_id, api_key, family, yolo_variant=None, yolo_sizing="na
             raise ValueError(f"yolo_sizing must be one of {valid_sizings}, got {yolo_sizing!r}")
         params["sizing"] = yolo_sizing
         params["architecture-type"] = yolo_variant
+
+        # Freeze-backbone and the two augmentation-strength knobs (advanced section,
+        # untried before this session - see ml/vision/README.md's customParameters
+        # dump, confirmed live 4 Sep via GET /transfer-learning-models). Validated
+        # against this model's own live customParameters rather than a hardcoded
+        # tuple here, so a renamed or removed level fails loudly instead of
+        # training silently with a value Edge Impulse no longer recognizes.
+        param_defs = {p["param"]: p for p in choice["customParameters"]}
+        overrides = {
+            "freeze-backbone": freeze_backbone,
+            "spatial-augmentation": spatial_augmentation,
+            "color-space-augmentation": color_space_augmentation,
+        }
+        for key, value in overrides.items():
+            if value is None:
+                continue
+            definition = param_defs.get(key)
+            if definition is None:
+                raise RuntimeError(
+                    f"YOLO-Pro customParameters has no {key!r} - model definition may have changed"
+                )
+            valid = (
+                ("true", "false")
+                if definition["type"] == "flag"
+                else tuple(o["value"] for o in definition.get("selectOptions", []))
+            )
+            if value not in valid:
+                raise ValueError(f"--{key.replace('-', '_')} must be one of {valid}, got {value!r}")
+            params[key] = value
+
         label = f"yolo-pro-{yolo_sizing}-{yolo_variant}"
+        overridden = [f"{k}={v}" for k, v in overrides.items() if v is not None]
+        if overridden:
+            label += "-" + "-".join(overridden)
         print(f"  selected: {label} (org model {org_id}), customParameters={params}")
         return label, {"type": "transfer_organization", "organizationModelId": org_id, "enabled": True}, params
 
@@ -665,6 +707,36 @@ def main():
             "full 320x320 corpus - not a hyperparameter tuned for score, a memory-fit fix"
         ),
     )
+    ap.add_argument(
+        "--freeze-backbone",
+        default=None,
+        help=(
+            "override YOLO-Pro's 'freeze-backbone' customParameter (model default: "
+            "'false' - confirmed live 4 Sep). Not validated against a hardcoded choice "
+            "list here; select_model() checks it against the model's own live "
+            "customParameters so a renamed value fails loudly. Ignored outside "
+            "--family yolo-pro."
+        ),
+    )
+    ap.add_argument(
+        "--spatial-augmentation",
+        default=None,
+        help=(
+            "override YOLO-Pro's 'spatial-augmentation' customParameter (model "
+            "default: 'low', ladder none/low/medium/high per the live API - confirmed "
+            "4 Sep, never assume it stays that shape). Ignored outside --family yolo-pro."
+        ),
+    )
+    ap.add_argument(
+        "--color-space-augmentation",
+        default=None,
+        help=(
+            "override YOLO-Pro's 'color-space-augmentation' customParameter (model "
+            "default: 'low', ladder none/low/medium/high per the live API - confirmed "
+            "4 Sep). Targets the RGB-daylight -> grayscale-IR domain shift more "
+            "directly than spatial augmentation does. Ignored outside --family yolo-pro."
+        ),
+    )
     args = ap.parse_args()
     if args.family == "yolo-pro" and not args.yolo_variant:
         print("--family yolo-pro requires --yolo-variant", file=sys.stderr)
@@ -719,7 +791,14 @@ def main():
 
     print("\nConfiguring training...")
     label, visual_layer, custom_params = select_model(
-        project_id, api_key, args.family, yolo_variant=args.yolo_variant, yolo_sizing=args.yolo_sizing
+        project_id,
+        api_key,
+        args.family,
+        yolo_variant=args.yolo_variant,
+        yolo_sizing=args.yolo_sizing,
+        freeze_backbone=args.freeze_backbone,
+        spatial_augmentation=args.spatial_augmentation,
+        color_space_augmentation=args.color_space_augmentation,
     )
     params = training_params(visual_layer, custom_params, batch_size=args.batch_size)
     set_project_gpu(project_id, api_key, args.family == "yolo-pro")
