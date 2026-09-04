@@ -3260,6 +3260,48 @@ the plan itself states — freezing the backbone removes exactly the adaptation 
 domain-shifted target needs — but it is cheap to falsify (fewer trainable parameters, faster to
 train) so worth the one remaining job.
 
+## 4 Sept — Trial 4, `freeze-backbone: true`, the worst of the three trials, confirming the plan's own low prior
+
+Step 3's third and last named lever, run with the plan's own stated low expectation: with
+`use-pretrained-weights: true` on a heavily domain-shifted target, freezing the backbone removes
+exactly the adaptation the IR domain needs. Same config as the baseline rerun otherwise, only
+`freeze-backbone` changed to `true` (customParameters confirmed from the job log: `...,
+'freeze-backbone': 'true', 'architecture-type': 'no_attn_relu', 'spatial-augmentation': 'low',
+'color-space-augmentation': 'low', ...`). Job chain: features 53457988 (0.3 min) → training
+53457993 (**50.2 min — the fastest training run this session**, consistent with fewer trainable
+parameters) → held-out test at the threshold left over from Trial 3's sweep (0.5) → full 5-point
+threshold sweep, jobs 53459000…53459452 (4.1–4.8 min each), all `successful=True`. Same test split
+size as every other 4 Sept run (1,503/844/974).
+
+**Full sweep, this trial:**
+
+| Threshold | Boar recall | Boar precision | Elephant recall | Elephant precision | Background FP rate |
+|---|---|---|---|---|---|
+| 0.05 | 0.731 | 0.660 | 0.800 | 0.665 | 0.219 |
+| 0.10 | 0.673 | 0.801 | 0.722 | 0.807 | 0.112 |
+| 0.20 | 0.599 | 0.908 | 0.629 | 0.918 | 0.056 |
+| 0.30 | 0.545 | 0.953 | 0.545 | 0.961 | 0.031 |
+| 0.50 | 0.424 | 0.987 | 0.380 | 0.984 | 0.010 |
+
+**At threshold 0.05, against the deployed checkpoint's 0.852 / 0.906 / 0.166: Boar recall −12.1 pt
+(0.731), Elephant recall −10.6 pt (0.800), background FP rate +5.3 pt and worse (0.219).** This is
+the only trial this session to regress **all three numbers simultaneously** — the other two traded
+some recall for a lower FP rate; this one loses on every axis. Precision at threshold 0.05 also
+collapsed to 0.660/0.665 (versus 0.890+ on the two prior trials and 0.875 deployed), a much larger
+effect than either augmentation trial produced. **Trial 4 fails, decisively, and is not adopted.**
+This confirms the plan's own stated prior exactly: a frozen ImageNet-pretrained backbone cannot
+adapt its features toward this corpus's still-substantial night/IR content, and with only the head
+free to train, the model has meaningfully less capacity to fit either class at all — not a
+domain-shift-specific failure like the augmentation trials, a general capacity failure.
+
+**Step 3 is now closed: all three named levers (color-space-augmentation, spatial-augmentation,
+freeze-backbone) were tried, full-swept, and all three regressed the deployed checkpoint on at
+least one recall number by well more than the noise floor — two on both recall numbers, this one on
+every number.** Per Step 5 of the plan: no candidate clears the adoption bar, so **the deployed
+checkpoint (`no_attn_relu`, `medium`, threshold 0.05: Boar 0.852 / Elephant 0.906 / FP 0.166) stays
+exactly as found.** No export, no version snapshot, no on-device benchmark — the adoption gate is
+never reached because nothing qualified to be gated.
+
 <!-- LIVE_SYNC_PLACEHOLDER -->
 
 ## Reproducing
