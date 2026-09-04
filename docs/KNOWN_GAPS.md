@@ -893,6 +893,19 @@ criteria — see each entry's status.
     shift. Two of Step 3's three named levers have now regressed both classes. Full sweep table in
     `ml/vision/README.md`'s "Trial 3" entry. Trial 4 (`freeze-backbone: true`) is next — the plan's
     own stated low-prior, cheap-to-falsify lever.
+    **4 Sept update, continued a sixth time — Step 3 Trial 4 (`freeze-backbone: true`) fails
+    decisively, confirming the plan's own low prior, and Step 3 is now closed.** At threshold 0.05:
+    Boar recall 0.731 (−12.1 pt), Elephant recall 0.800 (−10.6 pt), background FP rate 0.219
+    (+5.3 pt, **worse**) — the only trial this session to regress all three numbers at once, unlike
+    the two augmentation trials which each traded recall for a lower FP rate. Precision also
+    collapsed (0.660/0.665 versus 0.875+ deployed). **Not adopted.** All three of Step 3's named
+    levers (color-space-augmentation, spatial-augmentation, freeze-backbone) have now been tried,
+    full-swept, and all three regressed the deployed checkpoint by well more than the noise floor.
+    **Per the plan's Step 5: no candidate clears the adoption bar, so the deployed checkpoint stays
+    exactly as found — Boar recall 0.852, Elephant recall 0.906, background FP rate 0.166 at
+    threshold 0.05, unchanged.** No export, version snapshot, or on-device benchmark was run; the
+    adoption gate was never reached because nothing qualified to be gated. Full sweep tables and
+    job ids for all three trials are in `ml/vision/README.md`'s "4 Sept" entries.
 - **A deployment-day config-delivery gap affects every `NODE_`-prefixed site attribute, not just the
   new one (3 Sept).** Checked what actually setting a per-node commissioning constant requires on
   the real board: `NODE_HOUSEHOLD_PROXIMITY` (existing) and `NODE_DETERRENCE_SCOPE` (new, above) are
