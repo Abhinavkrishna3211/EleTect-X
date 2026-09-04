@@ -2740,6 +2740,35 @@ id, not the learn block id, goes in the URL) and captured in a versioning snapsh
 `53262402` (`yolo-pro-medium-no_attn_relu-threshold0.05-final-20260830`). This is the checkpoint
 exported and benchmarked below.
 
+### Deployed-artifact provenance record (4 Sep 2026, before the Boar-gap close-out session)
+
+Recorded once, before any further training was started this session, so a candidate replacement
+can be proven better rather than assumed. `device/mpu/models/vision/` is gitignored
+(`.gitignore` — model binaries not versioned in-repo), so this table is the only durable record of
+which exact bytes are the live checkpoint:
+
+| File | `sha256` | Board copy verified |
+|---|---|---|
+| `etx_cpu_final_0830.eim` (32,445,248 bytes) | `d7c2f2435badfad9ceb543c09c3edb155c5522d46ae9f84e9d7662bf46558081` | Yes — `/home/arduino/etx_cpu_final_0830.eim` and the app's active `~/ArduinoApps/eletect-x/python/models/vision/etx_cpu_final_0830.eim` both match this hash exactly |
+| `etx_gpu_final_0830.eim` (30,928,096 bytes) | `64f01e67edbab168999ede5b5e30a6ca7f01a10f8569159728c0ef4035c08635` | Yes — `/home/arduino/etx_gpu_final_0830.eim` matches this hash exactly |
+
+Both files were additionally copied off-repo (outside the working tree) as a local safety-net
+backup before touching anything this session.
+
+A fresh Edge Impulse project version snapshot was also taken (job `53449631`, description
+`pre-boar-gap-closeout-safety-snapshot-20260904`, now version 3 in the project's version list).
+**Its `totalSamplesCount` reads 14,225 items — identical to version 2's count from 30 Aug.** The
+corpus has not drifted since the deployed checkpoint was trained; the 121 orphan `uv29aug` samples
+flagged earlier in this file were never folded in, but nothing else changed either. This directly
+answers the corpus-drift question the baseline rerun below was partly designed to catch.
+
+One correction to how "restore" was assumed to work going into this session: the live OpenAPI spec
+(`/api/{projectId}/jobs/restore`) states a version restore "can only [be] applied to a project
+**without data**, and will overwrite your impulse and all settings." A version snapshot is not a
+one-click undo on a live project with data present — restoring would first require emptying the
+project. This makes the off-repo `.eim` backup and hash table above the real safety net for this
+session, not the version snapshot; the snapshot is a secondary record.
+
 ### On-device benchmark, real hardware — Arduino UNO Q (Qualcomm QRB2210)
 
 Exported via `edge-impulse-linux-runner --force-target <target> --force-engine tflite
