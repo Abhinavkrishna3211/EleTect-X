@@ -430,6 +430,57 @@ Source: [training-graphs](https://docs.edgeimpulse.com/studio/projects/learning-
 12. **Data Explorer** — documented as image-classification/audio/regression only; not OD.
     Confirm whether a newer Studio build added OD support before relying on it in-project.
 
+## 4 Sept — the three questions Step 6 of the Boar-gap close-out plan flagged as genuinely
+unknown and load-bearing, closed out by fetching the live docs + OpenAPI spec directly
+
+The plan's own Step 6 named three unknowns as decisive for whether future retrain sessions can stop
+routing every job through the delete-and-recreate hazard the whole engagement has worked around
+(`--skip-impulse` on every call, never calling `build_impulse()`). Answered here so a future session
+doesn't re-derive them.
+
+1. **Model-testing/threshold API surface — confirmed, and it validates the existing script design
+    rather than exposing a shortcut.** `docs.edgeimpulse.com/studio/projects/model-testing` and a
+    direct OpenAPI-spec search both come back with no endpoint that reads per-class
+    precision/recall/F1 at an arbitrary confidence threshold from an already-computed test run — the
+    UI's own "confidence threshold" slider on that page **re-triggers testing**, it does not filter a
+    cached result. This means `scripts/edge_impulse_train_vision.py`'s `sweep_thresholds()`
+    (classify-job-per-grid-point, `POST jobs/classify` with `skipFeatureGeneration: true`, one real
+    job per threshold) is not a workaround for a missing shortcut — **it is confirmed as the correct
+    approach**, matching the docstring's own claim that fast in-place re-scoring is unsupported for
+    object-detection models. No script change is indicated by this finding.
+2. **Experiments — a real Studio feature, but UI-only as far as this search could confirm; does not
+    change what the automation script can safely do.** `docs.edgeimpulse.com/studio/projects/experiments`
+    confirms multiple trained impulses genuinely coexist in one project and are independently
+    trainable and comparable: *"Want to experiment with both FOMO and MobileNet SSD simultaneously on
+    the same dataset? No problem! Add two impulses and use the dropdown impulse selector menu in the
+    left navigation bar to switch between them."* That would, in principle, remove the
+    delete-and-recreate hazard entirely — a candidate could live in impulse #2 while the deployed
+    checkpoint stays in impulse #1, untouched. **But** two targeted searches of the live OpenAPI spec
+    (`studio.edgeimpulse.com/openapi.yml`) for an impulse-creation endpoint (`addImpulse`,
+    `cloneImpulse`, or similar) found none — the spec's impulse-shaped operations are all
+    block-configuration calls on an *existing* impulse, not impulse lifecycle calls. Caveat: the
+    OpenAPI file is large and `WebFetch`'s page-to-markdown conversion is not proven exhaustive over
+    it, so this is a real but not fully certain negative result — worth a direct `grep` over a
+    downloaded copy of the spec before treating it as final. As things stand: **Experiments is a
+    UI-driven safety net for a human working in Studio, not a lever this project's API-only training
+    script can currently reach for.** The script's `--skip-impulse` / never-call-`build_impulse()`
+    discipline remains the correct approach for anything automated.
+3. **Versioning/snapshot restore semantics — partially resolved, still needs a live discovery pass,
+    not doc-reading.** `docs.edgeimpulse.com/studio/projects/versioning` states only that a version
+    "captures the current state of your project, including data, configurations, models, and
+    settings" and lets you "restore your project to a prior state if needed" — it does not say
+    whether a trained impulse's weights are recoverable after that impulse is deleted, or whether
+    restoration is all-or-nothing vs. selective. The OpenAPI spec search found real CRUD-shaped
+    endpoints under `/api/{projectId}/versions` (`listVersions`, `updateVersion`, `deleteVersion`,
+    `listPublicVersions`, `makeVersionPrivate`) but **no `createVersion` or `restoreVersion`
+    operation** — yet this project's own history proves creation works in practice (job `53262402`,
+    30 Aug, `yolo-pro-medium-no_attn_relu-threshold0.05-final-20260830`), so a create path
+    definitely exists, just not as a plain REST verb on that resource — most likely a job type
+    dispatched through the general `/jobs` endpoint, which was not searched. **This remains the one
+    of the three genuinely open**, and per the plan's own framing needs empirical confirmation (list
+    job types via the API, or trigger a version snapshot from the UI and capture the network call),
+    not another documentation pass.
+
 ---
 
 ## Source list
