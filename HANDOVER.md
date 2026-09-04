@@ -62,35 +62,58 @@ beyond SA-FARI" subsection of `boar-representation-audit.md` (Island Conservatio
 as a candidate, SWG/WCS confirmed already fully tapped, Wildlife Insights flagged unexplored, two
 Asian-elephant sourcing dead ends recorded).
 
-**Five commits this session, in order, all verified clean of any AI-authorship trailer:**
+**Seven commits this session, in order, all verified clean of any AI-authorship trailer** (the last
+two written after this checkpoint's own first draft — updated in place rather than as a second
+checkpoint, since nothing superseded it in between):
 1. `a0ca100` — docs(vision): source additional IR candidates for Boar/Elephant, best-effort
 2. `5d0ac30` — docs(vision): record Step 2 baseline rerun and noise floor for the Boar-gap close-out
 3. `49bda00` — docs(vision): Trial 2 color-space-augmentation regresses both classes, not adopted
 4. `1bb2f01` — docs(vision): Trial 3 spatial-augmentation regresses further, not adopted
 5. `0c02e49` — docs(vision): Trial 4 freeze-backbone fails decisively, Step 3 closed, no adoption
+6. `adcac70` — docs: checkpoint the Boar-gap close-out — no candidate cleared the bar (this
+   checkpoint's own first commit)
+7. `ce223ef` — docs(research): close two of Step 6's three load-bearing API unknowns
+
+All seven pushed to `origin/develop` (`7c57d08..ce223ef`); nothing left unpushed.
 
 Full detail (full sweep tables at every threshold, not just @0.05) is in `ml/vision/README.md`'s four
 new dated sections between the 30 Aug entries and `## Reproducing`, and in `docs/KNOWN_GAPS.md`'s
 "Vision detector does not reach the ≥92%-per-class-recall bar" section, which now has six consecutive
 "4 Sept update, continued a [Nth] time" paragraphs (two from the exposure-lock/audit session, four from
-this one). `ruff check .` (20 pre-existing errors, unchanged) and `pytest scripts/ device/mpu/tests -q`
-(432 passed, 2 skipped, unchanged) verified clean before every commit.
+this one). `ruff check .` (20 pre-existing errors, unchanged) and `pytest` (444 passed, 1 skipped,
+unchanged from before this session's edits) verified clean before every commit.
 
-**Open, non-blocking item**: eight new `.log` files under `ml/vision/` from this session's background
-training/sweep jobs (`_retrain_yolo_medium_baseline_20260904.log`,
-`_sweep_yolo_medium_baseline_20260904.log`, and matching `_colorspace_med_`/`_spatial_med_`/`_freeze_`
-pairs) never showed up as untracked in `git status --short` across this whole session — worth
-confirming against `.gitignore` in a future pass, not urgent.
+**Resolved**: the eight `.log` files this session's background training/sweep jobs wrote under
+`ml/vision/` are correctly gitignored (`.gitignore:49`, pattern `ml/vision/_*.log`) — not an
+oversight, no action needed.
 
-**Next step**: Step 6 (the ~200-URL Edge Impulse/Arduino documentation sweep) remains deferred and
-non-blocking — nothing about it is time-sensitive or gates further vision work. Otherwise this
-plan is complete; the next real lever (if one is ever needed) is new *data*, not more platform-config
-trials on the same corpus — all three plausible untried config levers are now falsified.
+**Step 6 (documentation sweep) — partially done, not a full re-run.** The general ~200-URL sweep
+itself turned out to already be comprehensive (5 files under `docs/research/platform/`, compiled
+2 Sept, predating this session) — re-running it in full would have been redundant. What was actually
+missing were the three specific questions Step 6's own text called out as "genuinely unknown and
+load-bearing": fetched the live Edge Impulse docs + OpenAPI spec directly for those three (not a
+doc-sweep agent fan-out) and closed two of them —
+[edge-impulse-studio-vision-tuning.md](docs/research/platform/edge-impulse-studio-vision-tuning.md)'s
+4 Sept addendum (items 1-3 there): the model-testing/threshold API surface is confirmed to have no
+shortcut (the script's classify-job-per-threshold sweep is the correct approach, no change indicated);
+Experiments is a real Studio UI feature (impulses genuinely coexist) but is not reachable from the
+API-only training script (no impulse-creation endpoint found in the OpenAPI spec); versioning/restore
+semantics remain genuinely open — the OpenAPI spec has version list/update/delete/make-private verbs
+but no create/restore verb, even though this project has created snapshots in practice, so creation is
+most likely a job type dispatched through `/jobs`, unconfirmed — needs a live API discovery pass, not
+more doc-reading, if it's ever needed for real.
+
+**Next step**: nothing plan-mandated remains. The one still-open item (versioning/restore API
+mechanics) is only worth chasing if a future session actually needs to snapshot-and-restore
+programmatically — not urgent on its own. Otherwise the next real lever for the Boar gap (if one is
+ever needed) is new *data*, not more platform-config trials on the same corpus — all three plausible
+untried config levers are now falsified.
 
 **Session-continuity note, per `CLAUDE.md`'s protocol**: this session completed a full, coherent unit
-of work (Step 2 + all of Step 3, reaching Step 5's conclusion) with nothing mid-flight. Default applies
-— start a fresh session for whatever comes next (Step 6, or a new task); continue in this session only
-for a small immediate follow-up fix to something that just ran here.
+of work (Step 2 + all of Step 3 reaching Step 5's conclusion, plus closing out Step 6's load-bearing
+unknowns) with nothing mid-flight and nothing unpushed. Default applies — start a fresh session for
+whatever comes next; continue in this session only for a small immediate follow-up fix to something
+that just ran here.
 
 ## RESUME HERE — 4 Sept — night exposure-lock implemented and host-tested for the active Camera path (not just written up); EventVideoRecorder/GStreamer side still unimplemented; Workstream 2 (Boar representation audit) complete
 
