@@ -19,6 +19,7 @@ number externally.
 | [app-lab-flash-and-routerbridge.md](app-lab-flash-and-routerbridge.md) | Canonical headless build/flash/deploy via `arduino-app-cli`, FQBN menu options, RouterBridge msgpack-RPC protocol spec, MCU recovery ladder, EI model bundling. Includes corrections to our prior understanding. |
 | [edge-impulse-linux-inference.md](edge-impulse-linux-inference.md) | Whether GPU/NPU/DSP acceleration is real on QRB2210 (it is not), Flex delegates, how the EI runner captures camera frames, locking exposure/gain/AGC, EON Compiler + no-retrain latency levers. |
 | [edge-impulse-studio-vision-tuning.md](edge-impulse-studio-vision-tuning.md) | Raising Elephant/Boar per-class recall past 92% without wrecking precision: YOLO-Pro knobs, block choice, augmentation, class weighting, object-tracking post-processing, EON Tuner search space, finding silent-miss images. |
+| [reference-links.md](reference-links.md) | Raw source link list (Edge Impulse docs sitemap + curated Arduino UNO Q / App Lab / integration set) the prose files above were distilled from. Not itself a findings doc. |
 
 ## The reliable fixes / methods, by problem
 
