@@ -834,6 +834,21 @@ criteria — see each entry's status.
     need a logged-in Hugging Face session. A `conditions` metadata schema is proposed for
     `dataset_manifest.json`/`DATASETS` (domain, lighting, IR-confirmed, sample-verified-n/of, angle,
     distance, occlusion) but not backfilled onto existing sources this pass.
+    **4 Sept update, continued — the Boar-gap close-out session's Step 4.1 closes the "unquantified"
+    gap the paragraph above left open for both sources.** A new seeded-sample script
+    (`scripts/audit_night_ir_sample.py`, sibling of `audit_boar_sample.py`) found
+    `swg-eurasian-wild-pig` **60% night/IR** (24/40 sampled, n=40 of 2,350 images on disk — not the
+    1,800 the manifest records; the discrepancy is flagged, not reconciled) and `wcs-sus-scrofa`
+    **22.5% night/IR** (9/40, n=40 of 828). Both raise the Boar night/IR floor well above the ~11%
+    estimate above, which only credited `trail-camera-v2`. The same pass quantified Elephant's
+    largest source, `asian-elephants-dataset-v1` (2,358 images, 58% of Elephant's total corpus),
+    previously only described as containing "a meaningful fraction" of uncredited real IR content:
+    **72.5% night/IR** (29/40 sampled). That reverses this document's working assumption that
+    Elephant was the better-covered class for night/IR — on these numbers it is not; Boar remains the
+    class with the real gap, even after every correction applied this session. Full per-source
+    breakdown, sampling method, and seeds are in `ml/vision/boar-representation-audit.md`'s
+    per-source table and cross-class-contrast section. This is still characterization, not a
+    retrain — none of these three sources have been folded into the training corpus by this pass.
 - **A deployment-day config-delivery gap affects every `NODE_`-prefixed site attribute, not just the
   new one (3 Sept).** Checked what actually setting a per-node commissioning constant requires on
   the real board: `NODE_HOUSEHOLD_PROXIMITY` (existing) and `NODE_DETERRENCE_SCOPE` (new, above) are
