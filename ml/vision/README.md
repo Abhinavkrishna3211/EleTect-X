@@ -3147,6 +3147,48 @@ live run. See `docs/KNOWN_GAPS.md`'s matching, more detailed entry.
 
 <!-- LIVE_SYNC_PLACEHOLDER -->
 
+## 4 Sept — `no_attn_relu` medium baseline rerun, full sweep, noise-floor check before the Boar-gap close-out trials
+
+Step 2 of the Boar-gap close-out plan: rerun the exact deployed config unchanged
+(`--family yolo-pro --yolo-variant no_attn_relu --yolo-sizing medium --skip-impulse`, then a
+separate `--sweep-thresholds` pass) before spending any job on an untried lever, both to
+re-baseline against today's corpus and to measure the run-to-run noise floor those levers have to
+clear. `check_data()` reported **10,904 training / 3,321 testing** — same order of magnitude as
+29-30 Aug, not independently diffed sample-by-sample against that run's counts (the test-split
+sizes below are the load-bearing check instead, see next paragraph). Job chain: features 53450151
+(2.4 min) → training 53450211 (92.5 min) → held-out test at the impulse's already-configured
+threshold, job 53452920 → full 5-point threshold sweep, jobs 53453199…53453771 (4.1–4.8 min each),
+all `successful=True`.
+
+**The test split came back byte-for-byte the same size as the 30 Aug run — 1,503 Boar / 844
+Elephant / 974 Background** — despite the 121 orphan `uv29aug` samples the 29 Aug full-dataset audit
+flagged as not yet folded into any documented source. Whatever those orphans are, they have not
+shifted the train/test boundary between the two runs; the corpus this rerun trained and tested
+against is effectively the same one the deployed checkpoint was measured on, not a drifted one.
+
+**Full sweep, this rerun (Boar/Elephant: 1,503/844 test images; Background: 974):**
+
+| Threshold | Boar recall | Boar precision | Elephant recall | Elephant precision | Background FP rate |
+|---|---|---|---|---|---|
+| 0.05 | 0.852 | 0.890 | 0.905 | 0.869 | 0.160 |
+| 0.10 | 0.834 | 0.930 | 0.893 | 0.898 | 0.115 |
+| 0.20 | 0.814 | 0.953 | 0.875 | 0.931 | 0.078 |
+| 0.30 | 0.803 | 0.969 | 0.862 | 0.951 | 0.064 |
+| 0.50 | 0.765 | 0.984 | 0.828 | 0.970 | 0.034 |
+
+**At threshold 0.05, against the deployed checkpoint's own 0.852 / 0.906 / 0.166: Boar recall
+identical (0.852, exact match), Elephant recall −0.001 (0.905 vs 0.906), background FP rate −0.006
+and better (0.160 vs 0.166).** All three deltas are far smaller than the ~1.5 pt run-to-run swing
+the plan's Correction 3 flagged from the 29 Aug `medium`/`ship` pair — that pair compared two
+different test splits (1402/844/787 vs the deployed run's own 1503/844/974), so it was never a clean
+same-split comparison to begin with. This rerun is: identical split, identical config, five weeks
+apart, and the numbers hold to within a few tenths of a point. **Noise floor for this engagement's
+remaining trials: call it ≤1 point on any of the three numbers** — a trial has to clear the deployed
+checkpoint by more than that, on all three numbers at once, to be a real candidate rather than
+measurement noise.
+
+<!-- LIVE_SYNC_PLACEHOLDER -->
+
 ## Reproducing
 
 ```
