@@ -206,5 +206,19 @@ precision — a **data/label problem**, not an architecture problem. Highest-lev
   read them in Studio / the on-device profiler.
 - Whether Performance Calibration and genuinely independent per-class thresholds work for object
   detection in the current Studio build.
+- **How a project version snapshot is actually created and restored via the API** — the OpenAPI
+  spec has `listVersions`/`updateVersion`/`deleteVersion`/`makeVersionPrivate` under
+  `/api/{projectId}/versions` but no `createVersion`/`restoreVersion` verb, even though this
+  project has created snapshots in practice (job `53262402`, 30 Aug) — creation is most likely
+  dispatched as a job type through the general `/jobs` endpoint, not confirmed. Needs a live API
+  discovery pass (list job types, or capture the network call the Studio UI makes), not more
+  doc-reading. Full detail in
+  [edge-impulse-studio-vision-tuning.md](edge-impulse-studio-vision-tuning.md)'s 4 Sept addendum.
 
-Each file's own "Unverified / open" section has the full list.
+Each file's own "Unverified / open" section has the full list. Two other questions Step 6 of the
+Boar-gap close-out plan had flagged as open are now closed, not just unresolved-and-listed: the
+model-testing/threshold API surface (confirmed no shortcut exists — the training script's
+classify-job-per-threshold sweep is the correct approach, not a workaround) and Experiments
+(confirmed real — multiple impulses coexist in Studio's UI — but confirmed *not* reachable from the
+API-only training script, since no impulse-creation endpoint exists in the OpenAPI spec). See the
+same addendum for both, with sourcing and caveats.
