@@ -71,3 +71,6 @@ secrets/
 *.key
 *.pem
 device/mcu/src/secrets.h
+
+# --- Local session-output scratch (not project deliverables) ---
+Claude outputs/
