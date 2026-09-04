@@ -45,11 +45,20 @@ camera-trap imagery (`pig-rinoz/wild-pig-at-night`), but that undercounts the tr
 `trail-camera-v2` (1,311 images) is documented in its own `DATASETS` entry as "day + IR-night," and a
 14-image visual sample found 57% were real night/IR trigger frames — extrapolating that rate across
 the source gives a corrected estimate of roughly 814 real night/IR images, ~11% of 7,394, not 0.87%.
-Two more sources (`swg-eurasian-wild-pig`, `wcs-sus-scrofa`) show real but unquantified additional
-night/IR content in their own spot-checks, so 11% is a floor, not a ceiling. Beyond the real imagery,
-200 synthetic `pseudo-ir-boar` images add further pseudo-IR coverage. See
-`ml/vision/boar-representation-audit.md` for the full per-source condition breakdown and the reasoning
-behind the correction.
+**Quantified, 4 Sept 2026 (Boar-gap close-out session, Step 4.1)** — the two sources above that were
+only "unquantified" are now counted. A seeded 40-image visual sample of each
+(`scripts/audit_night_ir_sample.py`) found `swg-eurasian-wild-pig` **60% night/IR** (24/40; the
+species subdirectory it resolves to on disk holds 2,350 images, not the 1,800 recorded in the
+manifest — flagged, not reconciled) and `wcs-sus-scrofa` **22.5% night/IR** (9/40 of 828). So 11%
+was indeed a floor: folding both sources' measured proportions in, the real night/IR share of the
+7,394-image Boar corpus is well above the original ~11% estimate. The same pass sampled Elephant's
+largest source, `asian-elephants-dataset-v1` (2,358 images), previously described only as containing
+"a meaningful fraction" of uncredited real IR content — measured at **72.5% night/IR** (29/40),
+meaning Elephant is not the better-covered class for night/IR that this document previously assumed;
+Boar's gap is real even accounting for these three sources. Beyond the real imagery, 200 synthetic
+`pseudo-ir-boar` images add further pseudo-IR coverage. See
+`ml/vision/boar-representation-audit.md` for the full per-source condition breakdown, sampling method,
+and the reasoning behind the correction.
 
 **Why the original three are real:** the first three sources listed were pulled live from Roboflow's
 COCO export API (`scripts/edge_impulse_upload_vision.py`), full images with real annotator-drawn

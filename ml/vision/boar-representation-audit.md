@@ -77,11 +77,31 @@ narrative; `Confidence` states what that characterization actually rests on.
 | `trackabox-4ejy9/wild-boar-a1flm/1` | 1,556 | CC BY 4.0 | Mixed — scraped/catalog Roboflow set, relabelled from "Pig"; documented contamination (domestic pig in a straw-lined pen, TV-broadcast clip frames both filtered) | Not characterized for day/night; no IR mention in any pass | `UNVERIFIED` — multiple visual-contamination passes exist (n≈40+9+17), none coded for lighting |
 | `boarwatch/wild-boar-deterrent-pzq5t/1` | 1,636 | CC BY 4.0 | Catalog-style sequential-ID Roboflow set, relabelled from class `"0"`; documented contamination (black redaction rectangles, TV-broadcast clip frames, vegan-food-brand imagery both filtered) | Not characterized for day/night; no IR mention | `UNVERIFIED`, same basis as above |
 | `roboflow-100/trail-camera/2` (`trail-camera-v2`) | 1,311 | CC BY 4.0 | Real US game-camera (Cuddeback), *Sus scrofa* under the "Hog" category — genuine field camera-trap domain, closest domain match to Kerala's deployment among all Boar sources | **Day + IR-night** per its own `DATASETS` entry; 8/14 (57%) of a real visual sample were night/IR trigger frames | `Measured`, n=14 visual sample, extrapolated for the corpus-wide estimate |
-| `wcs-sus-scrofa` | 827 | CDLA-Permissive-1.0 | LILA WCS Camera Traps — real field camera-trap, Indonesia (734) + Laos (94); genuine wild population, species-correct | Not confirmed IR; "close-range flash blowout, fog" in a 10-image sample is consistent with but not proof of night-flash capture | `UNVERIFIED` for lighting; domain and species are `Measured` |
+| `wcs-sus-scrofa` | 827 (828 on disk — see note below) | CDLA-Permissive-1.0 | LILA WCS Camera Traps — real field camera-trap, Indonesia (734) + Laos (94); genuine wild population, species-correct | **22.5% night/IR** — seeded 40-image sample (`scripts/audit_night_ir_sample.py`, seed 202609042), 9/40 genuine night-flash or dark-scene frames, the rest clear daylight; mostly colour night-flash rather than grayscale IR, unlike the other two sources audited the same pass | `Measured`, n=40 of 828 |
 | `pig-rinoz/wild-pig-at-night/1` | 64 | CC BY 4.0 | Real trail-cam, multiple camera brands visible in-frame (Bushnell, Moultrie, "JonahCam") | **Confirmed real night/IR** — grayscale near-IR, 5/5 visually verified, no staged or daytime-relabeled frames | `Measured`, n=5 of 64 |
-| `swg-eurasian-wild-pig` | 1,800 | CDLA-Permissive-2.0 | Real field camera-trap set (the SWG collection also used for Background negatives); domain-correct primary Boar source by volume | Real night/IR frames confirmed present in a 30-image spot-check (e.g. a 3840×2880 Bushnell night frame) but not quantified | `Measured` that it exists; proportion `UNVERIFIED` |
+| `swg-eurasian-wild-pig` | 1,800 (2,350 on disk — see note below) | CDLA-Permissive-2.0 | Real field camera-trap set (the SWG collection also used for Background negatives); domain-correct primary Boar source by volume | **60% night/IR** — seeded 40-image sample (`scripts/audit_night_ir_sample.py`, seed 202609041), 24/40 genuine night-flash or grayscale-IR frames (mix of colour night-flash and true grayscale IR, both public-dataset and SWG-tagged frames), the rest clear daylight | `Measured`, n=40 of 2,350 |
 | `pseudo-ir-boar` (synthetic) | 200 | N/A — derived from the real sources above | Synthetic pseudo-IR augmentation, not camera output | By construction, all 200 are synthetic night/IR-styled | `Measured` (it is what it says it is; not real capture) |
 | **Total** | **7,394** | | | | |
+
+**Night/IR proportions above, and the on-disk count discrepancy, measured 4 Sept 2026 (Boar-gap
+close-out session, Step 4.1) — closing the two `UNVERIFIED`-proportion rows this table carried since
+the audit's first pass.** `swg-eurasian-wild-pig` resolves on disk to `swg-camera-traps/
+eurasian_wild_pig/` (2,350 files) and `wcs-sus-scrofa` to `wcs-camera-traps/sus_scrofa/` (828 files) —
+both counted directly by listing the species subdirectory, not re-derived from `dataset_manifest.json`
+or README prose. The manifest's 1,800/827 figures were not re-investigated as part of this pass; they
+may reflect an EI-project-side filter (dedup, a prior exclusion pass) rather than an error in either
+number, but that reconciliation is out of scope here — flagged as a follow-up, not resolved. Both
+proportions come from `scripts/audit_night_ir_sample.py`, a sibling of `audit_boar_sample.py` written
+this session: seeded sample (`random.Random`, not corpus order), rendered as boxed/unboxed contact
+sheets under `ml/datasets/vision/raw/_audit_tmp/`, each image opened and judged by eye — same
+discipline as trail-camera-v2's original 14-image sample, not an automated grayscale-pixel heuristic.
+"Night/IR" here means the visual bucket that matters for this project's actual domain gap (RGB-daylight
+training data vs. the deployed camera's grayscale-IR night output): both true colour night-flash frames
+and true grayscale IR frames count as night/IR regardless of the EXIF-adjacent on-image timestamp,
+since a few frames in both samples carried a daylight-looking timestamp while displaying a clearly
+grayscale or flash-lit visual (a per-camera clock or metadata issue, not a lighting-condition
+misjudgment) — the visual bucket, not the printed clock, is what the deployed camera's exposure pipeline
+actually sees.
 
 ## Cross-class contrast with Elephant
 
@@ -102,6 +122,22 @@ correct supplement" framing did not credit. Neither class's true night/IR fracti
 today — both are undercounted by roughly the same mechanism (real IR content riding uncredited inside
 a source labelled and budgeted as generic daytime photography), which is exactly the case the proposed
 `conditions` schema below is meant to close for good, for both classes, not just Boar.
+
+**Quantified, 4 Sept 2026 (Boar-gap close-out session, Step 4.1) — the "meaningful fraction" above is
+72.5%, not a minority.** A seeded 40-image sample across `asian-elephants-dataset-v1`'s three splits
+(`scripts/audit_night_ir_sample.py`, seed 202609043, `parse()`/`contact_sheet()` reused from
+`audit_boar_sample.py` since this source carries real COCO boxes) found **29/40 genuine night/IR
+frames** — heavily grayscale, true-IR camera-trap output (Bushnell/ScoutGuard/XTBS overlays visible in
+several), not the exception the "species-correct supplement" framing implied. This is Elephant's
+largest single source (2,358 of 4,094 total, 58%) and the finding materially changes the Elephant side
+of this document's cross-class comparison: the earlier 267/4,094 (6.5%) confirmed-real-IR figure only
+credited `wcs-elephas-maximus` and the night-ojblh fold-in, and did not include
+`asian-elephants-dataset-v1` at all pending this quantification. At 72.5% of 2,358, this single source
+alone contributes on the order of 1,710 more real night/IR Elephant frames than the earlier confirmed
+figure credited — meaning Elephant's true night/IR share of its own corpus is almost certainly well
+above Boar's corrected ~11% estimate, not below it. This reframes an assumption this document was
+carrying since its first pass: Elephant was never the class starved of real IR content: Boar was, and
+still is, even after trail-camera-v2 and the corrections above.
 
 Background's own real-IR coverage is `board-captures-night1` — 207 real IR frames from the deployed
 camera itself, four physically distinct framings, true negatives rather than positives. It is the only
@@ -133,6 +169,34 @@ Both results point the same direction: the lever that has already shown a real, 
 is domain-matched real camera-trap data (trail-camera-v2's 0.863), not more images of any kind or more
 model capacity. This is the case for prioritising night/IR-heavy camera-trap sourcing over any
 volume-only pull.
+
+**Correction, 4 Sept, found by the execution session while planning the next retrain — read this before
+treating the 0.863 number above as a standalone, reproducible data lever.** The deployed checkpoint
+(0.852 Boar / 0.906 Elephant / 0.166 background FP) was itself already trained on the
+post-`trail-camera-v2` corpus — the 0.863-Boar run differs from the deployed one **only by
+`architecture-type`** (`attn_silu` vs the deployed `no_attn_relu`), on the same data and a
+near-identical test split (1505 vs 1503 Boar test images). It is not an independent confirmation that
+adding `trail-camera-v2` helps by itself; it is really a data point about the `attn_silu` architecture
+variant, already folded into a corpus the deployed model also trained on. Concretely, "reproduce the
+0.863 win" reduces to "redeploy with `attn_silu`," which trades **−2.6 points Elephant recall and +0.7
+points background FP** for the Boar gain — a real, known, already-measured tradeoff that fails this
+plan's own adoption bar (beat all three numbers, not trade one for another). Treat trail-camera-v2's
+inclusion as settled and already banked in the deployed checkpoint, not as an unexploited lever still
+worth "extending" — the real untried levers remaining are freeze-backbone and augmentation-strength
+(see below), not a trail-camera-v2 reproduction. Anyone reading only the paragraphs above this
+correction will draw the wrong conclusion — this note exists specifically to stop that.
+
+**Second correction, same session — the 1.1-point gap above (0.863 vs 0.852) is close to the measured
+run-to-run noise floor, not clearly outside it.** Two runs of the identical config on the identical
+corpus (`_retrain_yolo_medium_20260829.log` job 53251711 vs `_retrain_yolo_medium_ship_20260829.log`
+job 53254690 — same `customParameters`, same test split 1402/844/787, both cached 0.3-min feature
+generation) differ by **1.5 points of Boar recall at threshold 0.5** (0.770 vs 0.755) with no
+architecture or data change between them at all. That pair is suggestive rather than certified — no
+README entry exists for the "ship" run, so a silent corpus edit between the two can't be fully
+excluded — but it means a 1.1-point gap should not be read as a confirmed win without a noise-floor
+measurement alongside it. The Boar-gap close-out session reruns the exact deployed config once,
+unchanged, specifically to measure this floor at threshold 0.05 (the deployed operating point, not
+0.5) before judging any of the levers above against it.
 
 ## Proposed `conditions` metadata schema
 
@@ -172,14 +236,56 @@ Research (IREC, Spain), whose camera-trap work centres on Eurasian wild boar. Af
 confirmed present (~3.3 masklets/video), so the same source could plausibly help close Elephant's own
 undercounted night/IR gap too.
 
-**Status: candidate, not sourced — two blocking checks remain open, both need a logged-in Hugging Face
-session:**
+**Status, updated 4 Sept: one of the two blocking checks now has a real answer, and it's a likely
+disqualifier — not yet closed out either way.**
 
-1. The paper's 99-category species list does not name *Sus scrofa* anywhere reachable without
-   authentication — confirm boar is actually in the species table before assuming it is usable at all.
-2. Read the dataset's own licence terms directly off the page, the way ADR 0016 read each Freesound
-   page rather than trusting a snippet — "no paywalls, no restrictions" is website copy, not a licence,
-   and this project ships a manufactured device, so redistribution terms matter concretely.
+1. **Species-table check — resolved, direct from the paper (arXiv 2511.15622v2), and it changes the
+   practical read.** "Wild boar" is confirmed as one of the 99 species categories (Fig. 5's per-species
+   video-count chart, read directly off the figure, not inferred). But it's a rare long-tail category
+   within SA-FARI itself: **approximately 14 videos total** (train+test combined, out of 11,609 videos
+   in the whole dataset — roughly 0.12%), putting it in the same low-count band as "giant armadillo"
+   and "woolly monkey," well below the top-3 (spider monkey, collared peccary, agouti, each 700+
+   videos). African elephant is confirmed present too, at a similarly modest ~10 videos. This does not
+   disqualify SA-FARI — 14 videos of real, likely-IR-inclusive camera-trap boar footage (the dataset's
+   night subset is 598 of 11,609 videos overall, so a meaningful fraction of SA-FARI generally is
+   night; whether these particular 14 boar videos fall in that subset is not yet known and needs
+   checking against the per-video metadata once/if access is granted) would still be a genuine,
+   domain-matched addition — but it reframes SA-FARI from "the fix for the Boar gap" to "a small,
+   high-quality supplement," which matters for prioritization against the licence question below and
+   against continuing to look for other candidates in parallel rather than treating SA-FARI as
+   sufficient on its own.
+2. **Licence check — resolved, and it's a real problem, not a formality.** The dataset card states
+   plainly: **License: CC-BY-NC 4.0** (Creative Commons Attribution-NonCommercial). This is Meta's
+   stated licence for the data itself, not a restriction this project is imposing — and it is a
+   meaningfully different tier from every other source in this project's corpus, all of which are
+   CC0, CC BY (fully commercial-permissive), or CDLA-Permissive. NC terms restrict use "primarily
+   intended for or directed toward commercial advantage" — whether training a detector on SA-FARI
+   images and shipping the resulting model weights inside a manufactured device for a DFO field trial
+   crosses that line is a real legal question this document is not qualified to answer for the
+   project (not a lawyer, not reading this off general CC-BY-NC boilerplate as a verdict) — it needs
+   a human read of the exact clause against how this specific device is being distributed/funded
+   before any SA-FARI-derived data or weights go anywhere near the shipped model. **Do not proceed on
+   the assumption this clears the same rejection bar as the CC0/CC-BY/CDLA sources already in the
+   corpus — it does not, until that question is actually answered.**
+
+Given (2), the practical next step is no longer "confirm species then use it" — it's "get the NC
+question answered first," since a "no" there makes the ~14-video species-table finding above moot for
+this project's shipped model (SA-FARI could still be legitimate for internal research/benchmarking
+use, which NC permits, even if not for the deployed device — worth keeping that distinction in mind
+rather than discarding the source outright). And given the scale finding in (1), even a "yes" on the
+licence question makes SA-FARI a small supplement worth pursuing alongside continued sourcing, not a
+substitute for it.
+
+**NC question answered, 4 Sept — by the project owner, not a legal conclusion this document derives.**
+The project owner has determined CC-BY-NC 4.0 is compatible with this project's distribution and
+funding model for the shipped device, clearing SA-FARI-derived data/weights past the point this
+document flagged above. That determination is recorded here as an attributed decision, not as this
+audit's own legal reasoning — the caveats above about NC's "commercial advantage" language remain
+accurate background for why the question needed asking. Clearing the licence does not waive the rest
+of the checklist: file integrity, label correctness by eye on all 14/14 boar videos (not a sample),
+the real night/IR count specifically among those 14 (not SA-FARI's dataset-wide 598/11,609
+proportion), mask-to-box tightness, and a train/test tracklet-leakage check all still gate any actual
+training use, each with a written report before the data touches a training job.
 
 Real conversion cost if it clears both checks: SA-FARI is a video dataset with masks and tracklets, not
 static images — using it means frame extraction, mask-to-box conversion, and a sampling policy that
@@ -197,24 +303,38 @@ is more acute.
 
 ## Untried levers — named as next trials, not work done
 
-Neither lever below has been tried this engagement, and neither is reachable from
-`scripts/edge_impulse_train_vision.py` today without adding a flag first — confirmed by reading the
-script's own argument parser: it exposes `--family`, `--yolo-variant`, `--yolo-sizing`, `--image-size`,
-and `--batch-size`, and `augmentationPolicyImage` is hardcoded to `"all"` with no CLI override; YOLO-Pro
-reads its epoch count and learning rate from its own org-model `customParameters`, not from a script
-flag either.
+**Correction, 4 Sept, execution session — the paragraph below is now stale on two counts and is kept
+only so the historical reasoning is legible; read the bullets after it instead.** `augmentationPolicyImage`
+being "hardcoded to `all` with no CLI override" is misleading, not wrong: that generic Keras field is
+inert for YOLO-Pro, an org model that reads its own `spatial-augmentation`/`color-space-augmentation`
+customParameters instead — both were sitting at `low` (the weakest setting) in every run this
+engagement, never varied, which is the actual untried lever. And the "would need a new flag" framing
+for freeze-backbone is now done: `--freeze-backbone`, `--spatial-augmentation`, and
+`--color-space-augmentation` were added to `scripts/edge_impulse_train_vision.py` this session,
+threaded into `select_model()`'s YOLO-Pro branch and validated against the model's own live
+`customParameters` (not a hardcoded tuple), so a renamed level fails loudly rather than training
+silently on an unintended value.
 
-- **Freeze-backbone.** Untried. Would need a new flag threaded into `training_params()`'s
-  `custom_params` dict for the YOLO-Pro family, and confirmation that the platform's transfer-learning
-  API actually exposes a freeze knob for this model family before wiring it — not confirmed either way
-  yet.
-- **Augmentation strength.** Untried beyond the corpus-wide `"all"` default. Would need the same kind
-  of flag, and a decision on whether to vary it per-class (Boar only) or globally — object-detection
-  augmentation policy in this API is set once per training job, not per label, so a per-class version
-  would need to run as two separate training passes on filtered corpora, not a single job.
+Confirmed live 4 Sept via `GET /transfer-learning-models` (project 1097972) — the real allowed values,
+not assumed:
 
-Both are real candidates for whenever a retrain is next authorised; this document does not authorise
-one on its own.
+- **`freeze-backbone`** — a flag, `true`/`false`, model default `false` (matches every run to date;
+  never flipped). Only applicable when `use-pretrained-weights` is `true`, which every YOLO-Pro run
+  this engagement has used. **Low prior for a win**: freezing the backbone removes exactly the
+  adaptation a heavily domain-shifted target (RGB daylight → grayscale IR) needs from pretrained
+  ImageNet weights. Cheap to falsify — freezing most of the network trains faster — so worth running
+  even at a low prior.
+- **`spatial-augmentation`** — select, ladder `none` < `low` < `medium` (`+RandomRotation & RandomFlip`)
+  < `high` (`+Mosaic`), model default and every run to date at `low`. Addresses scale/crop/framing
+  variance, not the IR domain gap directly.
+- **`color-space-augmentation`** — select, same `none`/`low`/`medium`/`high` ladder (increasing levels
+  of RandAugment), model default and every run to date at `low`. **Highest prior of the three**: this
+  is the knob that targets a colour/appearance domain shift specifically, and the deployment gap is
+  exactly an RGB-daylight → grayscale-IR shift.
+
+Both augmentation knobs and freeze-backbone are real candidates for whenever a retrain is next
+authorised; naming them here does not authorise one on its own — see the Boar-gap close-out session's
+own plan for the trial ordering and adoption bar.
 
 ## What this document is not
 
