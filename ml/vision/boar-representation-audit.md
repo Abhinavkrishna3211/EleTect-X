@@ -287,6 +287,59 @@ the real night/IR count specifically among those 14 (not SA-FARI's dataset-wide 
 proportion), mask-to-box tightness, and a train/test tracklet-leakage check all still gate any actual
 training use, each with a written report before the data touches a training job.
 
+**Six-point checklist, completed 4 Sept — first correction: the video count itself was wrong.**
+The "~14 videos" figure above came from reading the paper's per-species chart (Fig. 5) by eye, hedged
+as approximate at the time. Direct verification against the primary annotation data supersedes it.
+`sa_fari_{train,test}_ext.json` (HF-gated, fetched with a granted-access token; the actual frames are
+unauthenticated and served from the public GCS bucket `cxl-public-camera-trap` named in the dataset's
+own README) carry a global, open-vocabulary noun-phrase category table shared across all three SA-FARI
+domains. Two category ids both resolve to *Sus scrofa* in that table's own taxonomy fields: id 111
+"pig" and id 43640 "wild boar". Counting `video_np_pairs` with `num_masklets > 0` for either id, across
+both splits: **15 distinct videos, not 14** — 7 in test, 8 in train, no video-name overlap between the
+two sets. Fourteen are annotated "wild boar", one ("sa_fari_009245", train) is annotated "pig" but is
+visually the same species doing the same thing (see below) — correctly a different noun-phrasing of
+the same animal, not a mislabel.
+
+1. **File integrity — pass.** A seeded sample of 6 frames per video (90 total, every video represented,
+   not a sub-sample of videos) fetched cleanly from the GCS bucket; no corrupt or missing JPEGs.
+2. **Label correctness by eye on 15/15 boar videos (not a sample) — pass, with two flagged as marginal.**
+   Boxes were rendered on the sampled frames (`scripts/audit_sa_fari_boar_sample.py`) and opened by eye,
+   video by video. 13/15 show an unambiguous boar (clear body silhouette or, in five daylight videos,
+   full-colour confirmation down to bristled coat and snout shape) with boxes that track the animal
+   tightly, including through partial frame-edge occlusion. Two are genuinely marginal:
+   `sa_fari_000820` (test) and `sa_fari_004160` (train) show only a faint, small dark shape at long IR
+   range — consistent with a boar but not confidently distinguishable from any other dark shape at that
+   resolution by eye alone. Both are flagged, not excluded; a training pass should weight or drop them
+   rather than treat all 15 as equally strong labels.
+3. **Real night/IR count among the 15 — measured, not the dataset-wide 598/11,609 figure.** 5/15 = 33%:
+   `sa_fari_000066`, `sa_fari_000153`, `sa_fari_000820` (test), `sa_fari_004160`, `sa_fari_007410`
+   (train). Three are clearly IR-lit (grayscale, visible flash falloff or eyeshine); the other two are
+   the same pair flagged as visually marginal in point 2. The remaining 10/15 are full-colour daylight
+   or dusk footage. 33% night/IR is a real, if small, improvement on this project's own corpus mix for
+   Boar (60% for `swg-eurasian-wild-pig`, 22.5% for `wcs-sus-scrofa`, quantified above) only in the
+   sense that it adds genuine IR frames outside those two sources' geography — it does not itself close
+   the gap at n=5.
+4. **Mask-to-box tightness — pass, quantified.** Comparing each frame's segmentation-mask area against
+   its bounding-box area (`bboxes` width×height) across all 1,217 annotated frames in the 15 videos:
+   median fill 0.69, mean 0.68, p10 0.57, p90 0.81, and — the check that actually matters for catching a
+   broken converter — zero frames where mask area exceeds box area, and only 6 frames (0.5%) with fill
+   below 0.15. That distribution is exactly what a tight box around an irregular quadruped silhouette
+   should look like; nothing here suggests SA-FARI's boxes are loose or its masks malformed.
+5. **Train/test tracklet-leakage check — pass, clean.** The 7 positive test videos come from locations
+   `campo9`/`campo4`/`campo2`; the 8 positive train videos come from `campo3`/`campo5`. No location
+   overlap at all between the two sets, so there is no case of one continuous boar encounter being cut
+   across the train/test boundary the way this engagement has already found and fixed twice with other
+   sources.
+6. **This section is the written report**, filed before any SA-FARI frame has touched a training job,
+   per the checklist's own requirement.
+
+**Net read**: SA-FARI's boar data is real and reasonably clean — passes 5 of 6 checks outright, with
+point 2 producing an honest caveat (2 of 15 videos are visually marginal) rather than a blanket pass.
+At 15 videos it remains the "small supplement, not the fix" framing from point 1 above, now on a
+verified rather than approximate count. Converting it into training-ready image+box pairs (frame
+extraction from the sampled or full 180-frame tracklets, one image-space annotation per usable frame)
+is a separate step this pass did not do — nothing from SA-FARI is in the training corpus yet.
+
 Real conversion cost if it clears both checks: SA-FARI is a video dataset with masks and tracklets, not
 static images — using it means frame extraction, mask-to-box conversion, and a sampling policy that
 does not let near-identical consecutive frames of one animal land in both train and test (the same
