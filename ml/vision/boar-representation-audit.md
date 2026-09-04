@@ -354,6 +354,52 @@ it was a phone screen-recording of a forwarded video, not licensable original ca
 source with an equivalent tell should be rejected the same way, not waved through because Boar's gap
 is more acute.
 
+**Sourcing pass beyond SA-FARI, 4 Sept — best-effort, one real new lead, two dead ends confirmed
+already-tapped.** Requested explicitly this session: look for more real IR/night data for both
+Elephant and Boar, not only SA-FARI. This was a search-and-triage pass, not a six-point verification —
+none of what follows has cleared the checklist SA-FARI went through above; it is candidate-status only.
+
+- **Island Conservation Camera Traps** (LILA BC, `lila.science/datasets/island-conservation-camera-traps`)
+  — real new candidate, not yet checked further. ~123,000 images, 123 camera locations across 7 islands
+  in 6 countries, feral pig ("pig") is one of the 7 most common labelled classes alongside rabbit, rat,
+  petrel, iguana, cat, and goat; ~65,000 bounding-box annotations over ~50,000 non-empty images.
+  **License: Community Data License Agreement, permissive variant (CDLA-Permissive)** — a materially
+  better tier than SA-FARI's CC-BY-NC, matching the fully-commercial-permissive sources already in this
+  project's corpus, so the licence question that gated SA-FARI for weeks does not apply here. Unknowns
+  that would gate any use, same bar as everything else in this corpus: the per-island pig count (not
+  found this pass — the site links a per-class CSV that was not fetched), whether island night-flash
+  IR imagery is well represented among that count (island invasive-pig eradication monitoring commonly
+  runs 24-hour IR camera traps, so the prior is reasonable but unconfirmed), and whether "pig" on these
+  islands means the same feral/wild *Sus scrofa* phenotype this project's Boar class targets or a more
+  domesticated-looking population that would read as visually distinct. Worth a follow-up pass with the
+  same rigor SA-FARI got before any use.
+- **SWG Camera Traps** (Vietnam/Laos, LILA) and **WCS Camera Traps** (12 countries, LILA) — both came
+  up as the two most relevant LILA hits for Boar/Elephant, and both are already fully tapped: they are
+  the direct source of this project's existing `swg-eurasian-wild-pig` and `wcs-sus-scrofa`/
+  `wcs-elephas-maximus` entries. Not a new lead — recorded here so a future pass doesn't re-search the
+  same ground.
+- **Wildlife Insights** (`wildlifeinsights.org`) — a large, well-known public camera-trap data
+  aggregator with per-species and per-country filtering on its Explore page, used as the data source
+  for many published camera-trap studies. Not explored further this pass: its Explore page is an
+  interactive web app, not a fetchable static page, so finding an India/Western-Ghats or Southeast-Asia
+  project with Elephant/Boar and real night-IR content requires manually working the filter UI rather
+  than a single search-and-fetch pass. Flagged as the most promising *unexplored* avenue for a future
+  session, ahead of a fresh general web search, precisely because it's filterable by both species and
+  country rather than requiring the same guess-a-dataset-name approach that found SA-FARI and Island
+  Conservation.
+- **No new Asian-elephant-specific IR lead found.** A Western-Ghats/Wayanad-specific paper on Asian
+  elephant corridor use, crop-raiding and body-injury photographic evidence
+  (`biorxiv.org/content/10.1101/2024.11.09.622825`) looked like the best possible geographic match —
+  same conflict context this device deploys into — but its data-availability status could not be
+  determined this pass (the PDF fetched as binary/undecodable content, not readable text). A PeerJ
+  paper on day/night camera-trap video for individual wild Asian elephants
+  (`peerj.com/articles/15130`) returned HTTP 403 on fetch and was not checked further. Neither is ruled
+  out; both need a direct, human-assisted look rather than another automated fetch attempt.
+
+Net read: one licence-clean, real candidate (Island Conservation) added to the sourcing queue behind
+SA-FARI, no change to Elephant's sourcing state, and one clear next step (Wildlife Insights' filterable
+Explore page) identified for whoever picks this up next rather than left as "look harder."
+
 ## Untried levers — named as next trials, not work done
 
 **Correction, 4 Sept, execution session — the paragraph below is now stale on two counts and is kept
