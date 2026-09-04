@@ -3187,6 +3187,45 @@ remaining trials: call it ≤1 point on any of the three numbers** — a trial h
 checkpoint by more than that, on all three numbers at once, to be a real candidate rather than
 measurement noise.
 
+## 4 Sept — Trial 2, `color-space-augmentation` one level up (`low` → `medium`), a real regression not noise
+
+Step 3's highest-prior lever, per the plan: the deployment gap is an RGB-daylight → grayscale-IR
+domain shift, and colour-space augmentation is the knob that targets it directly; it had never
+moved off `low`. Same config as the 4 Sept baseline rerun otherwise (`no_attn_relu`, `medium`,
+`--skip-impulse`), only `color-space-augmentation` changed to `medium` (customParameters confirmed
+from the job log: `..., 'spatial-augmentation': 'low', 'color-space-augmentation': 'medium', ...`).
+Job chain: features 53453936 (1.4 min) → training 53453976 (71.8 min — notably faster than the
+baseline rerun's 92.5 min, same architecture and data volume) → held-out test at the threshold left
+over from the prior sweep (0.5) → full 5-point threshold sweep, jobs 53455779…53456254 (4.1–4.8 min
+each), all `successful=True`. Same test split size as every other 4 Sept run this session
+(1,503/844/974).
+
+**Full sweep, this trial:**
+
+| Threshold | Boar recall | Boar precision | Elephant recall | Elephant precision | Background FP rate |
+|---|---|---|---|---|---|
+| 0.05 | 0.834 | 0.899 | 0.889 | 0.897 | 0.134 |
+| 0.10 | 0.811 | 0.936 | 0.872 | 0.930 | 0.095 |
+| 0.20 | 0.783 | 0.966 | 0.854 | 0.956 | 0.049 |
+| 0.30 | 0.768 | 0.978 | 0.830 | 0.968 | 0.035 |
+| 0.50 | 0.730 | 0.988 | 0.795 | 0.987 | 0.018 |
+
+**At threshold 0.05, against the deployed checkpoint's 0.852 / 0.906 / 0.166: Boar recall −1.8 pt
+(0.834), Elephant recall −1.7 pt (0.889), background FP rate −3.2 pt and better (0.134).** Both
+recall drops are well beyond the ≤1 pt noise floor the same-day baseline rerun established — this is
+a real regression, not measurement noise. The false-positive improvement does not offset losing
+recall on both target classes; the adoption bar requires clearing the deployed checkpoint on all
+three numbers, not trading recall for precision. **Trial 2 fails and is not adopted.** The prior the
+plan stated for this lever (colour augmentation should target the RGB→IR domain shift most directly)
+did not hold in practice — a plausible read is that `medium` colour-space augmentation perturbs the
+model away from the still-mostly-daylight-RGB majority of the training corpus faster than it helps
+it generalize toward the minority IR/night content, at this corpus's current night/IR proportion
+(this session's own audit put Boar's real floor at whatever `trail-camera-v2` and the two
+newly-quantified sources sum to — still well under half the corpus). Untried in the other direction:
+a lighter nudge (no intermediate step exists between `low` and `medium` on this ladder) or pairing
+colour augmentation with more real IR data first, rather than alone against a still-daylight-majority
+corpus — noted as a possible follow-up, not run this pass.
+
 <!-- LIVE_SYNC_PLACEHOLDER -->
 
 ## Reproducing

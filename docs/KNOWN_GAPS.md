@@ -874,6 +874,16 @@ criteria — see each entry's status.
     once. Full sweep table and job ids are in `ml/vision/README.md`'s "4 Sept" entry. Nothing has
     beaten the deployed checkpoint yet; Step 3's untried levers (color-space-augmentation,
     spatial-augmentation, freeze-backbone) have not been run this pass.
+    **4 Sept update, continued a fourth time — Step 3 Trial 2 (`color-space-augmentation` one level
+    up, `low`→`medium`) is a real regression, not a win.** This was the plan's highest-prior lever,
+    reasoned to target the RGB-daylight→IR domain shift most directly. At threshold 0.05: Boar
+    recall 0.834 (−1.8 pt), Elephant recall 0.889 (−1.7 pt), background FP rate 0.134 (−3.2 pt,
+    better). Both recall losses are well beyond the ≤1 pt noise floor — a real effect, not noise —
+    and the FP improvement does not offset losing recall on both target classes against the
+    adoption bar. **Not adopted.** Read: `medium` colour-space augmentation likely perturbs the
+    model away from the still-daylight-majority corpus faster than it helps it generalize to the
+    IR/night minority at this corpus's current proportions. Full sweep table in
+    `ml/vision/README.md`'s "Trial 2" entry. Trial 3 (spatial-augmentation) is next.
 - **A deployment-day config-delivery gap affects every `NODE_`-prefixed site attribute, not just the
   new one (3 Sept).** Checked what actually setting a per-node commissioning constant requires on
   the real board: `NODE_HOUSEHOLD_PROXIMITY` (existing) and `NODE_DETERRENCE_SCOPE` (new, above) are
