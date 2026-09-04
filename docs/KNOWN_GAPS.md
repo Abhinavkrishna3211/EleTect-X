@@ -849,6 +849,20 @@ criteria — see each entry's status.
     breakdown, sampling method, and seeds are in `ml/vision/boar-representation-audit.md`'s
     per-source table and cross-class-contrast section. This is still characterization, not a
     retrain — none of these three sources have been folded into the training corpus by this pass.
+    **4 Sept update, continued again — SA-FARI's Step 4.2 six-point checklist is complete.** The
+    "approximately 14 videos" figure above was read off the paper's per-species chart and was always
+    hedged as approximate; direct verification against the primary annotation JSONs (gated on HF, the
+    frames themselves unauthenticated on the public GCS bucket the dataset's README names) finds
+    **15 distinct boar/wild-boar videos** (7 test + 8 train, no overlap), not 14. All six checklist
+    items are done: file integrity (pass), label correctness by eye on 15/15 (13 unambiguous, 2 flagged
+    marginal at long IR range), real night/IR count among the 15 (5/15 = 33%, not the dataset-wide
+    598/11,609 figure), mask-to-box tightness (median fill 0.69 across 1,217 frames, zero mask-exceeds-
+    box defects), and a train/test tracklet-leakage check (clean — no camera-location overlap between
+    the positive test and train video sets). Full detail and the per-video breakdown are in
+    `ml/vision/boar-representation-audit.md`'s Sourcing plan section. Net read unchanged from the
+    licence-clearance note above: real, clean data, still a small supplement at n=15, not folded into
+    the training corpus by this pass — that conversion step (frame extraction, mask-to-box, a
+    leakage-safe sampling policy) is separate work not yet started.
 - **A deployment-day config-delivery gap affects every `NODE_`-prefixed site attribute, not just the
   new one (3 Sept).** Checked what actually setting a per-node commissioning constant requires on
   the real board: `NODE_HOUSEHOLD_PROXIMITY` (existing) and `NODE_DETERRENCE_SCOPE` (new, above) are
