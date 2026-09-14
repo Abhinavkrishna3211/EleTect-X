@@ -239,8 +239,7 @@ export const products = [
     body: 'A solar-powered digital sign that lights up only when EleTect X detects an animal nearby, so drivers trust it every time.',
     specs: [
       'Triggered live by nearby EleTect X nodes',
-      'High-visibility solar e-ink / LED display',
-      'Bilingual: English + Malayalam',
+      'High-visibility solar LED display',
       'Solar-powered, no grid connection needed',
     ],
   },
