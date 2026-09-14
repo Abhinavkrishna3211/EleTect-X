@@ -15,7 +15,7 @@ export function Home() {
           <div className="border-brand-green/40 bg-[#0F1D14]/60 mb-5 inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5">
             <span className="bg-brand-green h-1.5 w-1.5 animate-pulse rounded-full" />
             <span className="text-[#9DC7AC] font-mono text-[11.5px] font-semibold tracking-[0.14em]">
-              FIELD-TESTED WITH THE KERALA FOREST DEPARTMENT
+              FIELD TRIAL IN PROGRESS WITH THE KERALA FOREST DEPARTMENT
             </span>
           </div>
           <h1 className="mb-5 max-w-[13ch] font-serif text-[clamp(44px,7.5vw,92px)] leading-[1.02] font-normal tracking-tight">
