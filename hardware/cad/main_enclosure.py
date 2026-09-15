@@ -223,7 +223,7 @@ for name, x, y, w, d, h, source in tray_positions:
 # Export
 # ---------------------------------------------------------------------------
 
-out_dir = "/home/claude/enclosure_cad"
+out_dir = "/tmp/enclosure_cad"
 shell.val().exportStep(f"{out_dir}/main_enclosure_shell.step")
 cq.exporters.export(shell, f"{out_dir}/main_enclosure_shell.stl")
 mppt_ref.val().exportStep(f"{out_dir}/reference_mppt_controller.step")

@@ -59,7 +59,7 @@ pays for.
 - **Fork/vendor a UNO Q board definition into PlatformIO:** rejected — no upstream definition
   exists, Zephyr-Arduino-Core's actual flash chain isn't PlatformIO's `platform-*` model, and
   maintaining a private board definition is exactly the kind of unnecessary abstraction/maintenance
-  burden `CLAUDE.md`'s "prefer simplicity" rule warns against for a two-person team on a deadline.
+  burden this project's "prefer simplicity" convention warns against for a two-person team on a deadline.
 
 ## Consequences
 + Every pure-function change gets a real compiler and a known-answer test before it ever reaches
