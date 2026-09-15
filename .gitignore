@@ -73,4 +73,11 @@ secrets/
 device/mcu/src/secrets.h
 
 # --- Local session-output scratch (not project deliverables) ---
-Claude outputs/
+Session outputs/
+
+# --- Internal working/session docs (local only, not product deliverables) ---
+/HANDOVER.md
+/CONTEXT.md
+/EleTect-X.code-workspace
+/docs/VISION_MODEL_BUILD_PROMPT.md
+/docs/qa/boar-gap-session-notes.md
