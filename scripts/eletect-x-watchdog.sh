@@ -8,8 +8,8 @@
 # ~/ArduinoApps/eletect-x/.cache/app-compose.yaml on every redeploy, and that
 # generated file carries no restart policy of its own — so a future redeploy
 # silently reverts to Docker's default `no` policy. This script is the
-# durable layer: it runs from the arduino user's own crontab (no sudo, see
-# CLAUDE.md), checks the app's status through arduino-app-cli itself rather
+# durable layer: it runs from the arduino user's own crontab (no sudo, per
+# project convention), checks the app's status through arduino-app-cli itself rather
 # than assuming a fixed container name, restarts it if it isn't running, and
 # re-asserts the restart policy on whatever container is currently in place.
 #
