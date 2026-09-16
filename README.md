@@ -106,7 +106,7 @@ were made. Start with `0001` for the core sensing/vision/fusion architecture.
 ## Status
 
 Build complete — firmware, cognition layers, and the web app are done. The project is now in
-field validation and testing with the Kerala Forest Department.
+field validation and testing.
 
 ## License
 
