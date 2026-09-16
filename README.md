@@ -110,4 +110,4 @@ field validation and testing.
 
 ## License
 
-Proprietary — see [`LICENSE`](LICENSE).
+MIT — see [`LICENSE`](LICENSE).
