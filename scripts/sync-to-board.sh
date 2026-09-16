@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# One-directional sync: repo (device/mcu + device/mpu) -> the UNO Q's own App
-# Lab app folder. The git monorepo is the source of truth
+# One-directional sync: repo (app-lab/<app> + device/mcu + device/mpu) -> the
+# UNO Q's own App Lab app folder. The git monorepo is the source of truth
 # (ENGINEERING_CONVENTIONS.md 5) — App Lab's on-board editor is never the
 # place changes originate (DEVICE_DEVELOPMENT_WORKFLOW.md 2). Run this after
 # every edit, before building/flashing from App Lab or the Arduino App CLI.
+# See app-lab/eletect-x/README.md for the one-command deploy story this
+# script is the engine of.
 #
 # Only syncs the real EleTect-X app's sketch/python trees. The disposable
 # device/mpu/bench/ping app is deliberately not wired into this script — see
@@ -29,6 +31,7 @@ APP_ROOT="/home/${BOARD_USER}/ArduinoApps/${APP_NAME}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MCU_DIR="${REPO_ROOT}/device/mcu"
 MPU_DIR="${REPO_ROOT}/device/mpu"
+APP_LAB_DIR="${REPO_ROOT}/app-lab/${APP_NAME}"
 
 echo "==> 1. Sanity: local device/mcu tree present"
 [ -d "${MCU_DIR}/src" ] || { echo "   MISSING ${MCU_DIR}/src — aborting"; exit 1; }
@@ -39,6 +42,7 @@ if [ ! -f "${MCU_DIR}/src/secrets.h" ]; then
   echo "   own header comment). Aborting rather than sync a sketch with no LoRa identity."
   exit 1
 fi
+[ -f "${APP_LAB_DIR}/app.yaml" ] || { echo "   MISSING ${APP_LAB_DIR}/app.yaml — aborting"; exit 1; }
 
 echo "==> 2. Reachability check: ${BOARD_USER}@${BOARD_HOST}"
 if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "${BOARD_USER}@${BOARD_HOST}" true 2>/dev/null; then
@@ -52,7 +56,19 @@ fi
 echo "==> 3. Ensure app skeleton exists on the board (${APP_ROOT})"
 ssh "${BOARD_USER}@${BOARD_HOST}" "mkdir -p '${APP_ROOT}/sketch' '${APP_ROOT}/python' '${APP_ROOT}/assets'"
 
-echo "==> 4. rsync src/ -> sketch/ (one-directional, deletes files removed locally)"
+echo "==> 4. rsync app-lab/${APP_NAME}/ -> app root (app.yaml + assets/, not sketch/python)"
+# App Lab needs app.yaml at the app root to recognize the folder as an app at
+# all (device/mpu/README.md's "App Lab / Bridge field notes" gap on this).
+# assets/ is currently empty (.gitkeep only) but always synced so a future
+# asset lands without a script change.
+rsync -avz --delete \
+  --exclude='sketch/' \
+  --exclude='python/' \
+  --exclude='README.md' \
+  "${APP_LAB_DIR}/" \
+  "${BOARD_USER}@${BOARD_HOST}:${APP_ROOT}/"
+
+echo "==> 5. rsync src/ -> sketch/ (one-directional, deletes files removed locally)"
 # --delete keeps the board's sketch/ an exact mirror of src/ so a file removed
 # in the repo does not linger on the board as stale dead code. hostshim/ and
 # tests/ are host-only (platformio.ini's build_src_filter) and never sync —
@@ -69,10 +85,10 @@ rsync -avz --delete \
   "${MCU_DIR}/src/" \
   "${BOARD_USER}@${BOARD_HOST}:${APP_ROOT}/sketch/"
 
-echo "==> 5. Sanity: local device/mpu tree present"
+echo "==> 6. Sanity: local device/mpu tree present"
 [ -d "${MPU_DIR}/bridge" ] || { echo "   MISSING ${MPU_DIR}/bridge — aborting"; exit 1; }
 
-echo "==> 6. rsync device/mpu/ -> python/ (one-directional, deletes files removed locally)"
+echo "==> 7. rsync device/mpu/ -> python/ (one-directional, deletes files removed locally)"
 # --delete keeps the board's python/ an exact mirror of device/mpu/ so a file
 # removed in the repo does not linger on the board as stale dead code.
 # tests/, bench/ and pyproject.toml are host-only (ruff/pytest never run on
@@ -91,4 +107,4 @@ rsync -avz --delete \
   "${MPU_DIR}/" \
   "${BOARD_USER}@${BOARD_HOST}:${APP_ROOT}/python/"
 
-echo "==> 7. DONE. Build/flash from App Lab, or over SSH with the Arduino App CLI."
+echo "==> 8. DONE. Build/flash from App Lab, or over SSH with the Arduino App CLI."
