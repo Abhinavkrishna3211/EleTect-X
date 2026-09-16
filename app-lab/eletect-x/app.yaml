@@ -1,0 +1,10 @@
+# App Lab manifest for the real EleTect-X app (not the disposable bench apps
+# under device/mpu/bench/). Field names follow the same shape confirmed for
+# the ping bench (device/mpu/bench/ping/app.yaml) — name/description/version
+# — but have not independently been diffed against a fresh App Lab-generated
+# app.yaml on this board. If App Lab's own wizard ever produces a file with
+# different or additional fields, reconcile this one against that instead of
+# assuming this file alone is authoritative.
+name: eletect-x
+description: Autonomous seismic-primary elephant early-warning and deterrence node.
+version: "0.1.0"
