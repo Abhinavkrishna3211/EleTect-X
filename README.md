@@ -105,9 +105,8 @@ were made. Start with `0001` for the core sensing/vision/fusion architecture.
 
 ## Status
 
-Active development. Architecture frozen (see the ADRs); firmware and cognition layers are in
-active bench validation, the web app is built, and field deployment with the Kerala Forest
-Department is in progress.
+Build complete — firmware, cognition layers, and the web app are done. The project is now in
+field validation and testing with the Kerala Forest Department.
 
 ## License
 
