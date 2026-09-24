@@ -27,6 +27,7 @@ inside `open_v4l2_capture`, never at module scope.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -48,6 +49,7 @@ _CAP_PROP_FPS = 5
 _CAP_PROP_FOURCC = 6
 _CAP_PROP_EXPOSURE = 15
 _CAP_PROP_AUTO_EXPOSURE = 21
+_CAP_PROP_BACKLIGHT = 32
 
 # UVC's own exposure-mode menu (uvcvideo's auto_exposure control, not a
 # cv2 constant) - confirmed live against this exact camera 3 Sept 2026
@@ -58,6 +60,16 @@ _CAP_PROP_AUTO_EXPOSURE = 21
 # and 2 (shutter priority) are UVC values this camera never reports.
 _UVC_EXPOSURE_MODE_AUTO = 3
 _UVC_EXPOSURE_MODE_MANUAL = 1
+
+# v4l2-ctl --list-ctrls on this exact camera (24 Sept 2026): backlight_compensation
+# is min=0 max=2 default=1. Forcing it to 2 (max) at every open() alongside the
+# auto-exposure assert above - diagnosed 24 Sept as the fix for a daytime
+# false-fire storm: canopy-gap backlight was blowing out foreground foliage under
+# plain auto-exposure, degenerate-Boar/Elephant-reading the overexposed frames.
+# Independent of _UVC_EXPOSURE_MODE_AUTO/MANUAL and untouched by
+# lock_night_exposure()/restore_auto_exposure(), so it persists through night-lock
+# cycles without needing to be re-asserted there.
+_BACKLIGHT_COMPENSATION_MAX = 2
 
 
 class CameraError(RuntimeError):
@@ -160,7 +172,21 @@ def open_v4l2_capture(device: str, width: int, height: int, fourcc: str) -> _Cap
     (device/mpu/README.md's host-test harness).
 
     Args:
-        device: V4L2 device path, e.g. "/dev/video0".
+        device: V4L2 device path, e.g. "/dev/video0". May also be a
+            by-id symlink (config.CAMERA_DEVICE's default) - resolved to
+            its real /dev/videoN target below before being handed to
+            OpenCV, since cv2's V4L2 backend refuses to open a symlink
+            path directly: "backend is generally available but can't be
+            used to capture by name" (confirmed 7 Sept 2026 inside the
+            eletect-x-hometest container - the by-id symlink and target
+            both resolved fine via v4l2-ctl on the host and the whole
+            /dev tree was bind-mounted in, so this is an OpenCV V4L2
+            quirk about the path shape, not a missing-device or
+            permissions problem). Resolving here rather than caching the
+            by-id -> real-path mapping in config keeps the reboot/
+            replug robustness config.CAMERA_DEVICE's own comment
+            documents - the symlink is still followed fresh on every
+            open() call, only the string handed to cv2 changes shape.
         width: Requested frame width in pixels.
         height: Requested frame height in pixels.
         fourcc: 4-character pixel format code, e.g. "MJPG".
@@ -173,7 +199,8 @@ def open_v4l2_capture(device: str, width: int, height: int, fourcc: str) -> _Cap
     """
     import cv2  # noqa: PLC0415 (deliberately local, see module docstring)
 
-    capture = cv2.VideoCapture(device, cv2.CAP_V4L2)
+    resolved_device = os.path.realpath(device)
+    capture = cv2.VideoCapture(resolved_device, cv2.CAP_V4L2)
     capture.set(cv2.CAP_PROP_FOURCC, fourcc_to_int(fourcc))
     capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
@@ -337,6 +364,14 @@ class Camera:
                 self._device,
                 exc,
             )
+        try:
+            capture.set(_CAP_PROP_BACKLIGHT, _BACKLIGHT_COMPENSATION_MAX)
+        except Exception as exc:  # noqa: BLE001 - must never block camera open
+            logger.warning(
+                "camera %s: could not assert backlight compensation at open: %s",
+                self._device,
+                exc,
+            )
 
     def _consume_warmup_frames(self, capture: _CaptureHandle) -> str:
         """Grab and discard `warmup_frames` frames; release and return an error on failure.
@@ -480,12 +515,97 @@ class Camera:
         )
         return False
 
+    def restore_auto_exposure(self) -> bool:
+        """Switch back to auto exposure; verifies the write took.
+
+        The reversal lock_night_exposure() has never had: that method can
+        only move the device from auto to manual, and there was previously
+        no way back short of close() + open() (which re-runs
+        _assert_auto_exposure(), but at the cost of a full device
+        reopen). Callers that lock exposure for something other than a
+        single one-shot burst - services/home_test.py's periodic
+        day/night re-evaluation is the first - need a way to relax the
+        lock again once the scene brightens, without tearing down the
+        capture handle.
+
+        Deliberately does NOT consult NIGHT_EXPOSURE_LOCK_ENABLED, unlike
+        lock_night_exposure(). That kill switch means "never lock manual
+        exposure" - forcing auto is exactly how a caller honours it, so
+        this method must stay usable even when the switch is off; gating
+        it on the same flag would make it impossible to ever leave manual
+        mode once something else (or a stale device) had put the camera
+        there.
+
+        Read-back verified rather than trusted, same discipline as
+        lock_night_exposure() and for the same reason: a set() that
+        reports success on a control the device silently ignores is a
+        documented failure mode on this camera+container path.
+
+        Returns:
+            True only if auto-exposure mode reads back as requested.
+            False on a write that did not stick or on any error - callers
+            treat False the same way lock_night_exposure()'s False is
+            treated: continue on whatever exposure mode the camera
+            already had, never a reason to skip the capture.
+
+        Raises:
+            CameraError: If called before open() or after close().
+        """
+        capture = self._require_open()
+        try:
+            capture.set(_CAP_PROP_AUTO_EXPOSURE, _UVC_EXPOSURE_MODE_AUTO)
+            mode_ok = int(capture.get(_CAP_PROP_AUTO_EXPOSURE)) == _UVC_EXPOSURE_MODE_AUTO
+        except Exception as exc:  # noqa: BLE001 - a camera control failure must not block capture
+            logger.warning("camera %s: auto-exposure restore raised: %s", self._device, exc)
+            return False
+        if mode_ok:
+            logger.info("camera %s: auto-exposure restored", self._device)
+            return True
+        logger.warning(
+            "camera %s: auto-exposure restore did not take (mode_ok=%s) "
+            "- continuing on whatever exposure mode the camera already had",
+            self._device,
+            mode_ok,
+        )
+        return False
+
     def close(self) -> None:
         """Release the device. Idempotent - safe to call multiple times."""
         if self._capture is not None:
             self._capture.release()
             self._capture = None
         self._info = None
+
+    def reopen(self) -> bool:
+        """Release the handle and open a fresh one on the same device path.
+
+        For a camera that has stopped delivering frames while the process
+        keeps running - a USB link reset (brown-out, hub power cycle) drops
+        the device node and every subsequent capture_frame() returns None,
+        but the kernel re-enumerates the same node seconds later and a new
+        capture handle on it recovers without restarting the process or the
+        board. This is the in-place middle ground between capture_frame()'s
+        per-grab None (too small a hammer for a device that is gone) and a
+        container/board restart (too big).
+
+        Best-effort by contract: returns True only once the device is open
+        and its warmup grabs succeeded, False on any failure, and never
+        raises - a caller in a capture loop treats False as "still down,
+        try again later / escalate."
+        """
+        try:
+            self.close()
+        except Exception as exc:  # noqa: BLE001 - reopen must not raise
+            logger.warning("camera %s: close() during reopen raised: %s", self._device, exc)
+            self._capture = None
+            self._info = None
+        try:
+            self.open()
+        except CameraError as exc:
+            logger.warning("camera %s: reopen failed: %s", self._device, exc)
+            return False
+        logger.info("camera %s: reopened", self._device)
+        return True
 
     def _require_open(self) -> _CaptureHandle:
         if self._capture is None:
