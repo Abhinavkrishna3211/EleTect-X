@@ -97,6 +97,28 @@ static void test_at_playnum_command_rejects_null_or_zero_length(void) {
   TEST_ASSERT_FALSE(horn_at_playnum_command(1, buf, 0));
 }
 
+// --- horn_at_playfile_command ------------------------------------------------
+
+static void test_at_playfile_command_prepends_the_root_slash(void) {
+  char buf[96];
+  TEST_ASSERT_TRUE(horn_at_playfile_command("bee.mp3", buf, sizeof(buf)));
+  TEST_ASSERT_EQUAL_STRING("AT+PLAYFILE=/bee.mp3\r\n", buf);
+}
+
+static void test_at_playfile_command_rejects_a_buffer_that_cannot_hold_it(void) {
+  char buf[16] = {'x'};
+  // "AT+PLAYFILE=/bee.mp3\r\n" + NUL needs 23 bytes; 16 is not enough.
+  TEST_ASSERT_FALSE(horn_at_playfile_command("bee.mp3", buf, sizeof(buf)));
+  TEST_ASSERT_EQUAL_CHAR('\0', buf[0]);
+}
+
+static void test_at_playfile_command_rejects_null_or_zero_length(void) {
+  char buf[96];
+  TEST_ASSERT_FALSE(horn_at_playfile_command(nullptr, buf, sizeof(buf)));
+  TEST_ASSERT_FALSE(horn_at_playfile_command("bee.mp3", nullptr, sizeof(buf)));
+  TEST_ASSERT_FALSE(horn_at_playfile_command("bee.mp3", buf, 0));
+}
+
 // --- horn_at_playmode_command ------------------------------------------------
 
 static void test_at_playmode_command_exact_string(void) {
@@ -157,6 +179,9 @@ int main(int, char **) {
   RUN_TEST(test_at_playnum_command_exact_string);
   RUN_TEST(test_at_playnum_command_rejects_a_buffer_that_cannot_hold_it);
   RUN_TEST(test_at_playnum_command_rejects_null_or_zero_length);
+  RUN_TEST(test_at_playfile_command_prepends_the_root_slash);
+  RUN_TEST(test_at_playfile_command_rejects_a_buffer_that_cannot_hold_it);
+  RUN_TEST(test_at_playfile_command_rejects_null_or_zero_length);
   RUN_TEST(test_at_playmode_command_exact_string);
   RUN_TEST(test_at_playmode_command_rejects_a_buffer_that_cannot_hold_it);
   RUN_TEST(test_at_playmode_command_rejects_null_or_zero_length);

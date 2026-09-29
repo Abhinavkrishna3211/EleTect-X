@@ -21,12 +21,14 @@
 #include "Arduino.h"
 #include "config.h"
 #include "mac.h"
+#include "uart_share.h"
 
 void setUp() {
   hostshim::reset();
   while (LORA_SERIAL.available() > 0) {
     LORA_SERIAL.read();
   }
+  uart_share_init();
   lora_init();
 }
 
@@ -248,6 +250,44 @@ static void test_failed_state_backs_off_then_retries_from_idle(void) {
                "sequence from the top");
 }
 
+static void test_horn_taking_the_port_mid_step_restarts_from_the_probe(void) {
+  uint32_t t = 1000;
+  drive_to_state(lora_join_state::kSettingRegion, &t);
+  assert_state(lora_join_state::kSettingRegion, "setup: must reach kSettingRegion");
+  TEST_ASSERT_TRUE(uart_share_owner() == uart_owner::kLora);
+
+  // A horn fire claims USART1 while AT+DR=IN865 is outstanding. The E5's
+  // "+DR:" reply goes to a disconnected wire; whatever sits in the buffer
+  // afterwards is not it.
+  uart_share_acquire(uart_owner::kDfplayer);
+  LORA_SERIAL.host_feed("+DR: IN865 DR0 SF12BW125\r\n");
+
+  t += 10;
+  lora_service(t);
+  TEST_ASSERT_TRUE_MESSAGE(uart_share_owner() == uart_owner::kLora,
+                           "lora_service() must take the port back");
+  assert_state(lora_join_state::kProbing,
+               "a step interrupted by the horn must restart from the AT "
+               "probe, not act on a buffer that may hold the wrong reply");
+  TEST_ASSERT_EQUAL_UINT32(LORA_UART_BAUD, LORA_SERIAL.host_baud());
+}
+
+static void test_joined_and_failed_states_leave_the_port_with_the_dfplayer(void) {
+  uint32_t t = 1000;
+  drive_to_state(lora_join_state::kSettingMode, &t);
+  for (uint8_t retry = 0; retry < LORA_JOIN_MAX_RETRIES + 1; ++retry) {
+    t += LORA_AT_TIMEOUT_MS + 1;
+    lora_service(t);
+  }
+  assert_state(lora_join_state::kFailed, "setup: must reach kFailed");
+
+  uart_share_acquire(uart_owner::kDfplayer);
+  t += 1;
+  lora_service(t);
+  TEST_ASSERT_TRUE_MESSAGE(uart_share_owner() == uart_owner::kDfplayer,
+                           "waiting out a backoff must not pull the port from the DFPlayer");
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_happy_path_full_join_sequence);
@@ -256,5 +296,7 @@ int main(int, char **) {
   RUN_TEST(test_loading_key_does_not_advance_on_bare_ok);
   RUN_TEST(test_timed_out_step_retries_then_fails_after_max_retries);
   RUN_TEST(test_failed_state_backs_off_then_retries_from_idle);
+  RUN_TEST(test_horn_taking_the_port_mid_step_restarts_from_the_probe);
+  RUN_TEST(test_joined_and_failed_states_leave_the_port_with_the_dfplayer);
   return UNITY_END();
 }

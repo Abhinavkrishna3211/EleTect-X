@@ -32,12 +32,21 @@ class HardwareSerial : public Stream {
   size_t host_bytes_written() const { return bytes_written_; }
   void host_reset_bytes_written() { bytes_written_ = 0; }
 
+  // Host-side inspection hooks for the USART1 share (uart_share.cpp): the
+  // baud of the most recent begin(), and how many begin() calls there have
+  // been, so a test can see the port re-opened at the right rate on a switch.
+  unsigned long host_baud() const { return baud_; }
+  size_t host_begin_count() const { return begin_count_; }
+  void host_reset_begin_count() { begin_count_ = 0; }
+
  private:
   static constexpr size_t kRxCapacity = 512;
   char rx_[kRxCapacity] = {};
   size_t rx_head_ = 0;
   size_t rx_tail_ = 0;
   size_t bytes_written_ = 0;
+  unsigned long baud_ = 0;
+  size_t begin_count_ = 0;
 };
 
 extern HardwareSerial Serial;

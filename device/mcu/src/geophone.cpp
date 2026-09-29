@@ -144,12 +144,22 @@ void geophone_service() {
   // back-to-back calls can return the same conversion (KNOWN_GAPS) - this
   // gate bounds the console to the nominal sample rate, it does not make
   // the samples themselves any fresher.
+#if !HOME_TEST_MODE
+  // Suppressed in HOME_TEST_MODE: this console print and the Bridge that
+  // carries drive_led/pulse_ir both ride lpuart1
+  // (device/mcu/src/main.cpp's top comment), and HOME_TEST_MODE runs this
+  // stream at up to ~113 Hz (config.h's SEISMIC_STREAM_BRIDGE_EVERY_N_SAMPLES
+  // override) - a console flood at that rate on the same link an actuator
+  // call needs is not a combination this project has ever run. The Bridge
+  // relay two paragraphs below is untouched and is HOME_TEST_MODE's actual
+  // delivery path for this data.
   static uint32_t s_last_stream_print_ms = 0;
   const uint32_t stream_now_ms = millis();
   if (stream_now_ms - s_last_stream_print_ms >= (1000 / SEISMIC_SAMPLE_RATE_HZ)) {
     s_last_stream_print_ms = stream_now_ms;
     Serial.println(volts, 6);
   }
+#endif  // !HOME_TEST_MODE
 
   // Second delivery path, same samples: push every
   // SEISMIC_STREAM_BRIDGE_EVERY_N_SAMPLES-th sample to the MPU over

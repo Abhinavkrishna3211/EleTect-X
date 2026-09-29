@@ -128,7 +128,10 @@ size_t Print::println(double value, int digits) {
   return print(value, digits) + println();
 }
 
-void HardwareSerial::begin(unsigned long) {}
+void HardwareSerial::begin(unsigned long baud) {
+  baud_ = baud;
+  ++begin_count_;
+}
 
 void HardwareSerial::end() {}
 
@@ -200,6 +203,7 @@ void TwoWire::host_feed_raw(int16_t raw_value) {
 
 TwoWire Wire;
 TwoWire Wire1;
+TwoWire Wire2;
 
 void BridgeClass::begin() {}
 

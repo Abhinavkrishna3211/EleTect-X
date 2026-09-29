@@ -14,6 +14,15 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+// Per-unit overrides. A node can carry a config_local.h next to this file
+// (gitignored, never synced over by scripts/sync-to-board.sh) to override any
+// #ifndef-guarded default below without editing the shared tree.
+#if defined(__has_include)
+#if __has_include("config_local.h")
+#include "config_local.h"
+#endif
+#endif
+
 #include <stdint.h>
 
 // ---------------------------------------------------------------------------
@@ -26,25 +35,31 @@
 // (ENGINEERING_CONVENTIONS.md 1).
 //
 // Wiring is plain male-female jumpers to the breakout's 0.1" pin header, not
-// the Qwiic connector: no JST-SH cable is in hand. D20/D21 are I2C2, a bus
-// entirely separate from the Qwiic connector's I2C4 (PD12/PD13), so this
-// leaves Qwiic free for the BME280/MPU-6050 later.
-#define GEOPHONE_I2C_SDA_PIN 20  // PB11, I2C2_SDA (default mapping, no config needed)
-#define GEOPHONE_I2C_SCL_PIN 21  // PB10, I2C2_SCL
+// the Qwiic connector.
+//
+// Moved off D20/D21 (I2C2, PB10/PB11) onto A4/A5 (I2C3, PC1/PC0) during the
+// horn bring-up: the DFPlayer PRO's AT-command link needs a real hardware
+// UART, and usart3 - the only one the board overlay routes to a free header
+// pin pair - is pinned to exactly D20/D21 (see DFPLAYER_SERIAL below). I2C3
+// was free and is enabled in the same overlay, so the geophone moved rather
+// than the DFPlayer link, which has no alternative pin pair. This leaves the
+// Qwiic connector's I2C4 (PD12/PD13) free for the BME280/MPU-6050 later, same
+// as before.
+#define GEOPHONE_I2C_SDA_PIN 18  // PC1, A4, I2C3_SDA
+#define GEOPHONE_I2C_SCL_PIN 19  // PC0, A5, I2C3_SCL
 
-// CONFIRMED on hardware 2026-08-14: `Wire` is the correct instance for I2C2.
-// The arduino:zephyr core declares Wire/Wire1/Wire2/... in the order listed
-// by the board overlay's `zephyr,user { i2cs = <&i2c2>, <&i2c4>, <&i2c3>; }`
-// (arduino_uno_q_stm32u585xx.overlay) - i2c2 is first, so it is `Wire`, not
-// `Wire1` (which binds to i2c4, the Qwiic connector). The generated board
-// .dts confirms i2c2's pinctrl-0 is `i2c2_scl_pb10`/`i2c2_sda_pb11` and that
-// the node is aliased `arduino_i2c` - i.e. i2c2 is the default Arduino I2C
-// header, exactly the PB10/PB11 pins documented above. Cross-checked against
-// real bench data: continuous, plausible, varying ADS1115 differential
-// readings over the socat/TCP console bridge (not silent, not garbage),
-// which is what a correct bus produces - a wrong bus would fail every I2C
-// transaction and produce no ring-buffer writes at all.
-#define GEOPHONE_I2C_BUS Wire
+// `Wire2` is I2C3. The arduino:zephyr core declares Wire/Wire1/Wire2/... in
+// the order listed by the board overlay's
+// `zephyr,user { i2cs = <&i2c2>, <&i2c4>, <&i2c3>; }`
+// (arduino_uno_q_stm32u585xx.overlay): i2c2 is `Wire`, i2c4 is `Wire1`, i2c3
+// is `Wire2`. The overlay's i2c3 node pins `i2c3_scl_pc0`/`i2c3_sda_pc1` -
+// exactly A5/A4 - confirming this mapping independently of the pin numbers
+// above. Re-run the stomp test after this move and confirm continuous,
+// plausible, varying ADS1115 differential readings before trusting anything
+// downstream - a wrong bus fails every I2C transaction and produces no
+// ring-buffer writes at all, the same signature the pre-move `Wire` mapping
+// was confirmed against on 2026-08-14.
+#define GEOPHONE_I2C_BUS Wire2
 
 // 0x48 is the ADS1115 address with ADDR tied to GND - the breakout's default.
 #define ADS1115_I2C_ADDRESS 0x48
@@ -210,19 +225,99 @@
 // this has no autonomous trigger path. Still gated to 0 by default, same
 // discipline as the seismic bench flags above: the point of field builds is
 // that bench-only surface area doesn't exist in them.
+//
+// Set to 1 for the horn bring-up session (adds the raw-AT console mode,
+// fire_test.cpp) - MUST be back to 0 before any field sync.
+//
+// 7 Sept, system audit: reset to 0. No MCU reflash is planned for tonight's
+// test (only device/mpu Python files are pushed via scp to the bind-mounted
+// /app tree), so this had no live effect either way - closing it now just
+// clears a real, previously-flagged-but-unexecuted HANDOVER.md todo before
+// it can be forgotten and shipped in a future flash.
 #define FIRE_TEST_HARNESS 0
 
 // Bench defaults - short and conservative. The real safety backstop is still
 // rule_gate_apply()'s per-actuator caps (HORN_GAIN_MAX_PCT etc. above); these
 // are just sane starting points for a desk-bench test, not a duplicate
 // limit.
-#define FIRE_TEST_HORN_DURATION_MS 500   // well under HORN_BURST_MAX_MS=3000
-#define FIRE_TEST_HORN_GAIN_PCT 30.0f    // under HORN_GAIN_MAX_PCT=60, desk-volume not field-volume
-#define FIRE_TEST_HORN_TRACK_ID 1        // AT+PLAYNUM index 1 = bee swarm (ADR 0016 C track 1); bench wiring check, content is arbitrary
+#define FIRE_TEST_HORN_DURATION_MS 2500  // long enough to identify the clip by ear; still under HORN_BURST_MAX_MS=3000
+#define FIRE_TEST_HORN_GAIN_PCT 30.0f     // under HORN_GAIN_MAX_PCT=60, desk-volume not field-volume - reset from the 25% by-ear-identification bring-up value per HOME_TEST_MODE plan prerequisite 3. A 6 Sept gain-staging trial (60 w/ VOL_L turned down) and a same-day DFPlayer-direct-to-horn isolation test (10, then 4 for track 4/5 at night) both ran temporarily off this default - reverted after each. The isolation test was decisive: all 5 tracks played clean (no siren, no hum) straight off DFPlayer's own onboard amp with the TPA3116/XH-M543 fully out of the circuit, so both artifacts are isolated to that amp board, not DFPlayer/UNO Q/horn/wiring. Only the fire_test.cpp console harness reads this constant, drive_horn's Bridge path always takes gain_pct from the caller
+#define FIRE_TEST_HORN_LISTEN_DURATION_MS 15000  // 'l' command only (horn_debug_listen) - generous ceiling for any clip length; DFPLAYER_PLAYMODE_SINGLE stops the module itself once the track ends, so holding the amp open longer than the clip just plays silence, not a repeat
+#define FIRE_TEST_HORN_TRACK_ID 1        // default track if the harness's track prompt times out/is skipped; AT+PLAYNUM index, content TBD by ear (AT+QUERY=5 unreliable on this unit)
 #define FIRE_TEST_LED_DURATION_MS 1000
 #define FIRE_TEST_LED_GAIN_PCT 50.0f
 #define FIRE_TEST_IR_DURATION_MS 200     // under IR_PULSE_MAX_MS=500
 #define FIRE_TEST_IR_GAIN_PCT 100.0f     // IR is invisible, thermal is the only real constraint
+
+// Raw-AT console mode (fire_test.cpp 'a' command, horn bring-up). Bounded
+// waits, same convention as the actuator durations above: long enough for a
+// human to type a short AT line and for the DFR0768 to answer, short enough
+// that a dropped connection doesn't hang the harness indefinitely.
+#define FIRE_TEST_AT_LINE_TIMEOUT_MS 15000UL
+#define FIRE_TEST_AT_REPLY_TIMEOUT_MS 1000UL
+#define FIRE_TEST_AT_LINE_MAX_LEN 96  // Freesource content filenames run long -
+                                      // "AT+PLAYFILE=/788025__realsquink__intense-angry-bee-swarm-stereo.wav"
+                                      // alone is 67 chars; 64 silently truncated it (dropped ".wav"),
+                                      // producing a malformed path the module ack'd OK without acting on
+
+// ---------------------------------------------------------------------------
+// HOME_TEST_MODE - backyard test build ONLY - MUST be 0 before any field sync
+// ---------------------------------------------------------------------------
+// Second operating mode for a supervised one-night backyard wild-boar test.
+// This is NOT a field flag and must never read 1 on a node headed for the
+// field, same discipline as every other flag in this file marked that way.
+//
+// The MPU half of this toggle is HOME_TEST_MODE in
+// device/mpu/services/config.py (env-var-backed there, since the MPU has an
+// environment to read and the goal is that nobody ships to the field still
+// in test mode). The two flags are deliberately INDEPENDENT - no new
+// cross-process command syncs them. Building a new MCU<->MPU protocol under
+// time pressure to keep two flags in lockstep would be a bigger reliability
+// risk on the night this matters than the two flags ever were; each side
+// just prints which mode it came up in, loudly, at boot, so a mismatch is
+// visible on the console rather than silently wrong.
+//
+// What this flag changes: it turns on the existing bench debug-stream flags
+// below, so the STA/LTA feature stream (not just the binary trigger) is
+// captured for the whole session, for later offline correlation against the
+// MPU's vision detection log. It does NOT touch STA/LTA trigger logic or
+// its thresholds (see the STA/LTA section right below - untouched), and it
+// does NOT touch the deterrence fire path - drive_horn/drive_led/pulse_ir
+// and the tier/rotation logic that picks them are identical in both modes.
+#define HOME_TEST_MODE 0
+
+#if HOME_TEST_MODE
+// Overrides, in force only in a HOME_TEST_MODE build. Each overrides a bench
+// flag defined above in this file - see that flag's own comment for what it
+// does and why its field default is 0.
+
+// Full STA/LTA feature stream (sta/lta/ratio), not just the binary trigger.
+// Field mode logs [trigger] events only; this is the continuous time series
+// tonight's dataset needs to let ml/seismic/'s missing footfall classifier
+// be trained against real labelled ground truth instead of a hand-tuned
+// ratio threshold.
+#undef SEISMIC_DEBUG_VERBOSE
+#define SEISMIC_DEBUG_VERBOSE 1
+
+// Raw geophone volts, relayed to the MPU over the existing
+// debug_stream_raw_seismic_sample Bridge.notify() path (no new message
+// type - see device/mpu/main.py's handler, which appends to a CSV under
+// this same flag rather than adding a third provide()). The direct
+// Serial.println half of this same flag is separately suppressed below
+// (geophone.cpp) because it shares lpuart1 with the Bridge link that
+// drive_led/pulse_ir need, and a 250 Hz console flood on that link is not
+// something this project has ever run concurrently with a live actuator
+// call.
+#undef SEISMIC_DEBUG_STREAM_RAW
+#define SEISMIC_DEBUG_STREAM_RAW 1
+
+// Denser Bridge relay than the bench default of 10 (~25 Hz): 2 gives
+// ~113 Hz at the nominal 250 SPS SEISMIC_SAMPLE_RATE_HZ, still comfortably
+// above the STA/LTA band's ~50 Hz edge and half the Bridge traffic of the
+// full sample rate, which has never been benchmarked end to end.
+#undef SEISMIC_STREAM_BRIDGE_EVERY_N_SAMPLES
+#define SEISMIC_STREAM_BRIDGE_EVERY_N_SAMPLES 2
+#endif  // HOME_TEST_MODE
 
 // ---------------------------------------------------------------------------
 // STA/LTA footfall trigger
@@ -327,36 +422,55 @@
 // AUDIO_TRIGGER_PIN: retained but retired by ADR 0015 Decision E. It was a
 // GPIO pulse into the DFPlayer PRO (DFR0768) KEY input - the only control
 // path available while USART1 on D0/D1 (the sole header UART) was assumed
-// fully claimed by the Grove LoRa-E5. ADR 0015 moves horn control to a
-// dedicated software UART (below) so per-tier volume AND track selection are
-// possible, neither of which the single KEY button can do. Kept #define'd,
-// not deleted, so reverting to the KEY-pin trigger costs nothing if the
-// software-UART path fails bring-up (see DFPLAYER_SERIAL caveat below).
+// fully claimed by the Grove LoRa-E5. Kept #define'd, not deleted, so
+// reverting to the KEY-pin trigger costs nothing if the DFPlayer AT link
+// ever needs to be bypassed.
 #define AUDIO_TRIGGER_PIN 2
 
-// DFPlayer PRO (DFR0768) AT-command link, added by ADR 0015 Decision A. Two
-// of PIN_MAP.md's explicitly free pins: D9 (PB8) MCU TX -> DFPlayer RX,
-// D10 (PB9) MCU RX <- DFPlayer TX. 115200 baud is DFR0768's confirmed
-// default and the exact rate DFRobot's own DFRobot_DF1201S SoftwareSerial
-// example uses.
+// DFPlayer PRO (DFR0768) AT-command link. ADR 0015 Decision A originally
+// specified a software UART on D9/D10 (PB8/PB9) - impossible on this part:
+// PB8/PB9 have no UART TX/RX alternate function in the STM32U585 pinctrl
+// tables at all, and the arduino:zephyr core ships no SoftwareSerial (Zephyr
+// has no bit-banged UART driver).
 //
-// UNVERIFIED, same convention as LORA_SERIAL's own caveat below: the UNO Q
-// MCU core runs on Zephyr, a non-AVR target, and whether this Arduino Core
-// ships a working SoftwareSerial equivalent for D9/D10 is NOT confirmed.
-// ADR 0015 Decision A calls this "the single highest-priority thing to
-// confirm at bring-up" - no firmware depending on it is trusted until then.
-#define DFPLAYER_UART_TX_PIN 9   // PB8 -> DFR0768 RX
-#define DFPLAYER_UART_RX_PIN 10  // PB9 <- DFR0768 TX
+// A second candidate, `usart3` on D20/D21, was also ruled out: the official
+// UNO Q pinout diagram lists D20/D21 as I2C2 SDA/SCL only - the UART/USART
+// column for both rows is empty. There is no `usart3` reachable from either
+// header. That closes both non-header options too: JMISC/JMEDIA are 1.8V,
+// explicitly marked "cannot be used as regular GPIOs" on the official
+// diagram, and physically inaccessible on this board regardless.
+//
+// USART1 (D0/D1) is therefore the only hardware UART this board exposes at
+// all, on any header, so the DFPlayer and the LoRa-E5 share it through a
+// 74HC4053 bus switch (UART_SHARE_* below, ADR 0029): DFR0768 TX -> Y0,
+// DFR0768 RX <- X0, with the switch commons on D0/D1. See DFPLAYER_SERIAL
+// below for the naming rationale.
 #define DFPLAYER_UART_BAUD 115200UL
 
-// The stream horn.cpp writes AT commands to. Aliased to Serial1 for the host
-// build (hostshim provides it) and for the same reason LORA_SERIAL aliases
-// Serial - the pure command-string/volume logic (horn_at_vol_command,
+// Minimum gap horn.cpp holds between two consecutive AT command sends to the
+// DFR0768. Not from a datasheet number - the module's AT parser has shown
+// signs of dropping/misapplying a command sent immediately after another over
+// UART (Stage C bring-up: AT+PLAYMODE=3 resent before every fire still did not
+// stop the module from auto-advancing through every track, DFRobot forum
+// "DFPlayer Pro Playmode Resets"). A small settle gap between sends is the
+// standard workaround for this class of cheap AT-command audio module and
+// costs only tens of ms against HORN_AMP_ENABLE_DELAY_MS's existing budget.
+#define DFPLAYER_AT_COMMAND_GAP_MS 50
+
+// The stream horn.cpp writes AT commands to. `Serial1` is usart1 = D0/D1 -
+// the arduino:zephyr core skips the first serial index whenever the board
+// overlay declares `arduino,router-serial` (this board does, for Bridge), so
+// index 0 is `Serial1`, not `Serial`: `Serial1` = usart1 = D0/D1, `Serial2` =
+// lpuart1 = Bridge, `Serial3` = usart3 = D21/D20 (unreachable - see above). Bare `Serial` is the Bridge Monitor stream,
+// not a physical wire - confirmed by this project's own LORA_SERIAL
+// correction below - so it stays safe for fire_test.cpp's interactive
+// console to keep using while DFPLAYER_SERIAL sits on Serial1: the human
+// types into Serial, the DFPlayer link is Serial1, they cannot collide.
+// The host build resolves Serial1 to hostshim's stub; the pure
+// command-string/volume logic (horn_at_vol_command,
 // horn_at_playnum_command, horn_dfplayer_volume_from_gain_pct) is what the
-// host tests exercise, not the transport. On the real board this must be
-// bound to the D9/D10 software-UART instance once SoftwareSerial support is
-// confirmed; until then the AT writes go nowhere and the horn is silent.
-#define DFPLAYER_SERIAL Serial1
+// host tests exercise, not the transport. Recorded in ADR 0029.
+#define DFPLAYER_SERIAL UART_SHARE_SERIAL
 
 // AT+VOL parameter range on the DFR0768 (protocol reference: 0-30 absolute).
 // horn_dfplayer_volume_from_gain_pct() maps the wire gain_pct (0-100, already
@@ -367,9 +481,9 @@
 // modes: 1 single-loop, 2 all-loop, 3 play-once, 4 random, 5 folder-loop). A
 // deterrence burst must not loop - the amp shutdown ends it on schedule, but a
 // looping module would keep driving the DAC behind a muted amp until the next
-// fire. horn.cpp sends this once per boot on the first fire, not in horn_init(),
-// and re-sends it every boot because the DFR0768 does not reliably persist the
-// play mode across a power cycle.
+// fire. horn.cpp re-sends this before every fire, not once in horn_init() or
+// on a first-fire latch, because the DFR0768 does not reliably persist the
+// play mode across a power cycle and a single send is not verified to land.
 #define DFPLAYER_PLAYMODE_SINGLE 3
 
 // The DFR0768 has 128 MB of onboard flash and NO SD-card slot: audio files are
@@ -382,8 +496,16 @@
 // TPA3116D2 shutdown pin, active low. ADR 0003 drives a single BTL channel,
 // not PBTL: at the 12.8 V rail one channel already puts the SUH-15 well above
 // the 105 dB/1 m field-validated deterrence reference, while PBTL would exceed
-// the horn's own 23 W maximum.
-#define HORN_AMP_ENABLE_PIN 4  // PA12
+// the horn's own 23 W maximum. Low-side switch on the amp's GND return (an
+// IRLZ44N gate on D11), not in series with VCC - VCC feeds the amp directly
+// off the raw battery bus (hardware/PIN_MAP.md power-rail table).
+//
+// D11 (PB15), not the originally-specified D4: D4 is PA12, USB_OTG_FS D+,
+// claimed by the Arduino core's USB CDC - digitalWrite there is a silent
+// no-op, the same trap that latched the left LED wing on via D5/PA11 before
+// that moved to D3. D11 is otherwise-unused SPI2 MOSI and matches the
+// physical wiring confirmed at bring-up.
+#define HORN_AMP_ENABLE_PIN 11  // PB15
 
 // Width of the DFPlayer trigger pulse - long enough to register as a press on
 // its input, short enough not to read as a long-press.
@@ -397,8 +519,29 @@
 //
 // INVENTED - no measured DFPlayer trigger-to-audio latency backs this number.
 // Measure it at Rung 3 and tune for both pop suppression and clip-start
-// integrity (KNOWN_GAPS).
-#define HORN_AMP_ENABLE_DELAY_MS 150
+// integrity (KNOWN_GAPS). Bumped from the original 150 during Stage C bench
+// testing: track 1 played clean at 150ms but track 2 consistently produced
+// crackle/noise instead of content through the identical fire sequence,
+// pointing at a per-file seek/decode-start latency this value did not cover.
+#define HORN_AMP_ENABLE_DELAY_MS 600
+
+// Bench bring-up (6 Sept) found a second, separate transient this delay does
+// not cover: the TPA3116D2's own power-up/soft-start sequence produces an
+// audible rising-falling sweep every time D11 brings it out of shutdown,
+// independent of what DFPlayer is doing - confirmed on the bench by the
+// sweep appearing identically on every track, not just one. This board has
+// no exposed SD/MUTE pin to gate instead (checked the silkscreen around the
+// TPA3116D2 - none), so the sweep cannot be removed with this hardware.
+//
+// A trial moved the amp-enable ahead of the AT commands, on the theory that
+// the sweep should land on DFPlayer's silence instead of overlapping the
+// track's onset - that trial produced a dropped AT+PLAYNUM (silent no-play,
+// no ack check to catch it) on at least one fire, most likely a live,
+// actively-switching amp injecting noise onto DFPlayer's own UART RX right
+// as the command went out. Reverted (see horn.cpp): a horn that sometimes
+// plays nothing is a worse failure than one with an audible sweep on every
+// fire. KNOWN_GAPS: the sweep itself remains unsolved - a real SD/MUTE pin,
+// or ruling out this UART-noise theory with a scope, are the next leads.
 
 // ADR 0003 requires a burst-duration cap and a cooldown as an animal-welfare
 // safeguard and to bound battery draw, but names no numbers. All three values
@@ -409,9 +552,36 @@
 // provoke needs, and far short of continuous exposure.
 #define HORN_BURST_MAX_MS 3000
 
-// 30 s between bursts. Long enough that a node cannot harass an animal that
-// has not moved, short enough to re-fire at an animal still approaching.
-#define HORN_COOLDOWN_MS 30000
+// 10 s between bursts. Cut from an original 30 s (bring-up, 6 Sept) to
+// re-fire faster at an animal still approaching or lingering, at the cost of
+// a shorter minimum gap for one that has already stopped moving - a
+// deliberate trade toward deterrence responsiveness, not yet field-validated
+// (KNOWN_GAPS).
+#define HORN_COOLDOWN_MS 10000
+
+// A single HORN_BURST_MAX_MS (3 s) roar was field-tested 7 Sept against a
+// real elephant/wild-boar encounter and judged an insufficient deterrent
+// stimulus on the spot - one short burst did not read as convincingly as
+// multiple. horn_fire_sequence() now replays the track HORN_REPEAT_COUNT
+// times per drive_horn() call, each repeat re-triggering AT+PLAYNUM (see
+// horn.cpp) rather than looping playback on the DFPlayer itself, with
+// HORN_REPEAT_GAP_MS of amp-off silence between repeats so they read as
+// distinct roars and not one long one.
+//
+// Trade-off, not yet field-validated (KNOWN_GAPS): this multiplies the
+// single-fire stall horn_fire_sequence() already imposes on the MCU's
+// single-threaded loop() (starving geophone_service()/lora_service() for the
+// duration). At the worst case - HORN_BURST_MAX_MS clamp hit on every
+// repeat - three repeats at 3 s plus per-repeat AT-command/amp-enable
+// overhead (4 AT sends at DFPLAYER_AT_COMMAND_GAP_MS each, plus
+// HORN_AMP_ENABLE_DELAY_MS - about 0.8 s) plus two HORN_REPEAT_GAP_MS gaps
+// runs to roughly 12.2 s: 3*(0.8+3.0) + 2*0.4. This is now the MCU's
+// worst-case single-fire stall, longer than the LED path's - see
+// LED_BURST_MAX_MS below, deliberately raised past it. The gate's
+// cooldown/g_last_fire_ms bookkeeping is unaffected - one repeated fire is
+// still exactly one drive_horn() call for cooldown purposes, same as before.
+#define HORN_REPEAT_COUNT 3
+#define HORN_REPEAT_GAP_MS 400
 
 // Software gain ceiling, as a percentage of the channel's full output. ADR
 // 0003 limits delivered power to roughly 6-8 W of the channel's ~12 W at the
@@ -432,9 +602,23 @@
 
 // Light is far cheaper to run than the horn and less aversive, so it gets a
 // longer cap and a shorter cooldown - independent counters from the horn, per
-// device/mpu/bridge/schema.md. Provisional, same as the horn values above.
-#define LED_BURST_MAX_MS 10000
-#define LED_COOLDOWN_MS 20000
+// device/mpu/bridge/schema.md. Cut from an original 20 s alongside
+// HORN_COOLDOWN_MS's 6 Sept reduction, same deterrence-responsiveness trade,
+// not yet field-validated (KNOWN_GAPS).
+//
+// Raised from 10000 to 12500 on 7 Sept, same day as HORN_REPEAT_COUNT above:
+// field feedback wanted the light illusion running "as long as the sound
+// gets played," and a fixed 10 s cap would go dark before the horn's new
+// ~12.2 s worst-case multi-roar fire finishes. 12500 clears that worst case
+// with a little headroom; re-check this bound if HORN_REPEAT_COUNT,
+// HORN_REPEAT_GAP_MS, or HORN_BURST_MAX_MS change. Tier 2/3 already select
+// led_pattern_id 4/5 (kSweep / kPulseBothSync, cognition/config.py) - the
+// antiphase dual-wing "apparent-movement cue" ADR 0014 E.1 calls out - so the
+// movement/predator-presence illusion this is meant to run alongside is
+// already the pattern the field-tested tiers fire; this change is what keeps
+// it lit for the horn's whole roar instead of cutting out partway through.
+#define LED_BURST_MAX_MS 12500
+#define LED_COOLDOWN_MS 8000
 #define LED_GAIN_MAX_PCT 100.0f
 
 // ADR 0014 pattern-axis timing. The four patterns (led.h's led_pattern) all
@@ -515,39 +699,94 @@
 // ---------------------------------------------------------------------------
 // LoRaWAN - Grove LoRa-E5, IN865 (ADR 0002)
 // ---------------------------------------------------------------------------
-// USART1 is the only UART on the top headers. Whether the Arduino Core also
-// claims it for the sketch console is unconfirmed (KNOWN_GAPS).
+// LoRa and DFPlayer share USART1/D0-D1 (the board's only header UART - see
+// DFPLAYER_UART_BAUD above for why no other pin pair works) through a
+// 74HC4053 bus switch, arbitrated in uart_share.cpp (ADR 0029). main.cpp
+// gates lora_init()/lora_service() on this. Setting it 0 builds a
+// DFPlayer-only image: D0/D1 belong to the DFR0768 outright and
+// UART_SHARE_SELECT_PIN is never driven. Overridable with -D (platformio.ini
+// tests both) or from config_local.h.
+#ifndef LORA_ENABLED
+#define LORA_ENABLED 1
+#endif
+
+// The switch only has work to do when there is a second module behind it.
+#define UART_SHARE_ENABLED LORA_ENABLED
+
+// The one physical USART both modules sit behind. DFPLAYER_SERIAL and
+// LORA_SERIAL below both name it; uart_share.cpp is the only file that calls
+// begin() on it.
+#define UART_SHARE_SERIAL Serial1
+
+// 74HC4053 select line: both used channels' select inputs (A and B, pins 11
+// and 10) tied together to this pin, so TX and RX always switch as a pair.
+// D4 = PA12, plain GPIO, no PWM channel - fine for a static level, and it
+// keeps PWM-capable D5 free. (D4 was HORN_AMP_ENABLE_PIN in older trees; the
+// amp enable is D11.)
+#define UART_SHARE_SELECT_PIN 4  // PA12
+
+// Select level per module. LOW routes the X0/Y0 pair (DFPlayer), HIGH the
+// X1/Y1 pair (E5). Boot state is LOW: the DFPlayer is the default owner.
+#define UART_SHARE_SELECT_DFPLAYER LOW
+#define UART_SHARE_SELECT_LORA HIGH
+
+// Wait after moving the select line before re-opening the port. The
+// 74HC4053's own switching time is well under a microsecond at 3.3 V; this is
+// margin for the line to settle, not a datasheet figure, and costs 2 ms per
+// switch - nothing against a horn fire's AT sequence.
+#define UART_SHARE_SWITCH_SETTLE_MS 2
+
+// USART1 is the only UART on the top headers, confirmed live on hardware
+// 2026-09-06 via the board's own compiled devicetree over SSH: `zephyr,
+// console = &usart1` and `zephyr,shell-uart = &usart1`, while `arduino,
+// router-serial = <&lpuart1>` ('Serial' is provided by the Monitor - not a
+// physical wire). CONFIG_SHELL is not set in the board's merged .config, so
+// the shell-uart binding is inert; CONFIG_LOG/CONFIG_LOG_BACKEND_UART/
+// CONFIG_BOOT_BANNER are all on, so Zephyr kernel log lines (mostly at boot
+// in a quiescent system, but not exclusively) can land on this same wire -
+// unfixable from sketch code, since the core's devicetree/Kconfig is baked
+// into the prebuilt loader. Known, accepted risk on D0/D1; the bus switch
+// above does not remove it (it arbitrates between LoRa and the DFPlayer, not
+// the kernel console).
 #define LORA_UART_RX_PIN 0  // PB7, USART1_RX  <- E5 TX
 #define LORA_UART_TX_PIN 1  // PB6, USART1_TX  -> E5 RX
 
 // The Grove LoRa-E5 ships at 9600 baud 8N1.
 #define LORA_UART_BAUD 9600UL
 
-// CONFIRMED on hardware 2026-08-18: `Serial` is the correct instance for
-// USART1/D0-D1. Read directly from the board's own installed
-// arduino:zephyr core devicetree overlay
-// (~/.arduino15/packages/arduino/hardware/zephyr/0.90.0/variants/
-// arduino_uno_q_stm32u585xx/arduino_uno_q_stm32u585xx.overlay), not
-// inferred: `&usart1` (PB6/PB7, D0/D1) is assigned `zephyr,console`, while
-// `arduino,router-serial = <&lpuart1>` - a separate, header-inaccessible
-// internal peripheral - is what Bridge uses, with the overlay's own comment
-// noting "'Serial' is provided by the Monitor". Cross-checked against a
-// live board: `journalctl -u arduino-router` shows arduino-router opening
-// `/dev/ttyHS1` for its serial connection, the Linux-side node for that same
-// lpuart1 link - independent confirmation that Serial1/lpuart1 is Bridge's
-// internal MCU<->MPU channel, not the E5's physical UART. This settles the
-// open question in docs/eletect-x-applab-notes.md and docs/KNOWN_GAPS.md:
-// the community forum reports were right, and config.h's previous
-// `Serial1` default had never actually reached the physical Grove LoRa-E5.
+// CORRECTED - the 2026-08-18 "CONFIRMED on hardware" note below this line
+// used to bind LORA_SERIAL to `Serial` and had the naming backwards; it is
+// quoted rather than deleted so the reasoning error is visible. `zephyr,user`
+// in the board overlay declares `arduino,router-serial = <&lpuart1>`, and
+// its own comment there reads "'Serial' is provided by the Monitor" - i.e.
+// bare `Serial` is the Bridge Monitor stream (`journalctl -u arduino-router`
+// shows it opening `/dev/ttyHS1`, lpuart1's Linux-side node), not the E5.
 //
-// Real consequence, not just a naming fix: `Serial` is also the firmware's
-// debug console (every `[tag]`-prefixed print throughout this codebase), and
-// it is the *same physical wire* as the E5 - so any console output emitted
-// while lora_service() is mid-sequence lands on the E5's RX pin as noise.
-// Mitigated below by SEISMIC_TRIGGER_CONSOLE_LOG for the one unconditional
-// offender (state_machine.cpp's [trigger]/[notify] prints) - see
-// docs/KNOWN_GAPS.md's 18 Aug entry for the confirmed-real risk this closes.
-#define LORA_SERIAL Serial
+// The actual E5 wire is USART1/D0-D1, and the generic serial list
+// (`serials = <&usart1>, <&lpuart1>, <&usart3>;`) is what names it. The core
+// skips the first generic index whenever `arduino,router-serial` is present
+// (`cores/arduino/zephyrSerial.h`, `ZARD_SKIP_FIRST_SERIAL`) - because
+// `Serial` is already claimed by the router - so the list starts at
+// `Serial1`, not `Serial`: **`Serial1` = usart1 = D0/D1 (the E5, via the
+// switch), `Serial2` = lpuart1 = Bridge again, `Serial3` = usart3 = D21/D20
+// (see DFPLAYER_UART_BAUD above)**. `LORA_SERIAL Serial` therefore pointed at the
+// Bridge Monitor the whole time and never reached the physical wire - a
+// likely explanation for PIN_MAP.md's "wired 18 Aug, not yet answering AT
+// probes". Verify with a bare `AT` on Serial1 at bring-up.
+//
+// Also confirmed from the linked image: in sketch.ino.map, `Serial` resolves
+// to .bss.Monitor from Arduino_RouterBridge/singletons.cpp.o - the same
+// address as `Monitor` - while Serial1/2/3 are arduino::ZephyrSerial objects
+// from core.a(zephyrSerial.cpp.o).
+//
+// Real consequence, not just a naming fix: `Serial` (bare) is also the
+// firmware's debug console (every `[tag]`-prefixed print throughout this
+// codebase) and shares the Bridge Monitor stream - unrelated to the E5's
+// physical wire now that LORA_SERIAL is Serial1, so SEISMIC_TRIGGER_CONSOLE_LOG
+// below no longer protects LoRa traffic from console noise the way this
+// comment previously claimed. Re-evaluate that flag's purpose once Serial1
+// is confirmed live; it may now only matter for Bridge Monitor cleanliness.
+#define LORA_SERIAL UART_SHARE_SERIAL
 
 // When 1: state_machine.cpp's log_trigger() prints [trigger] on every real
 // STA/LTA crossing, and notify_footfall_event() prints [notify] alongside
@@ -657,6 +896,16 @@
 // tier (AT+PLAYNUM), not just how loud (AT+VOL). A real new wire field -
 // a schema-3 sender omits it - so it bumps the version. drive_led,
 // pulse_ir, and every MCU->MPU row are unchanged.
-#define BRIDGE_SCHEMA_VERSION 4
+//
+// 4 -> 128 on 2026-09-09: no wire-shape change, value change only. The
+// on-device MsgPack library (0.4.2, Arduino_RPClite's Unpacker.h) mis-detects
+// positive-fixint-encoded values (0-127) as the wrong type for a uint8_t
+// parameter - schema_version was always sent in that range, so every
+// actuator RPC call failed at deserialization regardless of everything else
+// being correct (bench-verified: value 200 unpacked fine, 0 and 1 did not).
+// 128 stays a valid uint8_t but forces the explicit uint8 msgpack format,
+// which unpacks correctly on this library version. Mirrors device/mpu/
+// services/config.py's SCHEMA_VERSION; both sides must bump together.
+#define BRIDGE_SCHEMA_VERSION 128
 
 #endif  // CONFIG_H

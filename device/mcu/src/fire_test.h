@@ -14,7 +14,38 @@
 // no target at all. Pure function, no hardware calls, no side effects -
 // this is the one piece of the harness that's host-testable without a
 // board, same discipline as rule_gate.h's pure core (ENGINEERING_CONVENTIONS.md 4).
-enum class fire_test_target { kNone, kHorn, kLedWingLeft, kLedWingRight, kIr, kHelp };
+//
+// kDfplayerAt is the raw-AT console mode added for the horn bring-up
+// (docs/decisions - ADR superseding 0015 Decision A): typing 'a' reads one
+// more line from Serial and forwards it verbatim to DFPLAYER_SERIAL, printing
+// whatever comes back. It exists to run the AT/AT+QUERY probes Stage B of the
+// bring-up needs and that no other harness path can send.
+//
+// kListen is Stage C's track-identification mode: typing 'l' reads a track
+// number and calls horn_debug_listen(), which runs the same fire/stop
+// sequence as kHorn but bypasses rule_gate_apply() entirely (no cooldown, no
+// HORN_BURST_MAX_MS clamp) so a whole clip can play long enough to identify
+// by ear. kHorn stays on the real drive_horn()/rule_gate path for verifying
+// production timing/cooldown behavior (Stage D) - the two are deliberately
+// different code paths, not a duplicate.
+//
+// kListenByFile is kListen's by-name counterpart: typing 'f' reads a FAT
+// filename instead of a track number and calls horn_debug_listen_file(),
+// which selects the file with AT+PLAYFILE rather than AT+PLAYNUM. Added
+// because AT+QUERY's index/filename readback proved unreliable, so a
+// by-index identification can't be pinned to a specific file with
+// confidence - playing an exact known filename can.
+enum class fire_test_target {
+  kNone,
+  kHorn,
+  kLedWingLeft,
+  kLedWingRight,
+  kIr,
+  kDfplayerAt,
+  kListen,
+  kListenByFile,
+  kHelp
+};
 
 // No precondition - total over every char value, including whitespace/
 // newline bytes a Serial Monitor's line terminator sends. Cannot fail: an
@@ -32,9 +63,13 @@ void fire_test_init();
 // (drive_horn/drive_led/pulse_ir - up to ~3.15s in the horn case, see
 // horn.h/led.h/ir.h's own blocking notes); geophone_service()/lora_service()
 // in the same loop() iteration are starved for that window, same as any
-// other actuator fire. Cannot fail outright: an unrecognized byte or a
-// cooldown-refused request prints the menu or an allowed=false ack rather
-// than crashing or hanging past the bounded duration above.
+// other actuator fire. kDfplayerAt blocks up to FIRE_TEST_AT_LINE_TIMEOUT_MS
+// waiting for the human to finish typing a command line, then up to
+// FIRE_TEST_AT_REPLY_TIMEOUT_MS waiting for the DFPlayer's reply - both
+// bounded, same convention as the actuator durations above. Cannot fail
+// outright: an unrecognized byte, a cooldown-refused request, or an AT
+// timeout prints the menu, an allowed=false ack, or a timeout notice rather
+// than crashing or hanging past the bounded durations above.
 void fire_test_service(uint32_t now_ms);
 
 #endif  // FIRE_TEST_H

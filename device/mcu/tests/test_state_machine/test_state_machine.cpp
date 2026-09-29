@@ -5,7 +5,7 @@
 // module, risking corruption of AT-command traffic mid-transaction.
 //
 // Drives a real STA/LTA trigger through the full geophone -> state_machine
-// chain (Wire.host_feed_raw() injects a real quiet-then-transient waveform,
+// chain (GEOPHONE_I2C_BUS.host_feed_raw() injects a real quiet-then-transient waveform,
 // hostshim::advance_millis() paces geophone_service()'s sample-rate gate,
 // same idiom as test_geophone.cpp) so the "zero Serial bytes" assertion is
 // meaningful - it proves the print path is gated, not that a trigger never
@@ -27,7 +27,7 @@ const uint32_t kPeriodMs = 1000 / SEISMIC_SAMPLE_RATE_HZ;
 // by the same state_machine_tick() call main.cpp's loop() makes every
 // iteration.
 void feed_and_tick(int16_t raw_value) {
-  Wire.host_feed_raw(raw_value);
+  GEOPHONE_I2C_BUS.host_feed_raw(raw_value);
   hostshim::advance_millis(kPeriodMs);
   const uint32_t now_ms = millis();
   geophone_service();

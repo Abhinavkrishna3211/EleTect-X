@@ -16,6 +16,13 @@
 //
 // IN865 only (ADR 0002) - 868 MHz is illegal in India (CONTEXT.md 8).
 // Never logs LORA_APP_KEY.
+//
+// LORA_SERIAL is shared with the DFPlayer through a 74HC4053 (uart_share.h,
+// ADR 0029). Every state that talks to the E5 claims the port first, and a
+// horn fire can take it back at any moment. When that happens mid-step, the
+// E5's reply went to a disconnected wire, so the sequence restarts from the
+// bare AT probe rather than sitting out a timeout on a line that will never
+// arrive. Every step of the join sequence is safe to repeat.
 
 #include "mac.h"
 
@@ -25,6 +32,7 @@
 #include "Arduino.h"
 #include "config.h"
 #include "secrets.h"
+#include "uart_share.h"
 
 namespace {
 
@@ -35,6 +43,9 @@ uint8_t g_retry_count = 0;
 char g_rx_buf[LORA_RESPONSE_MAX_LEN];
 size_t g_rx_len = 0;
 
+// uart_share_switch_count() when the current step's command went out.
+uint32_t g_step_switch_count = 0;
+
 // Sends one AT command line and resets the per-step response buffer/timer.
 // duration/response bytes are drained by poll_line() on later service()
 // calls - this never blocks waiting for a reply.
@@ -44,6 +55,14 @@ void send_command(const char *cmd, uint32_t now_ms) {
   LORA_SERIAL.print(cmd);
   LORA_SERIAL.print("\r\n");
   g_step_start_ms = now_ms;
+  g_step_switch_count = uart_share_switch_count();
+}
+
+// Whether this state exchanges bytes with the E5 and so needs the port.
+// kJoined has nothing to send yet and kFailed only waits out a backoff -
+// neither should pull the port away from the DFPlayer.
+bool state_uses_port(lora_join_state state) {
+  return state != lora_join_state::kJoined && state != lora_join_state::kFailed;
 }
 
 // Drains any bytes the E5 has sent since the last call into g_rx_buf.
@@ -89,14 +108,28 @@ void enter_failed_or_retry(lora_join_state retry_target, uint32_t now_ms) {
 
 }  // namespace
 
+// The port itself is opened by uart_share_init() (from horn_init()) and
+// re-opened at LORA_UART_BAUD by every uart_share_acquire(kLora), so this
+// only resets the join state machine.
 void lora_init() {
-  LORA_SERIAL.begin(LORA_UART_BAUD);
   g_state = lora_join_state::kIdle;
   g_retry_count = 0;
   g_rx_len = 0;
 }
 
 void lora_service(uint32_t now_ms) {
+  if (state_uses_port(g_state)) {
+    if (!uart_share_acquire(uart_owner::kLora)) {
+      return;
+    }
+    if (g_state != lora_join_state::kIdle &&
+        uart_share_switch_count() != g_step_switch_count) {
+      // The horn had the port since this step's command went out - its
+      // reply is gone. Not a failure of the E5, so no retry is charged.
+      g_state = lora_join_state::kIdle;
+    }
+  }
+
   switch (g_state) {
     case lora_join_state::kIdle:
       // "AT" - bare probe command. Response confirmed in manual sec 5

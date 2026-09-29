@@ -81,7 +81,11 @@ echo "==> 5. rsync src/ -> sketch/ (one-directional, deletes files removed local
 # addendum) — a nested sensors/, actuators/, etc. would silently vanish from
 # the board build (compiles with zero errors, then fails at the link step),
 # not just break an #include like the earlier config.h/secrets.h issue did.
+#
+# config_local.h is per-unit (see config.h) and lives only on the board, so it
+# is excluded both ways: never pushed, and never deleted by --delete.
 rsync -avz --delete \
+  --exclude='config_local.h' \
   "${MCU_DIR}/src/" \
   "${BOARD_USER}@${BOARD_HOST}:${APP_ROOT}/sketch/"
 

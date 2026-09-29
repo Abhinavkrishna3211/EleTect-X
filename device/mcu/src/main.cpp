@@ -14,12 +14,13 @@
 //
 // device/mpu/bridge/schema.md's MPU->MCU handlers (drive_horn, drive_led,
 // pulse_ir, get_system_state, send_lora_alert) have real adapters in
-// bridge_handlers.cpp, but their Bridge.provide() calls below stay
-// deliberately commented out - see
-// docs/KNOWN_GAPS.md for why that is deferred to a hardware session, one
-// function at a time. Bridge.begin()/Bridge.update() running unconditionally
-// does not change that discipline: it makes the notify direction reachable,
-// it does not register any provide() handler.
+// bridge_handlers.cpp. drive_led and pulse_ir were registered in earlier
+// hardware sessions; drive_horn joined them this session (HOME_TEST_MODE
+// plan prerequisite 2). get_system_state/send_lora_alert stay deliberately
+// commented out - see docs/KNOWN_GAPS.md for why that is deferred to a
+// hardware session, one function at a time. Bridge.begin()/Bridge.update()
+// running unconditionally does not change that discipline: it makes the
+// notify direction reachable, it does not register any provide() handler.
 
 #include "Arduino.h"
 #include "Arduino_RouterBridge.h"
@@ -36,11 +37,22 @@
 void setup() {
   Serial.begin(CONSOLE_BAUD);
 
+#if HOME_TEST_MODE
+  // Loud on purpose - see config.h's HOME_TEST_MODE comment. This line must
+  // be the first thing a human sees when opening the console, because the
+  // one failure mode this exists to prevent is a board shipped to the field
+  // with this flag still on.
+  Serial.println("[mode] *** HOME_TEST_MODE - BACKYARD TEST BUILD - NOT FOR FIELD DEPLOYMENT ***");
+#else
+  Serial.println("[mode] field build (HOME_TEST_MODE=0)");
+#endif
+
   Bridge.begin();
 
-  // NOT REGISTERED - see bridge_handlers.h and docs/KNOWN_GAPS.md. Each
-  // line below wires one MPU->MCU function from device/mpu/bridge/
-  // schema.md to its adapter in bridge_handlers.cpp.
+  // get_system_state/send_lora_alert below are NOT REGISTERED - see
+  // bridge_handlers.h and docs/KNOWN_GAPS.md. Each line wires one MPU->MCU
+  // function from device/mpu/bridge/schema.md to its adapter in
+  // bridge_handlers.cpp.
   // docs/DEVICE_DEVELOPMENT_WORKFLOW.md 3 / ENGINEERING_CONVENTIONS.md 8:
   // registering an additional Bridge.provide() has broken every
   // previously-working one on the same sketch in this project's own
@@ -50,10 +62,18 @@ void setup() {
   // uncommenting the next. Never uncomment more than one at a time, and
   // never as part of a routine sync-to-board.sh push.
   //
-  // Bridge.begin()/Bridge.update() are unconditional now (see this file's
-  // top comment), so that is no longer what gates these four - only the
-  // one-at-a-time hardware-verification discipline above does.
-  // Bridge.provide("drive_horn", bridge_drive_horn);
+  // drive_horn registered this session (HOME_TEST_MODE plan prerequisite 2),
+  // source-level only - this line was uncommented and pushed to the board's
+  // on-disk sketch/ tree, but the flash-and-verify step this discipline
+  // requires (arduino-app-cli app restart, then confirm drive_led/pulse_ir
+  // still work) never ran; it was interrupted before any reflash happened.
+  // See HANDOVER.md's 6 Sept section and docs/KNOWN_GAPS.md for the exact
+  // stopping point - do not treat this registration as hardware-verified
+  // until that gate actually runs. Bridge.begin()/Bridge.update() are
+  // unconditional now (see this file's top comment), so that is no longer
+  // what gates these four - only the one-at-a-time hardware-verification
+  // discipline above does.
+  Bridge.provide("drive_horn", bridge_drive_horn);
   Bridge.provide("drive_led", bridge_drive_led);
   Bridge.provide("pulse_ir", bridge_pulse_ir);
   // Bridge.provide("get_system_state", bridge_get_system_state);
@@ -67,7 +87,9 @@ void setup() {
   horn_init();
   led_init();
   ir_init();
+#if LORA_ENABLED
   lora_init();
+#endif
   state_machine_init();
 }
 
@@ -85,7 +107,9 @@ void loop() {
   // COOLDOWN, and the LoRa join state machine must keep advancing
   // independently of sensing.
   geophone_service();
+#if LORA_ENABLED
   lora_service(now_ms);
+#endif
 
   state_machine_tick(now_ms);
 }

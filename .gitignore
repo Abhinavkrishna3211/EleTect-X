@@ -92,3 +92,6 @@ Session outputs/
 /docs/STRUCTURE.md
 /docs/WEBAPP_COMPLETION_PLAN.md
 /docs/eletect-x-applab-notes.md
+
+# Per-unit MCU overrides (see device/mcu/src/config.h)
+device/mcu/src/config_local.h

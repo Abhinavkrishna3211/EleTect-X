@@ -43,6 +43,22 @@ void horn_init();
 // resolved duration; the reflex loop calling this must expect that.
 horn_ack drive_horn(horn_request req, uint32_t now_ms);
 
+// Bench-only debug helper: runs the identical fire/stop sequence as
+// drive_horn(), but bypasses rule_gate_apply() entirely - no cooldown check,
+// no HORN_BURST_MAX_MS clamp - so a Stage C track-identification listen can
+// run long enough to hear a whole clip. Never called outside fire_test.cpp's
+// FIRE_TEST_HARNESS-gated harness ('l' command); not a production fire path.
+void horn_debug_listen(uint8_t track_id, float gain_pct, uint16_t duration_ms);
+
+// Same contract as horn_debug_listen(), but selects the file by exact FAT
+// filename (AT+PLAYFILE=/<filename>) instead of FAT-order index (AT+PLAYNUM).
+// Exists because AT+QUERY's index/filename readback proved unreliable on this
+// unit (HANDOVER.md) - playing a known filename directly is the only way to
+// pin an identification to a specific file rather than a hard-to-verify FAT
+// slot. filename excludes the leading '/'. Same bench-only, FIRE_TEST_HARNESS
+// -gated caveat as horn_debug_listen().
+void horn_debug_listen_file(const char *filename, float gain_pct, uint16_t duration_ms);
+
 // --- Pure DFPlayer helpers (ADR 0015 Decision F) -----------------------------
 // No Serial/hardware dependency - the host-testable core, mirroring
 // footfall_probability_from_ratio()'s precedent. Unity-tested in
@@ -60,16 +76,25 @@ bool horn_at_vol_command(uint8_t dfplayer_vol, char *buf, size_t buf_len);
 // Same contract for "AT+PLAYNUM=<n>\r\n".
 bool horn_at_playnum_command(uint8_t track_id, char *buf, size_t buf_len);
 
+// Same contract for "AT+PLAYFILE=/<filename>\r\n" (filename excludes the
+// leading '/' - it is prepended here to match the DFR0768's absolute-path
+// requirement). Content filenames run long (Freesound source names easily
+// exceed 60 chars), so callers must size buf accordingly - this only fails
+// (false, buf[0] left at NUL) if buf_len is too small for the whole command.
+bool horn_at_playfile_command(const char *filename, char *buf, size_t buf_len);
+
 // Same contract for "AT+PLAYMODE=<n>\r\n" (DFR0768: 1 single-loop, 2 all-loop,
 // 3 play-once-then-pause, 4 random, 5 folder-loop). The horn wants mode 3 so a
 // burst plays exactly once and stops itself; the module does not reliably keep
-// this across a power cycle (DFRobot forum "DFPlayer Pro Playmode Resets"), so
-// it is re-sent once per boot on the first fire, not assumed.
+// this across a power cycle (DFRobot forum "DFPlayer Pro Playmode Resets") and
+// a single send is not verified to land (dfplayer_send() does not check for an
+// OK ack), so it is re-sent before every fire rather than assumed to stick.
 bool horn_at_playmode_command(uint8_t mode, char *buf, size_t buf_len);
 
-// Same contract for "AT+PROMPT=ON\r\n" / "AT+PROMPT=OFF\r\n". Sent OFF once per
-// boot to suppress the module's built-in confirmation beep, which would
-// otherwise play through the SUH-15 ahead of the deterrence clip.
+// Same contract for "AT+PROMPT=ON\r\n" / "AT+PROMPT=OFF\r\n". Sent OFF before
+// every fire (same not-verified-to-stick reasoning as horn_at_playmode_command)
+// to suppress the module's built-in confirmation beep, which would otherwise
+// play through the SUH-15 ahead of the deterrence clip.
 bool horn_at_prompt_command(bool enabled, char *buf, size_t buf_len);
 
 #endif  // ACTUATORS_HORN_H
