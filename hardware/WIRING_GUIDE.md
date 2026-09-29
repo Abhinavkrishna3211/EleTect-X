@@ -14,8 +14,9 @@ directly if you're reading this more than a session or two after 22 Aug in case 
 
 | Subsystem | Status | Reference |
 |---|---|---|
-| Geophone (SM-24 → 1kΩ damping → INA333 → ADS1115 → D20/D21 I2C2) | **W** | `device/mcu/README.md`'s wiring table |
-| Grove LoRa-E5 (Yellow=TX→D0, White=RX→D1, Red=VCC→5V, Black=GND→GND) | **P** — physically wired, module not yet answering AT probes (separate open issue, not a wiring defect) | `docs/KNOWN_GAPS.md`'s 18 Aug entry |
+| Geophone (SM-24 → 1kΩ damping → INA333 → ADS1115 → A4/A5 I2C3, `Wire2`) | **W** — corrected 29 Sept 2026 from the field board's `config.h`; D20/D21 are free | `device/mcu/README.md`'s wiring table |
+| DFPlayer PRO UART (DFPlayer TX→D0, RX←D1, 115200 AT commands on `Serial1`) | **W** — the field board's horn path; fires in field testing | `hardware/PIN_MAP.md`, ADR 0029 |
+| Grove LoRa-E5 | Shares D0/D1 (USART1) with the DFPlayer PRO through a 74HC4053, select on D4; the horn always wins the port (ADR 0029) | `docs/decisions/0029-dfplayer-and-lora-time-share-usart1.md` |
 | Camera (Arducam IMX462 → USB hub/adapter → UNO Q USB-C) | Bench-verified, no new wiring needed | `docs/KNOWN_GAPS.md`, build-call 3 |
 
 ## 1. Power bus — the part that doesn't need the battery to build
@@ -114,9 +115,10 @@ IRLZ44N gate side taps in at 3.3V, not 5V.
 
 | Pin | MCU pin | `config.h` name | Drives |
 |---|---|---|---|
-| D2 | PB3 | `AUDIO_TRIGGER_PIN` | DFPlayer IO/ADKEY input (§3) |
-| D4 | PA12 | `HORN_AMP_ENABLE_PIN` | TPA3116D2 `SHUTDOWN` pin, active-low (§3) — ⚠ PA12 is USB_OTG_FS D+, claimed by the Arduino core's USB CDC; expect `digitalWrite` here to be a no-op, same as D5 was. Relocate before the horn bring-up (candidates: D9/PB8). |
-| ~~D5~~ | PA11 | *unusable — was `LED_WING_LEFT_PIN`* | **Do not wire.** PA11 is USB_OTG_FS D−, claimed by the Arduino core's USB CDC — `digitalWrite`/`analogWrite` on D5 is a silent no-op. Left wing moved to D3 on 31 Aug 2026. |
+| D2 | PB3 | `AUDIO_TRIGGER_PIN` | retired — driven idle-high, not wired. The DFPlayer is driven by UART AT commands on D0/D1 (§3) |
+| D4 | PA12 | `UART_SHARE_SELECT_PIN` | 74HC4053 select for the DFPlayer/LoRa USART1 share: LOW = DFPlayer, HIGH = LoRa-E5 (ADR 0029). Plain GPIO — the "USB D+" claim is withdrawn |
+| D11 | PB15 | `HORN_AMP_ENABLE_PIN` | IRLZ44N gate switching the XH-M543 `VCC`, active-low (§3). **Field-confirmed** — this is the field board's pin |
+| D5 | PA11 | *free — was `LED_WING_LEFT_PIN`* | Free, usable, PWM-capable (TIM1_CH4). The 31 Aug "USB D−, silent no-op" diagnosis is withdrawn (`hardware/PIN_MAP.md` header). |
 | D3 | PB0 | `LED_WING_LEFT_PIN` (moved here from D5 on 31 Aug 2026) | IRLZ44N gate, left wing — mixed white+blue LEDs, real 2-wing/2-MOSFET build. PWM-capable (TIM3_CH3); OPAMP2 output shares the pin but is unused here. **Bench-confirmed 31 Aug.** |
 | D6 | PB1 | `LED_WING_RIGHT_PIN` (renamed 30 Aug, was `LED_BLUE_PIN`) | IRLZ44N gate, right wing — mixed white+blue LEDs, real 2-wing/2-MOSFET build. **Bench-confirmed 31 Aug.** |
 | D8 | PB4 | **planned `LED_BLUE_RIGHT_PIN`** — not yet in `config.h` | IRLZ44N gate, blue LED branch, right wing (§4). PB4 is also JTAG NJTRST — verify it's actually free before assigning. |
@@ -128,8 +130,8 @@ firmware — see §4.0.** Don't wire D8 expecting `led.cpp` to drive it; `config
 need the update first, same one-at-a-time Bridge-registration discipline as every other actuator pin
 in this repo.
 
-**Pin lesson (31 Aug 2026):** on the UNO Q, **D4 = PA12 and D5 = PA11 are the USB_OTG_FS D+/D− pair**
-and are claimed by the Arduino core's USB CDC — GPIO writes to them do nothing. Clean digital-header
+**Pin lesson (31 Aug 2026) — withdrawn 29 Sept 2026.** It said D4/D5 were the USB D+/D− pair and
+unusable; the STM32 on the UNO Q has no USB at all and both are ordinary GPIO (`hardware/PIN_MAP.md`). Clean digital-header
 GPIOs confirmed usable: D3 (PB0), D6 (PB1), D7 (PB2), D9 (PB8). D2 (PB3) and D8 (PB4) are JTAG
 SWO/NJTRST — usable but verify first.
 
@@ -144,7 +146,10 @@ primary sources, not assumed:
 1. **DFPlayer PRO power: VIN → UNO Q 5V, GND → common ground.** Its spec sheet states 3.3-5V —
    it does **not** go on the 12.8V actuator bus (see §1's new note). Confirm with a multimeter
    before connecting.
-2. **D2 (`AUDIO_TRIGGER_PIN`, PB3) → DFPlayer PRO's `KEY` pin, active-low.** This is the DFR0768's
+2. **Superseded 29 Sept 2026 — `KEY` is not used.** The DFPlayer PRO is driven with UART AT
+   commands on D0/D1 (`Serial1`, 115200, through the 74HC4053: DFPlayer TX → Y0, RX ← X0), which is what lets the
+   firmware pick the track and volume per tier. The KEY-pin wiring below is kept for history.
+   *Original text:* **D2 (`AUDIO_TRIGGER_PIN`, PB3) → DFPlayer PRO's `KEY` pin, active-low.** This is the DFR0768's
    real pin name — "IO/ADKEY" was the DFPlayer *Mini*'s naming, different hardware. The DF1101S
    chip inside the PRO pulls `KEY` up to its own IO rail through a 22kΩ resistor (idle **high**)
    and reads a direct short to ground as key K1 = Play & Pause (confirmed in the DF1101S
@@ -162,7 +167,7 @@ primary sources, not assumed:
    the one actually in hand) and its product photos confirm the only terminals are: power in
    (`VCC`/`GND`), the 3-pin audio input above, two speaker outputs (`L`, `R`), and two volume
    trimpots (`VOL_L`, `VOL_R`). `config.h`'s `HORN_AMP_ENABLE_PIN` comment assumed a `SHUTDOWN`
-   pin that this specific board doesn't expose. **Fallback: D4 (`HORN_AMP_ENABLE_PIN`, PA12) →
+   pin that this specific board doesn't expose. **Fallback: D11 (`HORN_AMP_ENABLE_PIN`, PB15 — the field board's pin; older text said D4) →
    IRLZ44N gate (or the LR7843 module), switching the amp's `VCC` line** — same 220-330Ω series
    gate resistor + 10kΩ pulldown pattern as §4/§5's LED and IR MOSFETs. This is power-side
    enable/disable instead of an IC mute pin, but functionally the same gate that
@@ -287,7 +292,7 @@ is earmarked specifically for this board, set to output ~12V.
    **with no load connected**, before connecting anything downstream — this is the same discipline
    `procurement-status.md` already specifies for the charge-side XL4015.
 2. Confirm fuse and switch are both in the positive leg only, ground bus is common and unfused.
-3. Turn the XH-M543's `VOL_L` trimpot to minimum before the amp's MOSFET enable (D4/IRLZ44N) is
+3. Turn the XH-M543's `VOL_L` trimpot to minimum before the amp's MOSFET enable (D11/IRLZ44N) is
    ever switched on (§3) — it's the one real physical volume control in this signal path.
 4. Confirm every IRLZ44N (or LR7843) gate has its pulldown resistor before power-on — an
    undriven/floating gate on a logic-level MOSFET can partially turn on unpredictably. This now
