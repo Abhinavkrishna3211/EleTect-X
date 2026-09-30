@@ -26,12 +26,6 @@ export function connectMqtt(onUplink: (payload: unknown) => Promise<void>): Mqtt
     });
   });
 
-  // Temporary low-level trace (diagnosing a silent-message issue) - logs every
-  // MQTT packet type crossing the wire in either direction, independent of our
-  // own 'message' handler. Remove once uplinks are confirmed flowing.
-  client.on('packetreceive', (packet) => console.log(`packetreceive: ${packet.cmd}`));
-  client.on('packetsend', (packet) => console.log(`packetsend: ${packet.cmd}`));
-
   client.on('message', (topic, raw) => {
     console.log(`Received message on ${topic} (${raw.length} bytes)`);
     let payload: unknown;
