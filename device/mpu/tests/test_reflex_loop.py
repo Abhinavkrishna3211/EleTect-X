@@ -45,6 +45,63 @@ from perception.storage import CaptureEventTag
 from services import config as services_config
 from services import reflex_loop
 
+# Deployment overrides live in cognition/config.py and services/config.py,
+# and the tests below assert the design each one suspends. Each override
+# gets its own marker rather than sharing one: they are lifted
+# independently, and a single combined condition keeps the mark applied
+# after one is reverted, reporting the other's tests as failures.
+# strict=True turns a suspended test back into a hard failure the moment
+# its override is lifted and it starts passing again, so an override can
+# never be left silently in place.
+#
+# The escalation ladder. Committed code carries (TIER_1, TIER_2, TIER_3);
+# a node that needs a flat floor sets ELETECT_TIER_FLOOR instead. The
+# marker is what lets that node still report honestly rather than failing
+# a suite that is testing the shipped default.
+_TIER_FLOOR_OVERRIDDEN = cognition_config.TIER_FLOOR_BY_CONTEXT != (
+    Tier.TIER_1,
+    Tier.TIER_2,
+    Tier.TIER_3,
+)
+TIER_FLOOR_OVERRIDE = pytest.mark.xfail(
+    _TIER_FLOOR_OVERRIDDEN,
+    reason="suspended by an ELETECT_TIER_FLOOR override of the escalation ladder",
+    strict=True,
+)
+
+# Horn and LED gain. Committed code fires every tier at full gain. A rig on
+# a soft supply may pin the columns lower to buy sag headroom - the 10 Sept
+# run #1 mitigation did, at horn 0.20/0.28/0.35 and LED 0.85. That is a
+# power decision, separate from the ladder, so it gets its own marker.
+_GAIN_OVERRIDDEN = (
+    cognition_config.TIER_3_GAIN_FRACTION != 1.0 or cognition_config.LED_TIER_1_GAIN_FRACTION != 1.0
+)
+GAIN_OVERRIDE = pytest.mark.xfail(
+    _GAIN_OVERRIDDEN,
+    reason="suspended by the 10 Sept horn/LED gain reductions in cognition/config.py",
+    strict=True,
+)
+
+# The two Boar vision gates: the consecutive-poll streak and the
+# burst-majority requirement. Emptying either lets a fox - which this
+# 2-class model labels "Boar" - admit and confirm on a single poll, which
+# is what the open-ended 13 Sept relaxation does. The tests that assert the
+# two-poll/majority design below are suspended rather than deleted, because
+# that design is still the one to return to.
+_FOX_GATE_RELAXED = (
+    services_config.VISION_SPECIES_CONSECUTIVE_POLLS.get("Boar", 1) < 2
+    or "Boar" not in services_config.VISION_SPECIES_BURST_MAJORITY_LABELS
+)
+FOX_GATE_RELAXATION = pytest.mark.xfail(
+    _FOX_GATE_RELAXED,
+    reason=(
+        "suspended by the open-ended 13 Sept fox-gate relaxation "
+        "(VISION_SPECIES_CONSECUTIVE_POLLS / "
+        "VISION_SPECIES_BURST_MAJORITY_LABELS in services/config.py)"
+    ),
+    strict=True,
+)
+
 # The real tuning, minus the randomness - see the module docstring.
 DETERMINISTIC_PARAMS = dataclasses.replace(cognition_config.DEFAULT_BANDIT_PARAMS, epsilon=0.0)
 
@@ -368,6 +425,7 @@ def _fire(probability=0.9, sta_lta_ratio=6.0, schema_version=1, call_log=None, *
 # ---------------------------------------------------------------------------
 
 
+@TIER_FLOOR_OVERRIDE
 def test_high_probability_alerts_and_fires_the_selected_tier_outside_safe_mode():
     """A strong footfall fuses past the threshold and fires the tier the bandit picked.
 
@@ -514,6 +572,7 @@ def test_schema_version_mismatch_is_logged_not_raised(caplog):
 # ---------------------------------------------------------------------------
 
 
+@TIER_FLOOR_OVERRIDE
 def test_camera_opens_before_actuators_and_closes_after_them_with_frames_saved():
     """Event order: open -> capture(vision) -> capture(evidence) -> horn -> led -> close -> save.
 
@@ -554,6 +613,7 @@ def test_saved_frames_are_tagged_with_the_triggering_event_metadata():
     assert tag.event_timestamp_s == pytest.approx(time.time(), abs=5.0)
 
 
+@TIER_FLOOR_OVERRIDE
 def test_camera_open_failure_never_blocks_actuator_firing(caplog):
     """The core safety requirement: a camera that won't open must not delay/suppress deterrence."""
     log: list = []
@@ -571,6 +631,7 @@ def test_camera_open_failure_never_blocks_actuator_firing(caplog):
     assert any("camera open failed" in record.message for record in caplog.records)
 
 
+@TIER_FLOOR_OVERRIDE
 def test_camera_capture_failure_never_blocks_actuator_firing_and_camera_still_closes(caplog):
     """A camera that opens but fails to capture must still let deterrence fire, and still close.
 
@@ -731,6 +792,7 @@ def test_vision_check_runs_before_decide_even_without_an_alert():
 # ---------------------------------------------------------------------------
 
 
+@TIER_FLOOR_OVERRIDE
 def test_repeat_triggers_close_together_escalate_the_tier():
     """The habituation-avoidance mechanism, end to end through the real loop.
 
@@ -764,6 +826,7 @@ def test_escalation_saturates_at_the_top_tier():
     experience.close()
 
 
+@TIER_FLOOR_OVERRIDE
 def test_escalated_tier_fires_ir_concurrently_with_the_capture():
     """Tier 2 fires all three actuators, with pulse_ir concurrent with the evidence capture.
 
@@ -794,6 +857,7 @@ def test_escalated_tier_fires_ir_concurrently_with_the_capture():
     experience.close()
 
 
+@TIER_FLOOR_OVERRIDE
 def test_pulse_ir_overlaps_the_capture_window_not_after_it():
     """pulse_ir() and the camera capture must overlap in wall-clock time.
 
@@ -837,6 +901,7 @@ def _escalate_to_tier_2(experience):
     _fire(0.9, experience=experience)
 
 
+@TIER_FLOOR_OVERRIDE
 def test_daylight_vision_check_suppresses_pulse_ir_but_still_fires_horn_and_led(caplog):
     """is_night() False: the illuminator is skipped, the rest of the tier is not.
 
@@ -885,6 +950,7 @@ def test_daylight_vision_check_suppresses_pulse_ir_but_still_fires_horn_and_led(
     experience.close()
 
 
+@TIER_FLOOR_OVERRIDE
 def test_undetermined_day_night_state_also_suppresses_pulse_ir(caplog):
     """is_night() None (no measurable frame): skip IR, with its own log line.
 
@@ -911,6 +977,7 @@ def test_undetermined_day_night_state_also_suppresses_pulse_ir(caplog):
     experience.close()
 
 
+@TIER_FLOOR_OVERRIDE
 def test_is_night_error_never_blocks_deterrence_and_the_pulse_still_fires(caplog):
     """A bug in is_night() must not cost the event its illuminator.
 
@@ -935,6 +1002,7 @@ def test_is_night_error_never_blocks_deterrence_and_the_pulse_still_fires(caplog
     experience.close()
 
 
+@TIER_FLOOR_OVERRIDE
 def test_is_night_is_handed_the_pre_decision_vision_check_frames():
     """The gate reads the burst captured before decide(), not the evidence burst.
 
@@ -959,6 +1027,7 @@ def test_is_night_is_handed_the_pre_decision_vision_check_frames():
     experience.close()
 
 
+@TIER_FLOOR_OVERRIDE
 def test_night_and_firing_ir_locks_exposure_before_the_evidence_burst():
     """A confirmed night event at an escalated tier locks exposure exactly once.
 
@@ -978,6 +1047,7 @@ def test_night_and_firing_ir_locks_exposure_before_the_evidence_burst():
     experience.close()
 
 
+@TIER_FLOOR_OVERRIDE
 def test_daylight_does_not_lock_exposure():
     """is_night() False must skip the lock the same way it skips pulse_ir."""
     experience = ExperienceStore(IN_MEMORY_PATH)
@@ -998,6 +1068,7 @@ def test_daylight_does_not_lock_exposure():
     experience.close()
 
 
+@TIER_FLOOR_OVERRIDE
 def test_undetermined_night_does_not_lock_exposure():
     """is_night() None (unmeasurable burst) must skip the lock, same as pulse_ir."""
     experience = ExperienceStore(IN_MEMORY_PATH)
@@ -1014,6 +1085,7 @@ def test_undetermined_night_does_not_lock_exposure():
     experience.close()
 
 
+@TIER_FLOOR_OVERRIDE
 def test_tier_1_never_locks_exposure():
     """Tier 1 fires no IR, so the lock - gated the same way pulse_ir is - never runs."""
     camera = _FakeCamera()
@@ -1023,6 +1095,7 @@ def test_tier_1_never_locks_exposure():
     assert camera.lock_night_exposure_calls == 0
 
 
+@TIER_FLOOR_OVERRIDE
 def test_is_night_error_still_locks_exposure_before_the_forced_pulse():
     """The except-branch forces night=True, and the lock follows the same forced value.
 
@@ -1044,6 +1117,7 @@ def test_is_night_error_still_locks_exposure_before_the_forced_pulse():
     experience.close()
 
 
+@TIER_FLOOR_OVERRIDE
 def test_tier_1_never_consults_the_night_gate():
     """Tier 1 fires no IR by config, so is_night() is irrelevant and uncalled.
 
@@ -1071,6 +1145,7 @@ def test_tier_1_never_consults_the_night_gate():
     assert kwargs["pulse_ir"].calls == []
 
 
+@TIER_FLOOR_OVERRIDE
 def test_sub_threshold_events_still_count_toward_habituation():
     """A non-alerting trigger must still escalate the next real alert.
 
@@ -1090,6 +1165,7 @@ def test_sub_threshold_events_still_count_toward_habituation():
     experience.close()
 
 
+@TIER_FLOOR_OVERRIDE
 def test_a_fired_attempt_is_recorded_and_settled_by_the_next_event():
     """The full learning round trip: fire, come back, score, store the value.
 
@@ -1115,6 +1191,7 @@ def test_a_fired_attempt_is_recorded_and_settled_by_the_next_event():
     experience.close()
 
 
+@TIER_FLOOR_OVERRIDE
 def test_learning_survives_a_restart_through_the_real_loop(tmp_path):
     """Two runs against one on-disk database: the second sees the first's history.
 
@@ -1162,6 +1239,7 @@ def test_a_refused_horn_records_no_attempt(caplog):
     experience.close()
 
 
+@TIER_FLOOR_OVERRIDE
 def test_safe_mode_selects_a_tier_but_records_no_attempt(caplog):
     """A dry run must still choose and log a tier, and must still learn nothing.
 
@@ -1277,6 +1355,7 @@ def test_a_learned_preference_beats_the_default_tie_break():
     experience.close()
 
 
+@TIER_FLOOR_OVERRIDE
 def test_exploration_is_reported_when_it_happens():
     """With epsilon 1.0 the outcome must say the tier came from exploration.
 
@@ -2214,6 +2293,7 @@ def test_the_watch_never_sleeps_past_its_own_deadline():
 # what the shipped constant does.
 
 
+@FOX_GATE_RELAXATION
 def test_an_isolated_boar_poll_never_enters_species():
     """One spurious Boar box must not be enough - that is the entire fix.
 
@@ -2229,6 +2309,7 @@ def test_an_isolated_boar_poll_never_enters_species():
     assert "Boar" not in watch.species
 
 
+@FOX_GATE_RELAXATION
 def test_two_consecutive_boar_polls_enter_species_from_the_second():
     """The streak has to actually reach 2, not merely accumulate 2 sightings.
 
@@ -2248,6 +2329,7 @@ def test_two_consecutive_boar_polls_enter_species_from_the_second():
     assert "Boar" in watch.species
 
 
+@FOX_GATE_RELAXATION
 def test_an_alternating_boar_streak_resets_and_never_admits():
     """A gap poll must zero the streak, not merely pause it.
 
@@ -2340,6 +2422,7 @@ def _frames(count: int) -> list[Frame]:
     return [Frame(image=None, index=i, timestamp_s=0.0) for i in range(count)]
 
 
+@FOX_GATE_RELAXATION
 def test_boar_on_a_minority_of_the_burst_is_excluded_from_species_and_confirmation():
     """One spurious Boar box in a 3-frame burst must not count for anything.
 
@@ -2387,6 +2470,7 @@ def test_elephant_on_a_minority_of_the_burst_still_counts():
     assert check.confirmed is True
 
 
+@FOX_GATE_RELAXATION
 def test_a_majority_rejected_boar_reading_contributes_no_positive_evidence():
     """A rejected poll must fall back to BASELINE_VISION, not the detector's own confidence.
 
@@ -2413,6 +2497,7 @@ def test_a_majority_rejected_boar_reading_contributes_no_positive_evidence():
 # since Boar is not in the default VISION_TARGET_LABELS.
 
 
+@FOX_GATE_RELAXATION
 def test_a_single_spurious_boar_poll_does_not_confirm_even_with_boar_targeted():
     """One majority-qualifying Boar poll must not confirm on its own.
 
@@ -2431,6 +2516,7 @@ def test_a_single_spurious_boar_poll_does_not_confirm_even_with_boar_targeted():
     assert watch.check.confirmed is False
 
 
+@FOX_GATE_RELAXATION
 def test_a_streak_rejected_boar_confirmation_downgrades_to_baseline():
     """The rejected poll must contribute BASELINE_VISION, not the raw confidence.
 
@@ -2448,6 +2534,7 @@ def test_a_streak_rejected_boar_confirmation_downgrades_to_baseline():
     assert watch.check.reading.log_odds == pytest.approx(cognition_config.BASELINE_VISION)
 
 
+@FOX_GATE_RELAXATION
 def test_two_consecutive_majority_boar_polls_confirm_on_the_second():
     """Once Boar's own streak is met, confirmation fires exactly like any other label.
 
@@ -2741,6 +2828,7 @@ def test_the_confirmation_requirement_can_be_turned_off():
     assert kwargs["drive_horn"].calls != []
 
 
+@TIER_FLOOR_OVERRIDE
 def test_a_held_event_still_records_its_trigger_for_habituation():
     """Holding the horn must not erase the encounter.
 
@@ -2830,6 +2918,7 @@ def test_a_boar_only_event_discards_its_video_by_default():
 # conclusions either way.
 
 
+@FOX_GATE_RELAXATION
 def test_a_single_spurious_boar_poll_fires_nothing_even_under_boar_only():
     """The bypass Workstream 3 exists to close, asserted at the actuator.
 

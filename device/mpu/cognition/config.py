@@ -28,10 +28,14 @@ deterrence tiers to fire, and how hard repeat triggers escalate it.
 """
 
 import dataclasses
+import logging
+import os
 import random
 
 from cognition.bandit import BanditParams, DeterrenceAction, Tier
 from cognition.fusion import FusionParams, Modality
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Prior
@@ -223,7 +227,92 @@ HABITUATION_BUCKET_COUNT = 3
 # fired, and waiting for epsilon-greedy to stumble onto a stronger response
 # would repeat the ineffective one an unbounded number of times first. The
 # bandit still chooses freely among the tiers at or above the floor.
+#
+# This ladder is also the only thing that makes the bandit a bandit. Flatten
+# it to (TIER_3, TIER_3, TIER_3) and select_tier() has exactly one legal
+# candidate at every context: nothing is explored, nothing is learned, and
+# every first sighting gets the loudest response the hardware permits. A
+# one-night field test did exactly that on 7 September, and it lived in this
+# file for three weeks. It belongs in the environment, not in a commit -
+# hence TIER_FLOOR_OVERRIDE below.
 TIER_FLOOR_BY_CONTEXT = (Tier.TIER_1, Tier.TIER_2, Tier.TIER_3)
+
+
+def parse_tier_floor(spec: str) -> tuple[Tier, ...] | None:
+    """Resolve an ELETECT_TIER_FLOOR string to a per-context floor ladder.
+
+    Accepts either one tier - "3", applied to every context - or exactly
+    HABITUATION_BUCKET_COUNT comma-separated tiers in context order,
+    "1,2,3". Whitespace-tolerant, because this is typed into a
+    commissioning sheet or a compose file rather than generated.
+
+    Never raises, and never returns a partially-applied ladder. Anything it
+    cannot read whole is rejected with a warning and the caller keeps the
+    shipped ladder - the same "degrade loudly, don't go silent" rule
+    services/config.py's parse_scope_labels() follows, and for the same
+    reason: a typo in a per-node environment variable must not crash a
+    field node. The difference is which way "safe" points. A garbled scope
+    falls back to a working default node; a garbled floor has no safe
+    partial reading at all, because half a ladder would silently hand some
+    contexts a floor the operator never asked for.
+
+    Returns:
+        The ladder, or None if `spec` could not be read - in which case the
+        caller uses TIER_FLOOR_BY_CONTEXT unchanged.
+    """
+    tokens = [token.strip() for token in spec.split(",") if token.strip()]
+    if not tokens:
+        logger.warning("ELETECT_TIER_FLOOR=%r is empty; keeping the built-in ladder", spec)
+        return None
+
+    tiers: list[Tier] = []
+    for token in tokens:
+        try:
+            tiers.append(Tier(int(token)))
+        except ValueError:
+            logger.warning(
+                "ELETECT_TIER_FLOOR=%r: %r is not one of %s; keeping the built-in ladder",
+                spec,
+                token,
+                [int(tier) for tier in Tier],
+            )
+            return None
+
+    if len(tiers) == 1:
+        return tuple(tiers) * HABITUATION_BUCKET_COUNT
+    if len(tiers) != HABITUATION_BUCKET_COUNT:
+        logger.warning(
+            "ELETECT_TIER_FLOOR=%r has %d tiers; expected 1 or %d. "
+            "Keeping the built-in ladder",
+            spec,
+            len(tiers),
+            HABITUATION_BUCKET_COUNT,
+        )
+        return None
+    return tuple(tiers)
+
+
+# Per-node override for the ladder above, read once at import like every
+# other ELETECT_* value (services/config.py). It exists so a field test that
+# needs a flat Tier-3 floor - the 7 September case - can have one for a
+# night without that becoming what every node ships with:
+#
+#     ELETECT_TIER_FLOOR=3        # flat, every context
+#     ELETECT_TIER_FLOOR=2,3,3    # start at tier 2, escalate once
+#
+# Deliberately not exposed through services/config.py even though the other
+# ELETECT_* variables live there: the ladder is cognition's own policy, and
+# routing its override through services/ would make this module import the
+# one its docstring says it stays out of.
+_TIER_FLOOR_SPEC = os.environ.get("ELETECT_TIER_FLOOR")
+if _TIER_FLOOR_SPEC is not None:
+    _override = parse_tier_floor(_TIER_FLOOR_SPEC)
+    if _override is not None:
+        logger.warning(
+            "ELETECT_TIER_FLOOR overrides the escalation ladder: %s",
+            [int(tier) for tier in _override],
+        )
+        TIER_FLOOR_BY_CONTEXT = _override
 
 # Quiet time at which proxy_reward() saturates to a full 1.0.
 #

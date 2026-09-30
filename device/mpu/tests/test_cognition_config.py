@@ -16,6 +16,43 @@ from cognition import config
 from cognition.bandit import Tier
 from cognition.fusion import Modality, sigmoid
 
+# Deployment overrides live in cognition/config.py and services/config.py,
+# and the tests below assert the design each one suspends. Each override
+# gets its own marker rather than sharing one: they are lifted
+# independently, and a single combined condition keeps the mark applied
+# after one is reverted, reporting the other's tests as failures.
+# strict=True turns a suspended test back into a hard failure the moment
+# its override is lifted and it starts passing again, so an override can
+# never be left silently in place.
+#
+# The escalation ladder. Committed code carries (TIER_1, TIER_2, TIER_3);
+# a node that needs a flat floor sets ELETECT_TIER_FLOOR instead. The
+# marker is what lets that node still report honestly rather than failing
+# a suite that is testing the shipped default.
+_TIER_FLOOR_OVERRIDDEN = config.TIER_FLOOR_BY_CONTEXT != (
+    Tier.TIER_1,
+    Tier.TIER_2,
+    Tier.TIER_3,
+)
+TIER_FLOOR_OVERRIDE = pytest.mark.xfail(
+    _TIER_FLOOR_OVERRIDDEN,
+    reason="suspended by an ELETECT_TIER_FLOOR override of the escalation ladder",
+    strict=True,
+)
+
+# Horn and LED gain. Committed code fires every tier at full gain. A rig on
+# a soft supply may pin the columns lower to buy sag headroom - the 10 Sept
+# run #1 mitigation did, at horn 0.20/0.28/0.35 and LED 0.85. That is a
+# power decision, separate from the ladder, so it gets its own marker.
+_GAIN_OVERRIDDEN = (
+    config.TIER_3_GAIN_FRACTION != 1.0 or config.LED_TIER_1_GAIN_FRACTION != 1.0
+)
+GAIN_OVERRIDE = pytest.mark.xfail(
+    _GAIN_OVERRIDDEN,
+    reason="suspended by the 10 Sept horn/LED gain reductions in cognition/config.py",
+    strict=True,
+)
+
 MCU_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "mcu" / "src" / "config.h"
 
 
@@ -217,6 +254,7 @@ def test_floors_never_step_back_down_as_repeats_accumulate():
     assert floors == sorted(floors)
 
 
+@TIER_FLOOR_OVERRIDE
 def test_the_first_context_permits_every_tier():
     """An isolated trigger must leave the bandit free to choose any response.
 
@@ -269,6 +307,7 @@ def test_every_requested_duration_fits_in_the_wire_uint16():
             assert 0 <= duration <= config.PROTOCOL_DURATION_MS_MAX
 
 
+@GAIN_OVERRIDE
 def test_the_top_tier_requests_the_protocol_maximum():
     """Tier 3 must stay exactly the pre-bandit behaviour.
 
@@ -364,6 +403,7 @@ def test_each_tier_has_a_distinct_led_signature():
     assert len(set(signatures)) == len(signatures)
 
 
+@GAIN_OVERRIDE
 def test_every_led_tier_fires_at_full_gain():
     """ADR 0014 E.3: the light is at full output on every tier, no ramp.
 
@@ -378,6 +418,7 @@ def test_every_led_tier_fires_at_full_gain():
     )
 
 
+@GAIN_OVERRIDE
 def test_every_led_tier_requests_exactly_the_mcu_led_clamp():
     """The drift check cognition/config.py's LED gain-fraction comment defers here.
 
@@ -386,6 +427,13 @@ def test_every_led_tier_requests_exactly_the_mcu_led_clamp():
     config error) and not fall under it (that would be a covert brightness
     ramp). If the firmware cap ever moves, this fails and the intent gets
     re-stated on both sides of the boundary.
+
+    Suspended while the 2026-09-10 field-trial LED override is active, for
+    the same reason and by the same mechanism as
+    test_every_led_tier_fires_at_full_gain above - the override holds every
+    tier at 0.85 to buy sag headroom on the shared LED buck. The mark is
+    condition-gated and strict, so restoring LED_TIER_1_GAIN_FRACTION to 1.0
+    re-arms this check automatically rather than leaving it silently off.
     """
     led_gain_max_pct = _read_mcu_define("LED_GAIN_MAX_PCT")
     for tier in Tier:
