@@ -6,8 +6,8 @@
 ## Context
 
 User asked directly for footage of the full encounter story — elephant entering camera field, the
-system detecting it, deterrence firing, the elephant retreating — as a real deliverable for both the DFO
-trial and the public writeup the second is also being built for. Today's actual capture
+system detecting it, deterrence firing, the elephant retreating — as a real requirement for both the
+DFO trial and the public documentation of the system. Today's actual capture
 (`reflex_loop.handle_footfall_event()`, `KNOWN_GAPS.md`'s 18 Aug entry) saves a 5-frame JPEG burst per
 alert, camera opened on wake and closed ~2s after the IR pulse — not continuous video, and explicitly
 **no rolling pre-event buffer**, a decision already made and documented as deliberate, not an oversight.
@@ -105,7 +105,7 @@ smuggled into this ADR on the strength of a plausible-but-unmeasured argument.
 ## Consequences
 
 + Real, continuous "entering → detected → deterred → retreating" footage for confirmed events, serving
-  both the DFO trial and the public-writeup goal directly.
+  both the DFO trial and the public documentation of the system directly.
 + No new always-on power draw — stays within the existing wake/suspend architecture ADR 0008 already
   sized the budget around.
 + Bounds the cost of non-elephant triggers to ~15-20s instead of the full event window.

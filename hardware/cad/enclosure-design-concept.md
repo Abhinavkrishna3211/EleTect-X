@@ -336,7 +336,7 @@ visible LED light into the lens and show up as flare in footage.
 strobe is bright enough at night to affect the camera's own day/night IR-cut auto-switching if it's ever
 close enough to read as "daylight" — worth checking on the bench once real parts are in hand, since a
 mistimed IR-cut switch mid-capture would lose exactly the footage (animal reacting to the deterrent) you
-most want for the public writeup.
+most want for the public documentation.
 
 **Electrical noise zoning.** The TPA3116D2 amp, the XL4015 solar-charging buck module, and the IR/LED
 MOSFET gate drivers are all switching-noise sources (class-D switching, buck conversion, gate switching
