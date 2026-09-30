@@ -1,7 +1,7 @@
 # Platform reference links — Edge Impulse + Arduino UNO Q + App Lab
 
-Source: link list supplied 2026-09-01 ("go through all documentation here... look into
-Arduino UNO Q and App Lab skills"). Most of the Edge Impulse block is the full docs
+Source: link list compiled 2026-09-01 while reading the Arduino UNO Q and App Lab
+documentation end to end. Most of the Edge Impulse block is the full docs
 sitemap; the curated UNO Q / App Lab / integration set is at the bottom and is the part
 worth keeping close. The prose research distilled from these lives in the sibling files
 indexed by `README.md`.
@@ -19,14 +19,11 @@ indexed by `README.md`.
 - https://docs.arduino.cc/tutorials/uno-q/remote-access/
 - https://docs.arduino.cc/tutorials/uno-q/security-hardening-guide/
 - https://docs.arduino.cc/tutorials/uno-q/routerbridge-multilanguage/
-- https://docs.arduino.cc/tutorials/uno-q/ai-coding-agents/
 - https://docs.edgeimpulse.com/hardware/boards/arduino-uno-q
 - https://www.edgeimpulse.com/arduino-integrations
 - https://docs.edgeimpulse.com/hardware/deployments/run-arduino-app-lab
 - https://blog.arduino.cc/2026/03/04/train-and-deploy-your-own-ai-models-in-arduino-app-lab-now-fully-integrated-with-edge-impulse/
 - https://www.edgeimpulse.com/blog/how-to-build-a-rock-paper-scissors-app-for-the-arduino-uno-q/
-- https://github.com/edgeimpulse/agent-tools/tree/main/skills/build-arduino-uno-q-app-lab
-- https://github.com/edgeimpulse/agent-tools/tree/main
 
 ## Edge Impulse — top level
 

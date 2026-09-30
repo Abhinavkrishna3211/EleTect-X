@@ -329,11 +329,11 @@ enumerates the camera and on the camera honoring UVC manual-exposure.
 - Deployment targets offered for the board: "Linux aarch64" and "Linux Arduino
   UNO Q (GPU)". The GPU one is the one that fails to launch (Q1).
 - **No official FPS / latency figure** is published for the UNO Q by Edge Impulse.
-  Third-party (hackster OCR project, Marc Pous) notes the QRB2210 UNO Q is "too
-  slow to handle heavy inference in real-time" and uses a model cascade / small
-  FOMO stages — directionally consistent with our ~5.7 FPS.
-  <https://www.hackster.io/marc-pous/ocr-on-arduino-uno-q-with-edge-impulse-using-model-cascade-5414f6>
-  (page returns 403 to automated fetch; summary from search index / Q&A)
+  A published third-party OCR project on this board reports the QRB2210 is "too
+  slow to handle heavy inference in real-time" and works around it with a model
+  cascade of small FOMO stages — directionally consistent with our ~5.7 FPS.
+  Recorded here as a second-hand observation: the write-up is not linked, so treat
+  our own measured figure as the one to reason from.
 - Supported blocks: standard EI image blocks — image classification (MobileNet),
   FOMO object detection, plus audio/motion. No board-specific block restriction
   documented; the constraint is compute, not block support.

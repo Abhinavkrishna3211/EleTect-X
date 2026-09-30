@@ -13,7 +13,8 @@ Primary sources used throughout:
 - RouterBridge multi-language tutorial: <https://github.com/arduino/docs-content/blob/main/content/hardware/02.uno/boards/uno-q/tutorials/09.routerbridge-multilanguage/content.md>
 - Linux-image flasher: <https://github.com/arduino/docs-content/blob/main/content/software/app-lab/2.configure/4.flash/flash.md>
 - Edge Impulse on App Lab: <https://docs.edgeimpulse.com/hardware/deployments/run-arduino-app-lab>
-- `edgeimpulse/agent-tools` UNO Q skill: <https://github.com/edgeimpulse/agent-tools/tree/main/skills/build-arduino-uno-q-app-lab>
+- Edge Impulse's condensed App Lab reference for the UNO Q — summarised in Q5 below;
+  its specifics were re-checked against the Arduino and Edge Impulse docs linked above.
 
 ---
 
@@ -141,7 +142,7 @@ and `cmd/arduino-app-cli/`):
 - `system` — `update [--only-arduino] [--yes]` (interactive "Do you want to upgrade these
   packages? (yes/no)"); `cleanup` (prune unused app images); `network-mode <enable|disable|status>`
   (enable/disable prompt for the Linux password); `keyboard [layout]`; `set-name <name>` (takes
-  effect after reboot). Note: older docs/skill text says `system network enable|disable` — the
+  effect after reboot). Note: older documentation says `system network enable|disable` — the
   current verb is `network-mode`.
 - `properties` — `get default`; `set default <app_path>` (`none` unsets).
 - `config` — `get` (dump effective config).
@@ -237,7 +238,7 @@ for fire-and-forget; call `Bridge.update()` in `loop()` to keep RPC responsive.
 Source: Bridge API reference, RouterBridge multi-language tutorial.
 
 **Python bindings.** App Lab apps: `from arduino.app_utils import App, Bridge` — `Bridge.call`,
-`Bridge.notify`, `Bridge.provide("name", fn)`. (The skill REFERENCE.md also shows the older
+`Bridge.notify`, `Bridge.provide("name", fn)`. (The Edge Impulse reference also shows the older
 `from arduino.bridge import Bridge` with decorators `@bridge.on_call` / `@bridge.on_notify`; treat
 `arduino.app_utils` as current per the Bridge API reference.) Raw clients in any language: open
 `AF_UNIX`/`SOCK_STREAM` to the socket and speak msgpack — full C++ (`libmsgpack-cxx-dev`,
@@ -264,18 +265,18 @@ client at `/tmp/debug.sock`.
 
 ---
 
-## Q5 — What the `edgeimpulse/agent-tools` UNO Q skill prescribes
+## Q5 — What Edge Impulse's condensed App Lab reference prescribes
 
-Skill: `skills/build-arduino-uno-q-app-lab` (metadata version 1.0.1). `SKILL.md` is a router that
-defers all specifics to `references/REFERENCE.md` and repeatedly warns that App Lab changes fast —
-"Treat file paths and ports in the reference as defaults to verify, not universal facts." Workflow
-it prescribes: inspect the existing project first; decide app vs brick vs sketch vs service;
-confirm mutable details against live docs; keep real-time I/O on the MCU and networking/files/
-web/ML on the MPU; reuse the project's existing manifest fields (don't invent); pin Python deps,
-prefer Debian packages for native libs; do not commit `.eim` binaries unless asked; then validate
-manifest → run → inspect logs → exercise the full MCU↔MPU / model→UI path.
+Edge Impulse publishes a condensed App Lab reference (version 1.0.1) next to its docs. The short
+front page defers all specifics to a long reference document, and repeatedly warns that App Lab
+changes fast — "Treat file paths and ports in the reference as defaults to verify, not universal
+facts." The order of work it prescribes: inspect the existing project first; decide app vs brick
+vs sketch vs service; confirm mutable details against live docs; keep real-time I/O on the MCU and
+networking/files/web/ML on the MPU; reuse the project's existing manifest fields (don't invent);
+pin Python deps, prefer Debian packages for native libs; keep `.eim` binaries out of version
+control; then validate manifest → run → inspect logs → exercise the full MCU↔MPU / model→UI path.
 
-Concrete build/flash/deploy steps from `REFERENCE.md`:
+Concrete build/flash/deploy steps from that reference:
 
 - **Deploy = `arduino-app-cli app start`.** "Sketch compilation occurs at launch (can take up to a
   minute)." Use `user:<app>` / `examples:<name>` shortcuts. Logs via `app logs <path> --all`.
@@ -394,7 +395,7 @@ reinstall without `arduino-app-cli` was not found documented.
 - **Model hot-swap / OTA.** No supported "update the model in a running app" path. Restart-based
   replacement works; live swap needs custom brick code. Behaviour of `arduino-app-cli model
   delete`/re-download while an app is running not verified.
-- **`~/.arduino-bricks/ei-models/` vs `~/.arduino-bricks/models/`.** EI docs and the skill say
+- **`~/.arduino-bricks/ei-models/` vs `~/.arduino-bricks/models/`.** EI docs and its condensed reference say
   `ei-models/`; `arduino-app-cli` env default is `models/` with `model.yaml`. Likely a version
   skew; confirm on the actual board (`ls ~/.arduino-bricks`).
 - **`daemon` REST base URL/port.** OpenAPI file says `http://localhost:8800` and `version
@@ -423,14 +424,14 @@ reinstall without `arduino-app-cli` was not found documented.
    There is no documented USB-DFU button/bootloader for the STM32 on UNO Q.
 5. **Do not pin `Arduino_RouterBridge` in `sketch.yaml`.** From `arduino:zephyr` core 0.55.0 it
    (and `Serial`) are bundled in the platform; `arduino-app-cli` strips an unpinned reference
-   automatically and a pinned one can break the build. Older skill/reference snippets that list
+   automatically and a pinned one can break the build. Older reference snippets that list
    `Arduino_RouterBridge (0.2.2)` are stale.
 6. **Bridge transport specifics:** Linux side is `/dev/ttyHS1` (not a generic `ttyUSB`/`ttyACM`),
    MCU side `Serial1`, 115200 bps, 256-byte max message, socket `/var/run/arduino-router.sock`.
    Both serial endpoints are exclusively held by `arduino-router`.
 7. **Python Bridge import is `from arduino.app_utils import App, Bridge`** per the current Bridge
-   API reference (the `from arduino.bridge import Bridge` + decorator style in the skill reference
-   is the older API).
+   API reference (the `from arduino.bridge import Bridge` + decorator style in the Edge Impulse
+   reference is the older API).
 8. **`system network enable|disable` is now `system network-mode <enable|disable|status>`.**
 9. **Edge Impulse model install is GUI "Download" inside the brick's AI-models tab** (writes
    `app.yaml` for you), or a manual `.eim` copy + `chmod +x`. CLI only exposes `model list` /

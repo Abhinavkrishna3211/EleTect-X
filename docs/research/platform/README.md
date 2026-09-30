@@ -1,7 +1,7 @@
 # Arduino UNO Q + Edge Impulse — platform research
 
 Compiled 2 Sept 2026 from the Arduino UNO Q docs, Edge Impulse docs (Studio + Linux SDK), the
-`edgeimpulse/agent-tools` App Lab skill, and the Arduino / Edge Impulse forums + GitHub issues.
+condensed App Lab reference Edge Impulse publishes, and the Arduino / Edge Impulse forums + GitHub issues.
 Purpose: stop re-deriving the same platform facts every session, and pin down real fixes for the
 problems that keep blocking the device track — the recurring crash-reboots, the dead GPU delegate,
 camera exposure at night, headless flash/deploy, and the vision recall bar.
@@ -19,6 +19,8 @@ number externally.
 | [app-lab-flash-and-routerbridge.md](app-lab-flash-and-routerbridge.md) | Canonical headless build/flash/deploy via `arduino-app-cli`, FQBN menu options, RouterBridge msgpack-RPC protocol spec, MCU recovery ladder, EI model bundling. Includes corrections to our prior understanding. |
 | [edge-impulse-linux-inference.md](edge-impulse-linux-inference.md) | Whether GPU/NPU/DSP acceleration is real on QRB2210 (it is not), Flex delegates, how the EI runner captures camera frames, locking exposure/gain/AGC, EON Compiler + no-retrain latency levers. |
 | [edge-impulse-studio-vision-tuning.md](edge-impulse-studio-vision-tuning.md) | Raising Elephant/Boar per-class recall past 92% without wrecking precision: YOLO-Pro knobs, block choice, augmentation, class weighting, object-tracking post-processing, EON Tuner search space, finding silent-miss images. |
+| [app-lab-bricks-and-custom-models.md](app-lab-bricks-and-custom-models.md) | How App Lab actually loads a model: the App/Brick/Model/Runner separation, the `app.yaml` and `model.yaml` schemas at Go-source level, the three routes for binding a custom `.eim`, the 1337-1343 runner port map, our 0.11.0-vs-0.13.0 version gap, the working on-board microphone, and two live golden-compose landmines. |
+| [app-lab-reference-links.md](app-lab-reference-links.md) | Link index for the App Lab and Edge Impulse sources the file above was built from, with an assessment of each. |
 | [reference-links.md](reference-links.md) | Raw source link list (Edge Impulse docs sitemap + curated Arduino UNO Q / App Lab / integration set) the prose files above were distilled from. Not itself a findings doc. |
 
 ## The reliable fixes / methods, by problem

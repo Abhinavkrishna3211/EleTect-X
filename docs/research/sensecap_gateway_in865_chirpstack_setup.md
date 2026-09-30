@@ -95,18 +95,17 @@ worth stating plainly rather than assuming the happy path:
   "supports global LoRaWAN frequency plans from 865 MHz to 923 MHz," which technically covers
   865 MHz — but that's an RF-range claim, not a confirmation that "IN865" is a selectable
   named entry in the Channel Plan dropdown on an EU868-labeled unit.
-- Two independent real-world write-ups exist of people deploying this exact gateway for IN865 in
-  India, and **both started from EU868-labeled hardware, not an IN865 SKU**:
-  - [SensCAP M2: IN865 LoRa Gateway, 4G-Ready Deployment (Hackster.io)](https://www.hackster.io/vinayyn/sensecap-m2-in865-lorawan-gateway-4g-ready-deployment-9f0da3)
+- A real-world write-up exists of someone deploying this exact gateway for IN865 in India, and
+  it **started from EU868-labeled hardware, not an IN865 SKU**:
   - [SenseCAP M2: IN865 LoRa Gateway Setup with 4G Backhaul (DFRobot community)](https://community.dfrobot.com/makelog-313793.html)
   
-  Neither report describes hitting a wall where IN865 was missing from the Channel Plan
-  dropdown, and neither reports a firmware swap or RMA to get IN865 working. That's a genuinely
-  reassuring signal — it suggests the "EU868" in the product name is the as-shipped default
-  channel plan, not a hard RF-hardware lock. But **neither write-up shows the actual dropdown
-  contents or explicitly states "IN865 was there and I selected it"** — the ChirpStack
-  tutorial's own instructions just say "select the Region and Frequency plan according to the
-  actual choice" without listing the options. So this is corroborating evidence, not
+  It does not describe hitting a wall where IN865 was missing from the Channel Plan dropdown,
+  and does not report a firmware swap or RMA to get IN865 working. That is a reassuring signal
+  — it suggests the "EU868" in the product name is the as-shipped default channel plan, not a
+  hard RF-hardware lock. But **it does not show the actual dropdown contents or explicitly
+  state "IN865 was there and I selected it"** — the ChirpStack tutorial's own instructions
+  just say "select the Region and Frequency plan according to the actual choice" without
+  listing the options. So this is corroborating evidence from a single report, not
   confirmation.
 
 **Bottom line:** two real deployments strongly suggest this works, but nobody's write-up
@@ -126,7 +125,6 @@ in this document.
 - [Connect M2 Multi-Platform Gateway to ChirpStack](https://wiki.seeedstudio.com/Network/SenseCAP_Network/SenseCAP_M2_Multi_Platform/Tutorial/Connect-M2-Multi-Platform-Gateway-to-ChirpStack/)
 - [traffic_saving_config (checked, not directly relevant — 4G data-usage feature, no region info)](https://wiki.seeedstudio.com/traffic_saving_config/)
 - [Seeed product page: SenseCAP M2 SX1302 — EU868](https://www.seeedstudio.com/SenseCAP-Multi-Platform-LoRaWAN-Indoor-Gateway-SX1302-EU868-p-5471.html)
-- [SenseCAP M2: IN865 LoRa Gateway, 4G-Ready Deployment (Hackster.io)](https://www.hackster.io/vinayyn/sensecap-m2-in865-lorawan-gateway-4g-ready-deployment-9f0da3)
 - [SenseCAP M2: IN865 LoRa Gateway Setup with 4G Backhaul (DFRobot community)](https://community.dfrobot.com/makelog-313793.html)
 
 Not used / not directly applicable to this frozen architecture (ADR 0002 names ChirpStack, not

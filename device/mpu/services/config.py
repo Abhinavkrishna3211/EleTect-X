@@ -765,7 +765,7 @@ CAPTURE_DIR = _MODULE_DIR / "data" / "captures"
 # INVENTED - no measured field JPEG-size/trigger-frequency data backs this
 # number yet; picked as a conservative "still room for hundreds more bursts"
 # floor against the real board's ~3.6GB usable /home/arduino partition
-# (.agents/skills/build-arduino-uno-q-app-lab/references/REFERENCE.md), not
+# (per Edge Impulse's App Lab reference), not
 # a tuned figure. See docs/KNOWN_GAPS.md.
 CAPTURE_LOW_DISK_HEADROOM_BYTES = 500 * 1024 * 1024  # 500 MB
 
