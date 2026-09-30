@@ -4,7 +4,9 @@ Auth + Postgres + realtime + storage + edge functions. Roles: **admin · officer
 
 ## Setup
 1. Create a free Supabase project → copy the Project URL + anon key + service-role key.
-2. **SQL editor →** run `schema.sql` (tables, RLS, triggers, realtime, public view).
+2. **SQL editor →** run `schema.sql` (tables, RLS, triggers, realtime, public view). On an existing
+   project, run the files in `migrations/` that it has not had yet, in order (`0004_lora_uplink.sql`
+   adds `events.uplink`, which `web/ingest` writes).
 3. **Auth →** enable Email/Password. First user: sign up, then in SQL set your role:
    `update profiles set role='admin' where id='<your-uid>';`
 4. **Storage →** create a public bucket `event-media` for detection thumbnails.
@@ -22,6 +24,13 @@ Auth + Postgres + realtime + storage + edge functions. Roles: **admin · officer
 
 ## Data flow (end to end)
 Node → LoRa → gateway (ChirpStack) → `web/ingest` (MQTT→Supabase insert into `events`/`health`) → Database Webhook → `send-alert` edge function → **notification channels** (email now; SMS/WhatsApp when configured) to officers + opted-in nearby public → row in `alerts`. Dashboard reads via Supabase realtime.
+
+Only `priority='high'` events fan out: camera-confirmed wildlife, and gunshot/chainsaw (ADR 0031).
+Wildlife alerts name the species the node reported (or "wildlife confirmed on camera" when a
+multi-species node could not say which) and go to officers plus opted-in residents within 3 km.
+**Gunshot and chainsaw alerts go to officers and admins only** — residents are never paged towards a
+possible poacher. Wording and audience live in `functions/send-alert/message.ts`
+(`deno test message.test.ts`).
 
 ## Notification channels (`send-alert`)
 Delivery is pluggable. `send-alert` reaches each recipient over the **first enabled channel it has

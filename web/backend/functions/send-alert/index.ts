@@ -1,6 +1,7 @@
 // EleTect X — alert fan-out (Supabase Edge Function, Deno)
 // Trigger: Database Webhook on INSERT into `events` (or call directly with an event record).
-// Sends to all officers + opted-in Public users near the node, and logs to `alerts`.
+// Sends to all officers + opted-in Public users near the node, and logs to `alerts`. Gunshot and
+// chainsaw alerts go to officers only (message.ts decides wording and audience).
 //
 // This file is the thin HTTP entrypoint: payload/demo guards, recipient selection, then hand off
 // to fanOut() in fanout.ts (channels + per-recipient delivery + audit). Keeping the delivery logic
@@ -20,6 +21,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { type AlertMessage, fanOut } from "./fanout.ts";
+import { alertText, audienceFor } from "./message.ts";
 
 const ALERT_RADIUS_KM = 3;
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SERVICE_ROLE_KEY")!);
@@ -46,16 +48,16 @@ Deno.serve(async (req) => {
   if ((ev.priority ?? "normal") !== "high") return new Response("skipped (not high)", { status: 200 });
 
   const { data: node } = await db.from("nodes").select("name,lat,lng").eq("id", ev.node_id).single();
-  const body = `EleTect X: elephant detected near ${node?.name ?? ev.node_id} ` +
-    `(${Math.round((ev.confidence ?? 0) * 100)}% confidence). Stay alert, avoid the area.`;
-  const msg: AlertMessage = { subject: `EleTect X alert — ${node?.name ?? ev.node_id}`, body };
+  const msg: AlertMessage = alertText(ev, node?.name ?? ev.node_id);
 
   // No phone filter: with email primary, a recipient needs only *an* address, and
   // per-channel addressability is decided in deliver(). Public opt-in is alerts_enabled.
   const { data: staff } = await db.from("profiles").select("id,phone")
     .in("role", ["admin", "officer"]);
-  const { data: pub } = await db.from("profiles").select("id,phone,lat,lng")
-    .eq("role", "public").eq("alerts_enabled", true);
+  // Residents are only queried for wildlife; a poaching alert never leaves staff.
+  const { data: pub } = audienceFor(ev) === "staff_and_residents"
+    ? await db.from("profiles").select("id,phone,lat,lng").eq("role", "public").eq("alerts_enabled", true)
+    : { data: [] as { id: string; phone: string | null; lat: number | null; lng: number | null }[] };
   const near = (pub ?? []).filter((p) =>
     p.lat != null && node?.lat != null && kmBetween(node.lat, node.lng, p.lat!, p.lng!) <= ALERT_RADIUS_KM);
 

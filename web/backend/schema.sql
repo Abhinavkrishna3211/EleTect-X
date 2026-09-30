@@ -46,6 +46,7 @@ create table events (
   priority     text default 'normal', -- normal | high
   fusion       jsonb,                 -- per-modality log-odds breakdown (see comment)
   corridor     jsonb,                 -- coordinated-corridor activation breakdown (see comment)
+  uplink       jsonb,                 -- LoRaWAN frame this event arrived in (see comment)
   created_at   timestamptz not null default now()
 );
 create index on events (node_id, ts desc);
@@ -80,6 +81,18 @@ comment on column events.corridor is
   'Coordinated safe-herding corridor activation breakdown (CONTEXT.md §4). Groups '
   'neighbour events of one herd movement (activation) with each node''s handoff '
   'role (detect/deter/escort) and sequence order; null for uncoordinated events.';
+
+-- The node's LoRaWAN event frame as web/ingest decoded it (ADR 0031). Kept so a
+-- ranger can see what the node itself reported - whether the camera confirmed
+-- it, which deterrence tier ran and whether it fired - and so ingest can drop a
+-- frame the node re-sent (same seq inside a short window). Null for events that
+-- did not arrive over LoRa (demo scenarios, pre-decoded test uplinks). Shape:
+--   { "seq": 0-255, "class": 0-4, "tier": 0-3, "flags": <byte>,
+--     "vision_confirmed": bool, "deterrent_fired": bool, "safe_mode": bool,
+--     "capture_ref": u32, "fcnt": int|null, "rssi": dBm|null, "snr": dB|null }
+comment on column events.uplink is
+  'Decoded LoRaWAN event frame (ADR 0031): seq, class, tier, flags and radio '
+  'metadata. Null for events that did not arrive over LoRa.';
 
 -- 4. Alerts sent (audit)
 create table alerts (
