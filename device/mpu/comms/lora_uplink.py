@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any, Protocol
 
+from services import config as services_config
+
 logger = logging.getLogger(__name__)
 
 SEND_LORA_EVENT = "send_lora_event"
@@ -63,9 +65,17 @@ class EventClass(IntEnum):
     FOX = 6
 
 
-# Vision label -> event class, for the labels a node may deter on
-# (services/config.py DETERRENT_TARGET_LABELS).
-_LABEL_CLASS = {"Elephant": EventClass.ELEPHANT, "Boar": EventClass.BOAR}
+# Vision label -> event class, derived from the species registry rather
+# than restated here. The registry holds each species' wire code as a plain
+# int so that services/config.py stays import-free; EventClass() is what
+# turns it back into a member, and it raises at import if the registry ever
+# names a code this enum does not define. That is deliberate: a species
+# whose wire code the two sides disagree about must fail the build, not
+# quietly uplink as something else.
+_LABEL_CLASS = {
+    label: EventClass(species.event_class)
+    for label, species in services_config.SPECIES_REGISTRY.items()
+}
 
 
 @dataclass(frozen=True)

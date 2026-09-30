@@ -19,6 +19,7 @@ constants in the same sense as the MCU's pin assignments (config.h), not
 tuning knobs for cognition math.
 """
 
+import dataclasses
 import logging
 import os
 from pathlib import Path
@@ -92,6 +93,148 @@ NODE_HOUSEHOLD_PROXIMITY = os.environ.get("ELETECT_HOUSEHOLD_PROXIMITY", "0") !=
 # see deterrence_scope_labels() - never raise, since a typo in a per-node
 # environment variable must not crash the reflex loop on a field node.
 NODE_DETERRENCE_SCOPE = os.environ.get("ELETECT_DETERRENCE_SCOPE", "elephant_only")
+
+
+@dataclasses.dataclass(frozen=True)
+class Species:
+    """Everything the pipeline needs to know about one deterrable species.
+
+    Attributes:
+        label: The vision model's class name, and this species' identity
+            everywhere else - scope strings, the detector, the experience
+            store, the log.
+        event_class: The LoRaWAN wire code, comms.lora_uplink.EventClass.
+            Held as a plain int so this module stays import-free; the enum
+            owns the number, and lora_uplink turns it back into an
+            EventClass at import, which fails loudly if the two disagree.
+        bandit_policy: Whose escalation ladder and action values this
+            species spends. Defaults to `label` - its own - because a
+            species that quietly shares another's ladder inherits its
+            habituation, and that is the defect ADR 0034 exists to fix.
+        deterrence_content: Whose horn track and LED pattern pool it
+            fires. Separate from bandit_policy on purpose: what you play
+            at an animal and what you learn from playing it are different
+            questions, and Fox is the case that proves it.
+        alert_audience: Who a confirmed detection reaches beyond the
+            dashboard, which shows everything. Declarative only - the
+            device never reads it, because the fan-out happens in
+            web/backend. It lives here so that adding a species is one
+            entry rather than one entry plus a cloud change nobody
+            remembers. tests/test_species_registry.py checks the value
+            against the closed vocabulary the routing table uses; the
+            backend does not consult this column yet, and wiring
+            send-alert's audienceFor() to agree with it is what closes
+            the loop.
+    """
+
+    label: str
+    event_class: int
+    bandit_policy: str = ""
+    deterrence_content: str = ""
+    alert_audience: str = "dashboard_only"
+
+    def __post_init__(self) -> None:
+        """Fill the alias keys a table entry left blank with the label."""
+        # Identity defaults, applied here rather than at each call site so
+        # a new entry gets its own bandit case automatically, and sharing
+        # another species' ladder or content stays a visible, deliberate
+        # line in the table below.
+        if not self.bandit_policy:
+            object.__setattr__(self, "bandit_policy", self.label)
+        if not self.deterrence_content:
+            object.__setattr__(self, "deterrence_content", self.label)
+
+
+# Every species this hardware may be pointed at, and what each one implies.
+# Adding a species is one entry here, plus its wire code in the three files
+# that carry the byte format (device/mcu/src/uplink.h,
+# device/mpu/comms/lora_uplink.py, web/ingest/src/payload.ts). Those stay a
+# deliberate manual addition because a wire code must be appended in
+# lockstep and never renumbered; tests/test_species_registry.py fails if
+# this table and any of the three drift apart.
+#
+# This is also the safety bound on ELETECT_DETERRENCE_SCOPE, not a default:
+# a scope naming a label that is not a key here has that label dropped with
+# a warning. Commissioning a node stays an environment variable while "what
+# may this hardware be pointed at" stays a reviewed source change - a typo,
+# or a deployment recipe copied from a site with different species, must
+# not be able to aim a horn at a class nobody decided to deter.
+#
+# Acoustic classes are deliberately absent and must stay absent. gunshot
+# and chainsaw route straight to forest officers and are never answered
+# with a horn (ADR 0007 5); elephant_call corroborates vision and does not
+# actuate on its own. Deterrence is a vision-confirmed decision - see
+# DETERRENT_REQUIRES_VISION_CONFIRMATION below.
+SPECIES_REGISTRY: dict[str, Species] = {
+    species.label: species
+    for species in (
+        Species(
+            label="Elephant",
+            event_class=1,
+            alert_audience="residents",
+        ),
+        Species(
+            label="Boar",
+            event_class=2,
+        ),
+        # Fox keeps its own bandit_policy - the default - so that a night
+        # of foxes cannot walk the elephant ladder up, which is the whole
+        # point of partitioning it. It borrows Boar's content because the
+        # horn tracks and LED patterns were chosen for a mid-sized mammal
+        # and there is no fox-specific evidence to choose differently;
+        # ADR 0023 makes the same ecological-inference argument for
+        # reusing tiger/lion on Boar. Until the vision model had a Fox
+        # class it labelled foxes "Boar", so this is also the content
+        # those arms were actually learned on.
+        Species(
+            label="Fox",
+            event_class=6,
+            deterrence_content="Boar",
+        ),
+    )
+}
+
+# Registry keys, in table order. Kept as its own name because it is the
+# vocabulary every scope string is validated against, and it reads better
+# at the call sites that only care about which labels exist.
+DETERRABLE_LABELS = tuple(SPECIES_REGISTRY)
+
+
+def bandit_policy_for(label: str) -> str:
+    """Which species' escalation ladder and action values `label` spends.
+
+    An unknown label returns itself rather than raising. A label that
+    reached the bandit without being in the registry is already a bug
+    upstream, and partitioning it under its own name at least keeps it
+    from spending a real species' ladder while that bug is found.
+    """
+    species = SPECIES_REGISTRY.get(label)
+    return species.bandit_policy if species is not None else label
+
+
+def deterrence_content_for(label: str) -> str:
+    """Whose horn track and LED pattern pool `label` fires.
+
+    An unknown label falls back to "Elephant" - the only content set with
+    a published evidence base behind it (Thuppil & Coss 2016), and this
+    device's first purpose. Never raises, for the reason
+    parse_scope_labels() gives: nothing on this path may crash a field
+    node.
+    """
+    species = SPECIES_REGISTRY.get(label)
+    return species.deterrence_content if species is not None else "Elephant"
+
+
+def event_class_for(label: str) -> int:
+    """`label`'s LoRaWAN wire code, or 0 (unconfirmed) if it has none.
+
+    0 is the honest answer for a label this build cannot name: the
+    detection still happened and still belongs on the dashboard, but
+    reporting it as a species would put a name in front of a ranger that
+    nothing on this node stands behind.
+    """
+    species = SPECIES_REGISTRY.get(label)
+    return species.event_class if species is not None else 0
 
 # ---------------------------------------------------------------------------
 # Bridge.call() timeout and retry policy

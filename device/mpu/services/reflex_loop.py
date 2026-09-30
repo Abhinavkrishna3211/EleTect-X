@@ -1399,21 +1399,31 @@ def _deterrence_species(
     always returns "Elephant" - the same value every call site passed
     implicitly before this function existed.
 
-    Only meaningful once NODE_DETERRENCE_SCOPE admits Boar (boar_only or
-    both). Reads vision_check.confirmed rather than raw species membership,
-    for the same reason _watch_for_vision()'s own confirm gate does: a
+    Only meaningful once NODE_DETERRENCE_SCOPE admits more than Elephant.
+    Reads vision_check.confirmed rather than raw species membership, for
+    the same reason _watch_for_vision()'s own confirm gate does: a
     majority-gated label present in .species without having cleared its
     poll-level streak is not a real confirmation and must not steer content
-    selection either. If both species confirmed on the same event - both
-    animals genuinely in frame at once, only reachable under "both" - this
-    prefers Elephant: its evidence base is the deeper one (Thuppil & Coss
-    2016 vs. the ecological-inference argument ADR 0023 makes for reusing
-    tiger/lion on Boar) and it is the species this device exists for first.
-    An alert with no vision confirmation at all (seismic/acoustic alone)
-    also falls through to "Elephant" - the seismic/acoustic signature this
-    device fuses on was built and tuned for elephant footfall, not boar, so
-    there is no non-vision evidence this function could use to say
-    otherwise.
+    selection either.
+
+    Which content a confirmed label maps to is the registry's answer, not
+    this function's - services/config.py's SPECIES_REGISTRY carries a
+    deterrence_content key per species, which is how Fox fires Boar's horn
+    tracks while keeping its own bandit ladder. This function only decides
+    *which* confirming label to ask about.
+
+    If two species confirmed on the same event - both animals genuinely in
+    frame at once - this prefers Elephant: its evidence base is the deeper
+    one (Thuppil & Coss 2016, against the ecological-inference argument
+    ADR 0023 makes for reusing tiger/lion on Boar), and it is the species
+    this device exists for first. Below Elephant the tie-break is registry
+    order, so it is settled in the table rather than by whichever label the
+    detector happened to list first. An alert with no vision confirmation
+    at all (seismic/acoustic alone) also falls through to "Elephant" - the
+    seismic signature this device fuses on was built and tuned for elephant
+    footfall, so there is no non-vision evidence this function could use to
+    say otherwise.
+
 
     Args:
         vision_check: The watch's final VisionCheck (handle_footfall_event's
@@ -1428,12 +1438,17 @@ def _deterrence_species(
     """
     if not vision_check.confirmed:
         return "Elephant"
-    confirming = [label for label in vision_check.species if label in target_labels]
-    if "Elephant" in confirming:
+    # Registry order, not detector order, so the multi-species tie-break is
+    # a property of the table rather than of whichever label came back
+    # first from a given frame.
+    confirming = [
+        label
+        for label in services_config.DETERRABLE_LABELS
+        if label in vision_check.species and label in target_labels
+    ]
+    if not confirming or "Elephant" in confirming:
         return "Elephant"
-    if "Boar" in confirming:
-        return "Boar"
-    return "Elephant"
+    return services_config.deterrence_content_for(confirming[0])
 
 
 def handle_footfall_event(
