@@ -138,6 +138,10 @@ void HardwareSerial::end() {}
 size_t HardwareSerial::write(uint8_t value) {
   std::fputc(static_cast<int>(value), stdout);
   ++bytes_written_;
+  if (tx_len_ + 1 < kTxCapacity) {
+    tx_[tx_len_++] = static_cast<char>(value);
+    tx_[tx_len_] = '\0';
+  }
   return 1;
 }
 

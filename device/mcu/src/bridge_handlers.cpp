@@ -6,6 +6,7 @@
 #include "horn.h"
 #include "ir.h"
 #include "led.h"
+#include "mac.h"
 
 namespace {
 
@@ -80,15 +81,25 @@ bridge_system_state bridge_get_system_state(uint8_t schema_version) {
   return state;
 }
 
-bool bridge_send_lora_alert(uint8_t schema_version, float confidence, uint32_t capture_ref) {
+bool bridge_send_lora_event(uint8_t schema_version, uint8_t event_class, float confidence,
+                            uint8_t tier, uint8_t flags, uint32_t capture_ref) {
   if (schema_version != BRIDGE_SCHEMA_VERSION) {
-    log_schema_mismatch("send_lora_alert", schema_version);
+    log_schema_mismatch("send_lora_event", schema_version);
   }
-  // No real LoRa transport exists yet - see bridge_handlers.h. Logged, not
-  // sent; always acks false.
-  Serial.print("[bridge] [SAFE_MODE] would send direct gunshot alert: confidence=");
-  Serial.print(confidence, 3);
-  Serial.print(" capture_ref=");
-  Serial.println(capture_ref);
+#if LORA_ENABLED
+  uplink_event ev{};
+  ev.event_class = event_class;
+  ev.confidence = confidence;
+  ev.tier = tier;
+  ev.flags = flags;
+  ev.capture_ref = capture_ref;
+  return lora_queue_event(ev);
+#else
+  (void)event_class;
+  (void)confidence;
+  (void)tier;
+  (void)flags;
+  (void)capture_ref;
   return false;
+#endif
 }

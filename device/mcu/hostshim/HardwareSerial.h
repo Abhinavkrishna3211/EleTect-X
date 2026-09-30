@@ -39,6 +39,15 @@ class HardwareSerial : public Stream {
   size_t host_begin_count() const { return begin_count_; }
   void host_reset_begin_count() { begin_count_ = 0; }
 
+  // Host-side inspection hook: everything written since the last
+  // host_reset_tx(), NUL-terminated, so a test can assert on the exact AT
+  // command a driver sent. Stops recording (silently) once full.
+  const char *host_tx() const { return tx_; }
+  void host_reset_tx() {
+    tx_len_ = 0;
+    tx_[0] = '\0';
+  }
+
  private:
   static constexpr size_t kRxCapacity = 512;
   char rx_[kRxCapacity] = {};
@@ -47,6 +56,9 @@ class HardwareSerial : public Stream {
   size_t bytes_written_ = 0;
   unsigned long baud_ = 0;
   size_t begin_count_ = 0;
+  static constexpr size_t kTxCapacity = 1024;
+  char tx_[kTxCapacity] = {};
+  size_t tx_len_ = 0;
 };
 
 extern HardwareSerial Serial;

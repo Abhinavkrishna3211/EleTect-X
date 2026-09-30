@@ -13,12 +13,14 @@
 // see docs/KNOWN_GAPS.md for the full writeup.
 //
 // device/mpu/bridge/schema.md's MPU->MCU handlers (drive_horn, drive_led,
-// pulse_ir, get_system_state, send_lora_alert) have real adapters in
+// pulse_ir, get_system_state, send_lora_event) have real adapters in
 // bridge_handlers.cpp. drive_led and pulse_ir were registered in earlier
 // hardware sessions; drive_horn joined them this session (HOME_TEST_MODE
-// plan prerequisite 2). get_system_state/send_lora_alert stay deliberately
-// commented out - see docs/KNOWN_GAPS.md for why that is deferred to a
-// hardware session, one function at a time. Bridge.begin()/Bridge.update()
+// plan prerequisite 2). send_lora_event is registered with the LoRa build
+// (LORA_ENABLED) and is that bring-up session's one new function (ADR
+// 0029/0030). get_system_state stays deliberately commented out - see
+// docs/KNOWN_GAPS.md for why that is deferred to a hardware session, one
+// function at a time. Bridge.begin()/Bridge.update()
 // running unconditionally does not change that discipline: it makes the
 // notify direction reachable, it does not register any provide() handler.
 
@@ -33,6 +35,23 @@
 #include "led.h"
 #include "mac.h"
 #include "state_machine.h"
+
+#if LORA_ENABLED
+namespace {
+
+// Heartbeat fields for the status uplink (ADR 0031). No battery ADC is
+// fitted yet, so battery goes out as unknown rather than a made-up value.
+uplink_status lora_status_now(uint32_t now_ms) {
+  uplink_status st{};
+  st.flags = (geophone_ok() ? UPLINK_STATUS_FLAG_GEOPHONE_OK : 0) |
+             (HOME_TEST_MODE ? UPLINK_STATUS_FLAG_HOME_TEST : 0);
+  st.battery_mv = UPLINK_BATTERY_UNKNOWN;
+  st.uptime_s = now_ms / 1000UL;
+  return st;
+}
+
+}  // namespace
+#endif
 
 void setup() {
   Serial.begin(CONSOLE_BAUD);
@@ -49,7 +68,7 @@ void setup() {
 
   Bridge.begin();
 
-  // get_system_state/send_lora_alert below are NOT REGISTERED - see
+  // get_system_state below is NOT REGISTERED - see
   // bridge_handlers.h and docs/KNOWN_GAPS.md. Each line wires one MPU->MCU
   // function from device/mpu/bridge/schema.md to its adapter in
   // bridge_handlers.cpp.
@@ -77,7 +96,11 @@ void setup() {
   Bridge.provide("drive_led", bridge_drive_led);
   Bridge.provide("pulse_ir", bridge_pulse_ir);
   // Bridge.provide("get_system_state", bridge_get_system_state);
-  // Bridge.provide("send_lora_alert", bridge_send_lora_alert);
+#if LORA_ENABLED
+  // The LoRa bring-up session's one new function (ADR 0031) - verify
+  // drive_horn/drive_led/pulse_ir still answer after flashing it.
+  Bridge.provide("send_lora_event", bridge_send_lora_event);
+#endif
 
 #if FIRE_TEST_HARNESS
   fire_test_init();
@@ -89,6 +112,7 @@ void setup() {
   ir_init();
 #if LORA_ENABLED
   lora_init();
+  lora_set_status_source(lora_status_now);
 #endif
   state_machine_init();
 }

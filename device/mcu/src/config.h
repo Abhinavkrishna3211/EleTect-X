@@ -825,8 +825,40 @@
 #define LORA_JOIN_BACKOFF_BASE_MS 5000
 
 // Longest single line the E5 sends back. Fixed buffer, no dynamic allocation
-// in the reflex path.
+// in the reflex path. A longer line is consumed up to its newline and
+// matched on what fit.
 #define LORA_RESPONSE_MAX_LEN 128
+
+// Every uplink uses this FPort (ADR 0031); the ingest bridge decodes only
+// frames that arrive on it. Set once per join with AT+PORT.
+#define LORA_UPLINK_FPORT 10
+
+// Frames waiting for the radio. Events are rare and a status is sent every
+// LORA_STATUS_INTERVAL_MS, so four covers a burst of triggers while the port
+// is busy with the horn. When full, a new event evicts the oldest status; a
+// new status is dropped.
+#define LORA_UPLINK_QUEUE_LEN 4
+
+// Largest payload any uplink type encodes to (uplink.h). IN865 allows 51
+// bytes even at DR0, so every frame fits at the slowest data rate.
+#define LORA_UPLINK_MAX_LEN 16
+
+// One AT+(C)MSGHEX exchange, "+...: Start" through "+...: Done". A confirmed
+// frame waits out both receive windows and the E5's own retransmissions
+// before it prints Done, so this is far longer than LORA_AT_TIMEOUT_MS.
+#define LORA_UPLINK_TIMEOUT_MS 30000UL
+
+// Sends of one frame before it is dropped. A horn fire that cuts the exchange
+// short is not counted - the frame is re-sent with the same seq.
+#define LORA_UPLINK_MAX_ATTEMPTS 3
+
+// Wait before re-sending a frame that failed: this times the attempt number.
+#define LORA_UPLINK_RETRY_BASE_MS 15000UL
+
+// Status heartbeat period. The dashboard marks a node stale after two missed
+// periods (bridge/schema.md, report_system_status). A status is also queued
+// right after every join so a node shows up as soon as it is on the network.
+#define LORA_STATUS_INTERVAL_MS 600000UL
 
 // ---------------------------------------------------------------------------
 // Reflex state machine

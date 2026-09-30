@@ -1,6 +1,6 @@
 // Bridge RPC adapter functions - one per MPU->MCU function in
 // device/mpu/bridge/schema.md's second table (drive_horn, drive_led,
-// pulse_ir, get_system_state, send_lora_alert). Each adapter converts the
+// pulse_ir, get_system_state, send_lora_event). Each adapter converts the
 // flat scalar Bridge call signature schema.md defines into this file's real
 // actuator/sensor calls (horn.h/led.h/ir.h/geophone.h) and back into the
 // flat return shape schema.md specifies. Named bridge_* rather than
@@ -120,16 +120,18 @@ struct bridge_system_state {
 // bridge_handlers.cpp and docs/KNOWN_GAPS.md.
 bridge_system_state bridge_get_system_state(uint8_t schema_version);
 
-// MPU -> MCU: request a direct gunshot alert uplink (schema.md:
-// send_lora_alert, ADR 0007 5's anti-poaching path). Same schema_version
-// handling as bridge_drive_horn.
+// MPU -> MCU: queue a detection event for LoRaWAN uplink (schema.md:
+// send_lora_event, ADR 0031). Same schema_version handling as
+// bridge_drive_horn. The MPU decides what the event is - class, fused
+// confidence, the deterrence tier it chose, and what actually happened
+// (UPLINK_EVENT_FLAG_*) - and this only queues the frame with mac.cpp;
+// lora_service() sends it once the node is joined and the port is free.
 //
-// STUB: no real LoRa transport exists yet - the Grove E5 module does not
-// join (mac.h exposes only lora_init()/lora_service()/lora_get_state()/
-// lora_joined(), no uplink-send primitive; see docs/KNOWN_GAPS.md's 18 Aug
-// entry). This handler only logs the request and always returns false -
-// ack therefore means "queued/logged", never "delivered", until a real
-// uplink exists. Never touches mac.cpp.
-bool bridge_send_lora_alert(uint8_t schema_version, float confidence, uint32_t capture_ref);
+// Returns true when the frame was queued, not when it was delivered: the
+// E5's ACK arrives seconds later, long after this call has returned.
+// False when the queue is full of undelivered events, or in a build with
+// LORA_ENABLED 0.
+bool bridge_send_lora_event(uint8_t schema_version, uint8_t event_class, float confidence,
+                            uint8_t tier, uint8_t flags, uint32_t capture_ref);
 
 #endif  // BRIDGE_HANDLERS_H
