@@ -243,7 +243,7 @@ from cognition.bandit import (
     select_tier,
 )
 from cognition.decision import Decision, decide
-from cognition.experience import SettledAttempt
+from cognition.experience import UNATTRIBUTED, SettledAttempt
 from cognition.fusion import FusionResult, Modality, ModalityReading, fuse, logit
 from perception.camera import CameraError, Frame
 from perception.detector import Detection, DetectionError, VisionDetectFn
@@ -461,7 +461,15 @@ class ExperienceStoreProtocol(Protocol):
     """
 
     def record_trigger(self, event_ts_s: float, window_s: float) -> int:
-        """Log a trigger; returns the in-window repeat count before it."""
+        """Log a trigger; returns the species-blind in-window count before it."""
+        ...
+
+    def attribute_trigger(self, event_ts_s: float, species: str) -> int:
+        """Name a recorded trigger once vision resolves it; returns rows named."""
+        ...
+
+    def repeat_count(self, event_ts_s: float, window_s: float, species: str) -> int:
+        """Count one species' earlier triggers inside the habituation window."""
         ...
 
     def settle_pending(
@@ -470,11 +478,13 @@ class ExperienceStoreProtocol(Protocol):
         """Score the oldest unsettled attempt against the quiet since it fired."""
         ...
 
-    def action_values(self) -> dict[tuple[int, Tier], float]:
-        """Return every learned value, keyed by (context, tier)."""
+    def action_values(self, species: str = UNATTRIBUTED) -> dict[tuple[int, Tier], float]:
+        """Return one species' learned values, keyed by (context, tier)."""
         ...
 
-    def record_attempt(self, event_ts_s: float, context: int, tier: Tier) -> None:
+    def record_attempt(
+        self, event_ts_s: float, context: int, tier: Tier, species: str = UNATTRIBUTED
+    ) -> None:
         """Open an unsettled attempt for a deterrence that actually fired."""
         ...
 
