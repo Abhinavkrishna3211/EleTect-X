@@ -88,7 +88,7 @@ KNOWN_BRIDGE_FUNCTIONS = {
     "drive_led",
     "pulse_ir",
     "get_system_state",
-    "send_lora_alert",
+    "send_lora_event",
 }
 
 SCHEMA_FUNCTIONS = _parse_schema_functions()
@@ -152,7 +152,7 @@ EXPECTED_RETURN_ANNOTATIONS = {
     "drive_led": bool,
     "pulse_ir": bool,
     "get_system_state": rpc.SystemState,
-    "send_lora_alert": bool,
+    "send_lora_event": bool,
 }
 
 

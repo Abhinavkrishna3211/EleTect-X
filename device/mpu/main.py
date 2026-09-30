@@ -48,6 +48,7 @@ from arduino.app_utils import Bridge
 
 from bridge.rpc import AcousticClass
 from cognition.experience import ExperienceStore
+from comms.lora_uplink import LoraUplink, event_from_footfall, gunshot_event
 from perception.camera import Camera
 from perception.detector import HttpVisionDetector
 from perception.night import frames_are_night
@@ -165,6 +166,14 @@ _vision_detector = HttpVisionDetector(
 # would rescue.
 _experience = ExperienceStore()
 
+# LoRa event uplink (ADR 0031). The Bridge call only puts the frame on the
+# MCU's radio queue, so it gets the IR call's short timeout; the worker
+# thread means even that wait never lands on a deterrence path.
+_lora_uplink = LoraUplink(
+    lambda *args: Bridge.call(*args, timeout=config.BRIDGE_IR_CALL_TIMEOUT_S),
+    config.SCHEMA_VERSION,
+)
+
 
 def _on_footfall_event(
     schema_version: int,
@@ -183,7 +192,7 @@ def _on_footfall_event(
     set, in which case it is the same object as `camera` - see the
     construction block above.
     """
-    reflex_loop.handle_footfall_event(
+    outcome = reflex_loop.handle_footfall_event(
         schema_version,
         probability,
         sta_lta_ratio,
@@ -217,6 +226,13 @@ def _on_footfall_event(
         experience=_experience,
         event_video=_event_video,
     )
+    _lora_uplink.submit(
+        event_from_footfall(
+            outcome,
+            safe_mode=reflex_loop.SAFE_MODE,
+            target_labels=reflex_loop.VISION_TARGET_LABELS,
+        )
+    )
 
 
 def _on_acoustic_event(
@@ -229,18 +245,31 @@ def _on_acoustic_event(
 
     Discards the returned AcousticOutcome: a notify has no return channel,
     so the outcome exists for tests and for a future caller that wants to
-    branch on the routing, not for this adapter. Same reason
-    _on_footfall_event above drops its FootfallOutcome.
+    branch on the routing, not for this adapter. A gunshot's uplink is
+    already sent from inside the handler, through send_lora_alert.
     """
     reflex_loop.handle_acoustic_event(
         schema_version,
         class_label,
         confidence,
         capture_ref,
-        send_lora_alert=lambda sv, conf, cap_ref: Bridge.call(
-            "send_lora_alert", sv, conf, cap_ref
-        ),
+        send_lora_alert=_send_lora_alert,
     )
+
+
+def _send_lora_alert(schema_version: int, confidence: float, capture_ref: int) -> bool:
+    """Gunshot branch's uplink: a GUNSHOT event on the LoRa uplink queue.
+
+    Returns whether the event was queued on this side; the radio reports
+    delivery on its own.
+    """
+    del schema_version  # the uplink sends config.SCHEMA_VERSION itself
+    return _lora_uplink.submit(
+        gunshot_event(confidence, capture_ref, safe_mode=reflex_loop.SAFE_MODE)
+    )
+
+
+_lora_uplink.start()
 
 
 # NOT YET ENABLED - see module docstring's "Registration state" paragraph.

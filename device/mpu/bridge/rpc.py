@@ -285,30 +285,35 @@ def get_system_state(schema_version: int) -> SystemState:
     raise NotImplementedError
 
 
-def send_lora_alert(schema_version: int, confidence: float, capture_ref: int) -> bool:
-    """Request a direct gunshot alert uplink (ADR 0007 5's anti-poaching path).
+def send_lora_event(
+    schema_version: int,
+    event_class: int,
+    confidence: float,
+    tier: int,
+    flags: int,
+    capture_ref: int,
+) -> bool:
+    """Queue one detection event for LoRaWAN uplink (ADR 0031).
 
     Bridge target: `call` (synchronous, blocks up to
     services.config.BRIDGE_CALL_TIMEOUT_S). Not idempotent - never retried
-    on timeout (services.config.BRIDGE_ACTUATOR_CALL_RETRIES): retrying a
-    timed-out call would risk sending a duplicate alert, not just a
-    duplicate request.
-
-    No real LoRa transport exists on the MCU side yet - the Grove E5 module
-    is not answering AT probes (docs/KNOWN_GAPS.md, 18 Aug entry), so the
-    MCU-side handler only logs the request and always returns False. A True
-    ack, once the module joins, would still mean "queued/logged on the
-    MCU", never "delivered over the air" - schema.md's own wording for this
-    row.
+    on timeout (services.config.BRIDGE_ACTUATOR_CALL_RETRIES): each call is
+    a separate uplink, so a retry would risk a duplicate alert. The MCU
+    owns join, retry and ACK handling (device/mcu/src/mac.cpp); the MPU
+    caller is comms/lora_uplink.py, which makes this call off the event
+    path so a slow radio never delays a deterrent.
 
     Args:
         schema_version: Wire schema version; must equal SCHEMA_VERSION.
-        confidence: Classifier confidence, 0-1, as reported by
-            report_acoustic_event.
-        capture_ref: Index into the MCU's raw-window ring buffer.
+        event_class: comms.lora_uplink.EventClass wire value (0 unconfirmed,
+            1 elephant, 2 boar, 3 gunshot, 4 chainsaw).
+        confidence: Fused probability or classifier confidence, 0-1.
+        tier: Deterrence tier that ran, 0-3 (0 when none was selected).
+        flags: 0x01 vision confirmed, 0x02 deterrent fired, 0x04 SAFE_MODE.
+        capture_ref: Local record reference, uint32; 0 when there is none.
 
     Returns:
-        True if the MCU queued/logged the alert. False today, always - no
-        real transport exists for it to queue into yet.
+        True if the MCU queued the frame - "queued", never "delivered over
+        the air". False when its uplink queue is full.
     """
     raise NotImplementedError
