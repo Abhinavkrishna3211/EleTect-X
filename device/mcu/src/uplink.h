@@ -46,15 +46,34 @@ enum class uplink_event_class : uint8_t {
   kBoar = 2,
   kGunshot = 3,
   kChainsaw = 4,
+  kElephantCall = 5,  // heard, not seen - see the note below
+  kFox = 6,
 };
+
+// kElephantCall is an acoustic detection, not a sighting. It is a separate
+// code from kElephant on purpose: an officer reading "elephant" must be
+// able to tell a camera confirmation from a microphone one, and the two
+// have different false-positive profiles. When vision does confirm the
+// same encounter the node sends kElephant with
+// UPLINK_EVENT_FLAG_VISION_CONFIRMED, so the server sees both and can
+// collapse them; it never sees kElephantCall carrying that flag.
 
 // Highest valid uplink_event_class value; anything above it is sent as
 // kUnconfirmed rather than as a code the server cannot name.
-#define UPLINK_EVENT_CLASS_MAX 4
+#define UPLINK_EVENT_CLASS_MAX 6
 
 #define UPLINK_EVENT_FLAG_VISION_CONFIRMED 0x01
 #define UPLINK_EVENT_FLAG_DETERRENT_FIRED 0x02
 #define UPLINK_EVENT_FLAG_SAFE_MODE 0x04
+
+// Set when the node fired its top tier and the animal was still there at
+// the end of the retreat tail. It is the only thing in the protocol that
+// says the node has run out of options and a person has to go, so the
+// server raises it above a routine alert rather than adding one more line
+// to a feed. Measured on the device (ADR 0034): inferring it in the cloud
+// from a repeat trigger arrives minutes late, and never fires at all if
+// the animal stays put without crossing the geophone gate again.
+#define UPLINK_EVENT_FLAG_NO_RETREAT 0x08
 
 #define UPLINK_STATUS_FLAG_GEOPHONE_OK 0x01
 #define UPLINK_STATUS_FLAG_HOME_TEST 0x02

@@ -19,8 +19,37 @@ test('event known answer', () => {
     visionConfirmed: true,
     deterrentFired: true,
     safeMode: false,
+    noRetreat: false,
     captureRef: 0x01020304,
   });
+});
+
+// Same vector as test_uplink.cpp's test_no_retreat_event_known_answer.
+test('no-retreat event known answer', () => {
+  const ev = decodeUplink(hex('12 07 06 32 03 0B 00 00 00 00'));
+  assert.deepEqual(ev, {
+    kind: 'event',
+    seq: 7,
+    eventClass: 6,
+    species: 'fox',
+    confidence: 0.5,
+    tier: 3,
+    flags: 0x0b,
+    visionConfirmed: true,
+    deterrentFired: true,
+    safeMode: false,
+    noRetreat: true,
+    captureRef: 0,
+  });
+});
+
+test('the appended classes decode to their own species', () => {
+  const species = (cls: number) =>
+    (decodeUplink(Uint8Array.from([0x12, 0, cls, 80, 0, 0, 0, 0, 0, 0])) as UplinkEvent).species;
+  // elephant_call must not collapse into elephant: heard and seen are
+  // different evidence, and an officer has to be able to tell them apart.
+  assert.equal(species(5), 'elephant_call');
+  assert.equal(species(6), 'fox');
 });
 
 test('status known answer', () => {
@@ -60,9 +89,33 @@ test('priority: only camera-confirmed wildlife and poaching sounds page people',
   const ev = (cls: number, flags: number) =>
     decodeUplink(Uint8Array.from([0x12, 0, cls, 80, 1, flags, 0, 0, 0, 0])) as UplinkEvent;
   assert.equal(eventPriority(ev(1, 0x01)), 'high');
-  assert.equal(eventPriority(ev(0, 0x01)), 'high', 'confirmed on a multi-species node');
   assert.equal(eventPriority(ev(0, 0x00)), 'normal', 'seismic only');
   assert.equal(eventPriority(ev(3, 0x00)), 'high', 'gunshot');
+  assert.equal(eventPriority(ev(4, 0x00)), 'high', 'chainsaw');
+
+  // Since ADR 0034 the node names the species it saw, so a confirmation
+  // that arrives with no species is either firmware older than that or a
+  // class this build cannot name. Either way it must not page a village -
+  // the old behaviour paged one on a guess drawn from the node's own
+  // configuration.
+  assert.equal(eventPriority(ev(0, 0x01)), 'normal', 'confirmed but unnamed');
+  assert.equal(eventPriority(ev(9, 0x01)), 'normal', 'confirmed, class from newer firmware');
+
+  // Boar and fox are shown, never pushed - however sure the camera was.
+  assert.equal(eventPriority(ev(2, 0x01)), 'normal', 'boar');
+  assert.equal(eventPriority(ev(6, 0x01)), 'normal', 'fox');
+
+  // Heard and not seen is exactly what the vision gate declines to page on.
+  assert.equal(eventPriority(ev(5, 0x00)), 'normal', 'elephant call');
+});
+
+test('priority: no retreat outranks everything', () => {
+  const ev = (cls: number, flags: number) =>
+    decodeUplink(Uint8Array.from([0x12, 0, cls, 80, 3, flags, 0, 0, 0, 0])) as UplinkEvent;
+  assert.equal(eventPriority(ev(1, 0x0b)), 'critical', 'elephant stayed after the top tier');
+  // The flag says the node has run out of options; that is true whatever
+  // the species, so it is not gated on PAGING_SPECIES.
+  assert.equal(eventPriority(ev(0, 0x08)), 'critical', 'unnamed, stayed');
 });
 
 test('action label', () => {

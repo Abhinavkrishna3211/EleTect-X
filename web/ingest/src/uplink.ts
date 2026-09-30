@@ -108,6 +108,7 @@ async function writeEvent(devEui: string, ev: UplinkEvent, radio: Radio) {
       vision_confirmed: ev.visionConfirmed,
       deterrent_fired: ev.deterrentFired,
       safe_mode: ev.safeMode,
+      no_retreat: ev.noRetreat,
       capture_ref: ev.captureRef,
       ...radio,
     },

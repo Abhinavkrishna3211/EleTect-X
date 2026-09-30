@@ -49,6 +49,46 @@ static void test_status_unknown_battery(void) {
   TEST_ASSERT_EQUAL_HEX8(0xFF, out[4]);
 }
 
+static void test_no_retreat_event_known_answer(void) {
+  // The classes and the flag appended for ADR 0034: fox as a deterrence
+  // target, and "fired the top tier and the animal stayed". Pinned as its
+  // own vector rather than folded into the one above, because the byte the
+  // server keys "send a person" off is worth failing on by itself.
+  uplink_event ev{};
+  ev.event_class = static_cast<uint8_t>(uplink_event_class::kFox);
+  ev.confidence = 0.50f;
+  ev.tier = 3;
+  ev.flags = UPLINK_EVENT_FLAG_VISION_CONFIRMED | UPLINK_EVENT_FLAG_DETERRENT_FIRED |
+             UPLINK_EVENT_FLAG_NO_RETREAT;
+  ev.capture_ref = 0u;
+
+  uint8_t out[UPLINK_EVENT_LEN];
+  TEST_ASSERT_EQUAL_UINT(UPLINK_EVENT_LEN, uplink_encode_event(ev, 7, out, sizeof(out)));
+  const uint8_t expected[] = {0x12, 0x07, 0x06, 0x32, 0x03, 0x0B, 0x00, 0x00, 0x00, 0x00};
+  TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, sizeof(expected));
+}
+
+static void test_every_named_class_survives_encoding(void) {
+  // UPLINK_EVENT_CLASS_MAX is the only thing stopping a new class from
+  // being silently flattened to kUnconfirmed, and it is a #define sitting
+  // several lines away from the enum it bounds. This is what notices when
+  // the next class is appended and the bound is not raised with it.
+  const uplink_event_class classes[] = {
+      uplink_event_class::kUnconfirmed, uplink_event_class::kElephant,
+      uplink_event_class::kBoar,        uplink_event_class::kGunshot,
+      uplink_event_class::kChainsaw,    uplink_event_class::kElephantCall,
+      uplink_event_class::kFox,
+  };
+  for (uplink_event_class value : classes) {
+    uplink_event ev{};
+    ev.event_class = static_cast<uint8_t>(value);
+    uint8_t out[UPLINK_EVENT_LEN];
+    uplink_encode_event(ev, 0, out, sizeof(out));
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(static_cast<uint8_t>(value), out[2],
+                                    "a named class must not flatten to kUnconfirmed");
+  }
+}
+
 static void test_event_fields_are_clamped(void) {
   uplink_event ev{};
   ev.event_class = 42;
@@ -100,6 +140,8 @@ static void test_at_command_rendering(void) {
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_event_known_answer);
+  RUN_TEST(test_no_retreat_event_known_answer);
+  RUN_TEST(test_every_named_class_survives_encoding);
   RUN_TEST(test_status_known_answer);
   RUN_TEST(test_status_unknown_battery);
   RUN_TEST(test_event_fields_are_clamped);

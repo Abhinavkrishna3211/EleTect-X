@@ -30,20 +30,37 @@ logger = logging.getLogger(__name__)
 SEND_LORA_EVENT = "send_lora_event"
 
 # Flag bits, byte 5 of the event frame. Wire values - device/mcu/src/uplink.h
-# and web/ingest/src/payload.ts carry the same three.
+# and web/ingest/src/payload.ts carry the same four.
 FLAG_VISION_CONFIRMED = 0x01
 FLAG_DETERRENT_FIRED = 0x02
 FLAG_SAFE_MODE = 0x04
 
+# The node fired its top tier and the animal was still there at the end of
+# the retreat tail (ADR 0034). The backend maps this to priority 'critical':
+# it is the one signal that means "this node has run out of options", as
+# distinct from every other alert, which means "this node is handling it".
+FLAG_NO_RETREAT = 0x08
+
 
 class EventClass(IntEnum):
-    """What the node saw. Wire values - append only, never renumber."""
+    """What the node saw. Wire values - append only, never renumber.
+
+    ELEPHANT_CALL is deliberately not ELEPHANT: it is an acoustic
+    detection, and an officer reading "elephant" has to be able to tell a
+    camera confirmation from a microphone one, because the two have
+    different false-positive profiles. An encounter the camera does confirm
+    goes out as ELEPHANT with FLAG_VISION_CONFIRMED, so ELEPHANT_CALL never
+    carries that flag - see device/mcu/src/uplink.h, which says the same
+    thing on the other side of the wire.
+    """
 
     UNCONFIRMED = 0
     ELEPHANT = 1
     BOAR = 2
     GUNSHOT = 3
     CHAINSAW = 4
+    ELEPHANT_CALL = 5
+    FOX = 6
 
 
 # Vision label -> event class, for the labels a node may deter on
