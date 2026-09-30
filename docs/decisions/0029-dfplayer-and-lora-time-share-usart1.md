@@ -62,7 +62,8 @@ Implemented in `device/mcu/src/uart_share.cpp`, called from `horn.cpp`, `fire_te
    deterrent is never delayed by telemetry.
 3. **LoRa acquires the port only in join states that talk to the E5.** `kJoined` and `kFailed` (the
    backoff wait) leave the port with the DFPlayer, which is also the boot owner, so a first fire never
-   pays for a switch.
+   pays for a switch. A joined radio takes it only while a queued uplink is due or being sent
+   (ADR 0031); a horn fire mid-send re-sends the same frame afterwards.
 4. **An interrupted LoRa step restarts from the AT probe.** If the port was switched away while an AT
    command was outstanding, the reply went to a disconnected wire and whatever is in the buffer is
    not it. `lora_service()` notices the switch count moved and returns to `kIdle`, without charging a
@@ -106,3 +107,4 @@ and `native_dfplayer_only`.
 3. Watch D1 on a scope through one join: the baud change at each switch and no clipped bytes.
 4. Fire the horn during a join and confirm the join restarts from the probe and completes afterwards.
 5. OTAA join and a gateway uplink.
+6. The uplink checks in ADR 0031.
