@@ -109,11 +109,18 @@ NODE_DETERRENCE_SCOPE = os.environ.get("ELETECT_DETERRENCE_SCOPE", "elephant_onl
 # overhead - a single shared ceiling (the LED cap + margin) would make a
 # hung horn or IR call block the reflex loop several seconds longer than
 # that actuator can physically run. The caps are owned by
-# device/mcu/src/config.h (HORN_BURST_MAX_MS 3000, LED_BURST_MAX_MS 10_000,
+# device/mcu/src/config.h (HORN_BURST_MAX_MS 3000, LED_BURST_MAX_MS 12_500,
 # IR_PULSE_MAX_MS 500); tests/test_config.py fails if any value here stops
 # exceeding its cap.
+#
+# LED_BURST_MAX_MS was raised from 10_000 to 12_500 on 7 September without
+# this value moving with it, which left a 12.0s timeout against a 12.5s cap.
+# Any tier that clamps led_duration_ms to the full cap - the top tier always
+# does - would have raised TimeoutError on a burst that completed normally.
+# 14.5s restores the same ~2s transport-overhead margin the horn timeout
+# already carries over its own cap.
 BRIDGE_HORN_CALL_TIMEOUT_S = 5.0
-BRIDGE_LED_CALL_TIMEOUT_S = 12.0
+BRIDGE_LED_CALL_TIMEOUT_S = 14.5
 BRIDGE_IR_CALL_TIMEOUT_S = 2.0
 
 # Generic ceiling for non-actuator calls (get_system_state), which read a
