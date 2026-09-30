@@ -122,7 +122,7 @@ sets were deployed for over a year across three real human-elephant-conflict hot
    defensible cost/capability comparison for documentation — but don't publish it until that
    full number is nailed down, since the ₹18–20k figure quoted above is partial.
 6. **No published dimensions/weight/IP rating from Kyari** — publishing real, verified numbers
-   for EleTect X is a low-cost documentation win that a judge or buyer can't get from the
+   for EleTect X is a low-cost documentation win that a reviewer or buyer can't get from the
    incumbent.
 
 ## Open items / not yet verified

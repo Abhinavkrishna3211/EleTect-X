@@ -4,7 +4,7 @@
 // not advertise one: a public page that names an account hands a visitor half a
 // credential pair for free (which is exactly why the demo-account list was removed
 // from Login.tsx). So the accounts are created here and the credentials are written
-// to docs/internal/judge-demo-credentials.md — a git-ignored file — for you to send
+// to docs/internal/reviewer-demo-credentials.md — a git-ignored file — for you to send
 // to reviewers directly.
 //
 // Same shape as scripts/seed-day5-profiles.mjs: `profiles` is 1:1 with auth.users,
@@ -19,8 +19,8 @@
 // can be revoked by re-running with a new value.
 //
 // Usage:
-//   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... QA_JUDGE_PASSWORD=... \
-//     node scripts/seed-judge-accounts.mjs
+//   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... QA_REVIEWER_PASSWORD=... \
+//     node scripts/seed-reviewer-accounts.mjs
 //
 // DELETE THESE ACCOUNTS once they are no longer needed — see the generated file.
 
@@ -49,14 +49,14 @@ const envVars = fs.existsSync(envPath)
 
 const SUPABASE_URL = process.env.SUPABASE_URL
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
-const JUDGE_PASSWORD = process.env.QA_JUDGE_PASSWORD || envVars.QA_JUDGE_PASSWORD
+const REVIEWER_PASSWORD = process.env.QA_REVIEWER_PASSWORD || envVars.QA_REVIEWER_PASSWORD
 
 if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
   console.error('Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY first.')
   process.exit(1)
 }
-if (!JUDGE_PASSWORD || JUDGE_PASSWORD.length < 16) {
-  console.error('Set QA_JUDGE_PASSWORD (>= 16 chars) in the environment or web/frontend/.env.local.')
+if (!REVIEWER_PASSWORD || REVIEWER_PASSWORD.length < 16) {
+  console.error('Set QA_REVIEWER_PASSWORD (>= 16 chars) in the environment or web/frontend/.env.local.')
   console.error('One of these accounts is an ADMIN on the production project — no guessable password.')
   process.exit(1)
 }
@@ -70,13 +70,13 @@ const SECTOR_7_CENTRE = { lat: 10.058, lng: 76.628 }
 
 const ACCOUNTS = [
   {
-    email: 'judge.admin@eletect-x.test',
+    email: 'reviewer.admin@eletect-x.test',
     role: 'admin',
     metadata: { full_name: 'Demo Admin' },
     note: 'Full staff dashboard: live map, replay, corridor, learning, fleet, planner, Demo Mode, officer approvals.',
   },
   {
-    email: 'judge.resident@eletect-x.test',
+    email: 'reviewer.resident@eletect-x.test',
     role: 'public',
     metadata: { full_name: 'Demo Resident' },
     note: 'Resident view: area risk derived from public_area_risk, recent activity counts, alerts opt-in toggle.',
@@ -96,14 +96,14 @@ async function findUserByEmail(email) {
 async function ensureUser({ email, metadata }) {
   const existing = await findUserByEmail(email)
   if (existing) {
-    const { error } = await admin.auth.admin.updateUserById(existing.id, { password: JUDGE_PASSWORD })
+    const { error } = await admin.auth.admin.updateUserById(existing.id, { password: REVIEWER_PASSWORD })
     if (error) throw error
     console.log(`  exists: ${email} — password rotated`)
     return existing
   }
   const { data, error } = await admin.auth.admin.createUser({
     email,
-    password: JUDGE_PASSWORD,
+    password: REVIEWER_PASSWORD,
     email_confirm: true,
     user_metadata: metadata,
   })
@@ -118,7 +118,7 @@ async function main() {
 
     const patch = { role: acct.role }
     if (acct.role === 'public') {
-      // Give the resident judge a location + alerts on, so their view is populated
+      // Give the resident reviewer a location + alerts on, so their view is populated
       // rather than an empty state.
       patch.alerts_enabled = true
       patch.lat = SECTOR_7_CENTRE.lat + 0.004
@@ -141,12 +141,12 @@ async function main() {
 
   const outDir = path.join(repoRoot, 'docs', 'internal')
   fs.mkdirSync(outDir, { recursive: true })
-  const outFile = path.join(outDir, 'judge-demo-credentials.md')
+  const outFile = path.join(outDir, 'reviewer-demo-credentials.md')
   const today = new Date().toISOString().slice(0, 10)
 
   const body = `# Demo reviewer credentials (LOCAL ONLY — git-ignored)
 
-Generated ${today} by \`web/frontend/scripts/seed-judge-accounts.mjs\`.
+Generated ${today} by \`web/frontend/scripts/seed-reviewer-accounts.mjs\`.
 
 **Do not commit this file, do not put these on the site, do not put them in a
 page that is publicly readable.** \`docs/internal/\` is git-ignored via
@@ -157,17 +157,17 @@ Live app: <https://eletect.vercel.app>
 
 | Role | Email | Password |
 |---|---|---|
-${ACCOUNTS.map((a) => `| ${a.role} | \`${a.email}\` | \`${JUDGE_PASSWORD}\` |`).join('\n')}
+${ACCOUNTS.map((a) => `| ${a.role} | \`${a.email}\` | \`${REVIEWER_PASSWORD}\` |`).join('\n')}
 
 ${ACCOUNTS.map((a) => `- **${a.email}** — ${a.note}`).join('\n')}
 
 ## Rotate or delete when no longer needed
 
-\`judge.admin@eletect-x.test\` holds the **admin** role on the *production* Supabase
+\`reviewer.admin@eletect-x.test\` holds the **admin** role on the *production* Supabase
 project: it can approve officer requests and mutate node state. It is a throwaway on
 the \`.test\` domain, but it is real, and it must not outlive this build cycle.
 
-- **Rotate:** set a new \`QA_JUDGE_PASSWORD\` in \`web/frontend/.env.local\` and re-run
+- **Rotate:** set a new \`QA_REVIEWER_PASSWORD\` in \`web/frontend/.env.local\` and re-run
   the script — it resets the password on the existing accounts.
 - **Delete:** remove both from Supabase → Authentication → Users. \`profiles\` cascades
   off \`auth.users\`, so the profile rows go with them.
@@ -177,7 +177,7 @@ Rotate or delete these credentials once they are no longer needed.
 `
 
   fs.writeFileSync(outFile, body, 'utf8')
-  console.log(`\nCredentials written to docs/internal/judge-demo-credentials.md (git-ignored).`)
+  console.log(`\nCredentials written to docs/internal/reviewer-demo-credentials.md (git-ignored).`)
   console.log('Send them to reviewers from there. Delete the accounts once they are no longer needed.')
 }
 

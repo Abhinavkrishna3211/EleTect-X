@@ -6,8 +6,8 @@ import { supabase } from '@/lib/supabase'
 // No demo-account list here, deliberately. A public login page that names accounts
 // hands a visitor half of a credential pair for free — and one of the entries that
 // used to sit here (officer@eletect.in) was a real, officer-role account in the
-// production project. Judge/demo logins are issued privately instead; see
-// scripts/seed-judge-accounts.mjs. Do not reintroduce this section.
+// production project. Reviewer/demo logins are issued privately instead; see
+// scripts/seed-reviewer-accounts.mjs. Do not reintroduce this section.
 export function Login() {
   const navigate = useNavigate()
   const [email, setEmail] = useState('')

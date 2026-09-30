@@ -301,7 +301,7 @@ create view public_area_risk with (security_invoker = false) as
 grant select on public_area_risk to authenticated, anon;
 
 -- ---------- Demo Mode (Phase 4c) ----------
--- One-click scenarios that make the full system act for a judge with no live
+-- One-click scenarios that make the full system act for a reviewer with no live
 -- hardware present. Each scenario writes real, tagged rows through the
 -- SECURITY DEFINER RPC below, so it flows through the true realtime pipeline
 -- onto Overview / Alerts rather than being a canned client-side animation.

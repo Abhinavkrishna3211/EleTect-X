@@ -61,7 +61,7 @@ The classes turn out to be trivially separable at this scale, which is worth sta
 than dressing up: measured directly from the committed windows, quiet RMS averages 1.34e-4 V
 (max 1.89e-4) and footfall RMS averages 2.93e-3 V (min 2.29e-3) — a 12× gap with **zero overlap**
 between the two sets. A single RMS threshold would separate this dataset perfectly. The trained
-model is not doing anything a judge should assume is subtle.
+model is not doing anything a reader should assume is subtle.
 
 ## Caveats — required whenever this number is quoted
 

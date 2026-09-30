@@ -13,7 +13,7 @@ import {
 
 type Mode = 'draw' | 'cross' | 'idle'
 
-// Preset boundaries around the Sector-7 pilot area, so a judge can get a real
+// Preset boundaries around the Sector-7 pilot area, so a reviewer can get a real
 // estimate in one click without drawing. Rough rings, deliberately not the exact
 // node layout — the planner derives its own.
 const PRESETS: { label: string; ring: LatLng[] }[] = [
