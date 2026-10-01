@@ -21,7 +21,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { type AlertMessage, fanOut } from "./fanout.ts";
-import { alertText, audienceFor } from "./message.ts";
+import { alertText, audienceFor, isPaging } from "./message.ts";
 
 const ALERT_RADIUS_KM = 3;
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SERVICE_ROLE_KEY")!);
@@ -45,7 +45,7 @@ Deno.serve(async (req) => {
   const ev = payload.record ?? payload;                       // DB webhook sends {record}
   if (ev?.media_url === "demo") return new Response("skipped (demo)", { status: 200 });
   if (!ev?.node_id) return new Response("no event", { status: 400 });
-  if ((ev.priority ?? "normal") !== "high") return new Response("skipped (not high)", { status: 200 });
+  if (!isPaging(ev.priority)) return new Response("skipped (not paging)", { status: 200 });
 
   const { data: node } = await db.from("nodes").select("name,lat,lng").eq("id", ev.node_id).single();
   const msg: AlertMessage = alertText(ev, node?.name ?? ev.node_id);

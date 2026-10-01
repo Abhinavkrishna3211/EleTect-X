@@ -158,11 +158,9 @@ const PAGING_SPECIES = new Set(['elephant', 'gunshot', 'chainsaw']);
 // decodes to species null and lands here, and the safe direction for a
 // species this build cannot name is the dashboard, not every phone within
 // 3 km.
-// NOTE: 'critical' is only reachable once a node sets the no-retreat flag.
-// Before that happens, the two places that gate on priority = 'high' -
-// web/backend/functions/send-alert/index.ts and the public_area_risk view in
-// web/backend/schema.sql - must widen to in ('high','critical'), or the one
-// alert that means "send a person" is the one alert nobody is sent.
+// send-alert (isPaging in message.ts) and the public_area_risk view both
+// treat 'critical' as paging, so a no-retreat event reaches the same people
+// a 'high' one does, worded as a request for a team (migration 0005).
 export function eventPriority(ev: UplinkEvent): 'critical' | 'high' | 'normal' {
   if (ev.noRetreat) return 'critical';
   if (ev.species === null) return 'normal';

@@ -297,7 +297,7 @@ grant execute on function reject_officer_request(bigint) to authenticated;
 -- setting security_invoker = true; that would make public users see zero rows.
 create view public_area_risk with (security_invoker = false) as
   select date_trunc('day', ts) as day, count(*) as detections
-  from events where priority = 'high' group by 1 order by 1 desc;
+  from events where priority in ('high', 'critical') group by 1 order by 1 desc;
 grant select on public_area_risk to authenticated, anon;
 
 -- ---------- Demo Mode (Phase 4c) ----------

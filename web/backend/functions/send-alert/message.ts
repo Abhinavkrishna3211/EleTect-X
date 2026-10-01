@@ -11,16 +11,28 @@ export type Audience = "staff_and_residents" | "staff_only";
 
 const POACHING = new Set(["gunshot", "chainsaw"]);
 
+// Priorities that fan out. 'critical' is the no-retreat flag (ADR 0034): the node fired its top
+// tier and the animal stayed, so it pages everyone a 'high' would, with a line asking for a team.
+// Anything else - 'normal', or a value this build does not know - stays on the dashboard.
+const PAGING_PRIORITIES = new Set(["high", "critical"]);
+
+export function isPaging(priority: string | null | undefined): boolean {
+  return PAGING_PRIORITIES.has(priority ?? "normal");
+}
+
 const WHAT: Record<string, string> = {
   elephant: "elephant detected",
   boar: "wild boar detected",
   gunshot: "possible gunshot heard",
   chainsaw: "chainsaw heard",
+  elephant_call: "elephant heard (not seen on camera)",
+  fox: "fox detected",
 };
 
 export interface AlertEvent {
   species?: string | null;
   confidence?: number | null;
+  priority?: string | null;
 }
 
 export function audienceFor(ev: AlertEvent): Audience {
@@ -35,6 +47,15 @@ export function alertText(ev: AlertEvent, place: string): { subject: string; bod
   const advice = audienceFor(ev) === "staff_only"
     ? "Respond per anti-poaching protocol."
     : "Stay alert, avoid the area.";
+  // Residents within 3 km get this same text, so it states that a team is being
+  // called rather than telling the reader to send one.
+  if (ev.priority === "critical") {
+    return {
+      subject: `EleTect X URGENT — ${place}`,
+      body: `EleTect X URGENT: ${what} near ${place} (${pct}) has not retreated after full deterrence. ` +
+        `Forest team requested. ${advice}`,
+    };
+  }
   return {
     subject: `EleTect X alert — ${place}`,
     body: `EleTect X: ${what} near ${place} (${pct}). ${advice}`,

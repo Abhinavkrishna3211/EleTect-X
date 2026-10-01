@@ -25,7 +25,9 @@ Auth + Postgres + realtime + storage + edge functions. Roles: **admin · officer
 ## Data flow (end to end)
 Node → LoRa → gateway (ChirpStack) → `web/ingest` (MQTT→Supabase insert into `events`/`health`) → Database Webhook → `send-alert` edge function → **notification channels** (email now; SMS/WhatsApp when configured) to officers + opted-in nearby public → row in `alerts`. Dashboard reads via Supabase realtime.
 
-Only `priority='high'` events fan out: camera-confirmed wildlife, and gunshot/chainsaw (ADR 0031).
+Only `priority='high'` and `priority='critical'` events fan out: camera-confirmed wildlife, and
+gunshot/chainsaw (ADR 0031); `critical` is a no-retreat event (ADR 0034) and goes to the same people
+worded as a request to send a team (migration 0005).
 Wildlife alerts name the species the node reported (or "wildlife confirmed on camera" when a
 multi-species node could not say which) and go to officers plus opted-in residents within 3 km.
 **Gunshot and chainsaw alerts go to officers and admins only** — residents are never paged towards a
