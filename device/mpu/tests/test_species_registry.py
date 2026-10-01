@@ -1,9 +1,10 @@
 """Contract checks between the species registry and the wire format.
 
-A species exists in four places: services/config.py's SPECIES_REGISTRY,
-the MCU's uplink_event_class enum, comms/lora_uplink.py's EventClass, and
-web/ingest/src/payload.ts's EVENT_CLASS_SPECIES. The registry is the one
-that decides policy; the other three carry the byte format and are
+A species exists in five places: services/config.py's SPECIES_REGISTRY,
+the MCU's uplink_event_class enum, comms/lora_uplink.py's EventClass,
+web/ingest/src/payload.ts's EVENT_CLASS_SPECIES, and the audience map in
+web/backend/functions/send-alert/message.ts. The registry is the one that
+decides policy; the others carry the byte format and the fan-out and are
 hand-written against each other, so nothing at runtime ever compares them.
 
 That is how the previous class-scheme defect happened, and it is why
@@ -25,11 +26,23 @@ DEVICE_DIR = Path(__file__).resolve().parent.parent.parent
 REPO_ROOT = DEVICE_DIR.parent
 MCU_UPLINK_PATH = DEVICE_DIR / "mcu" / "src" / "uplink.h"
 PAYLOAD_TS_PATH = REPO_ROOT / "web" / "ingest" / "src" / "payload.ts"
+MESSAGE_TS_PATH = REPO_ROOT / "web" / "backend" / "functions" / "send-alert" / "message.ts"
 
 # Audiences the routing table in the plan's D7 actually distinguishes.
 # "dashboard_only" is the default and the safe one: a species nobody has
 # decided to page about shows up in the feed and wakes no phones.
 KNOWN_AUDIENCES = frozenset({"residents", "staff_only", "dashboard_only"})
+
+# How this column reads in send-alert, which only needs to know whether a
+# message leaves the staff. "dashboard_only" and "staff_only" both land on
+# "staff_only" there: a dashboard species does not page at all today, and
+# if a later priority change ever makes it page, staff_only is the answer
+# that does not wake a village as a side effect.
+BACKEND_AUDIENCE = {
+    "residents": "staff_and_residents",
+    "staff_only": "staff_only",
+    "dashboard_only": "staff_only",
+}
 
 
 def _mcu_event_classes() -> dict[str, int]:
@@ -50,6 +63,27 @@ def _payload_ts_classes() -> dict[int, str | None]:
     out: dict[int, str | None] = {}
     for code, value in re.findall(r"(\d+)\s*:\s*(null|'[^']*')", body.group(1)):
         out[int(code)] = None if value == "null" else value.strip("'")
+    return out
+
+
+def _message_ts_audiences() -> dict[str, str]:
+    """Parse the AUDIENCE map out of send-alert/message.ts.
+
+    Read as text rather than imported, because it is Deno TypeScript and
+    this is a Python suite. Reading it is still worth more than not
+    comparing them at all - that is the same argument test_rpc_contract.py
+    makes for parsing schema.md.
+    """
+    text = MESSAGE_TS_PATH.read_text(encoding="utf-8")
+    start = text.index("const AUDIENCE")
+    body = text[text.index("{", start) + 1 : text.index("}", start)]
+    out: dict[str, str] = {}
+    for raw in body.splitlines():
+        line = raw.strip().rstrip(",")
+        if not line or line.startswith("//"):
+            continue
+        name, _, value = line.partition(":")
+        out[name.strip()] = value.strip().strip('"')
     return out
 
 
@@ -196,3 +230,66 @@ def test_registry_wire_code_matches_the_cloud_decoder(label):
 def test_the_cloud_decoder_reserves_zero_for_no_species():
     """Code 0 must decode to null on both sides, not to a species name."""
     assert _payload_ts_classes().get(0, "missing") is None
+
+
+@pytest.mark.parametrize("label", sorted(config.SPECIES_REGISTRY))
+def test_the_backend_fans_out_to_whoever_the_registry_says(label):
+    """send-alert's audience must be the registry's, translated.
+
+    This is the column the registry carries and the device never reads.
+    Nothing at runtime compares the two, so a species marked `residents`
+    here while send-alert quietly leaves it staff-only is a warning that
+    silently never reaches the people it was written for - and the reverse
+    is a village paged about a boar.
+    """
+    backend = _message_ts_audiences()
+    name = label.lower()
+    assert name in backend, (
+        f"{MESSAGE_TS_PATH.name}'s AUDIENCE map has no entry for {name!r}. "
+        "Every species the cloud can decode must be named there - the map "
+        "defaults to staff_only, so a missing entry is a resident warning "
+        "that is never sent and never reported."
+    )
+    expected = BACKEND_AUDIENCE[config.SPECIES_REGISTRY[label].alert_audience]
+    assert backend[name] == expected
+
+
+def test_every_species_the_cloud_can_decode_has_a_stated_audience():
+    """Including the ones that are not deterrable species.
+
+    Gunshot, chainsaw and elephant_call are acoustic classes, so they are
+    not in the registry, but they are species strings that reach an events
+    row and therefore send-alert. The map is allowed to be a superset of
+    the registry; it is not allowed to be silent about a class the decoder
+    can produce.
+    """
+    backend = _message_ts_audiences()
+    decodable = {name for name in _payload_ts_classes().values() if name}
+    missing = sorted(decodable - set(backend))
+    assert not missing, (
+        f"web/ingest can decode {missing} but {MESSAGE_TS_PATH.name} does not "
+        "name them. They would fall through to the staff_only default, which "
+        "is safe but undeclared - state the decision instead of defaulting it."
+    )
+
+
+def test_only_a_registry_species_may_reach_residents():
+    """The fail-open regression, asserted from this side too.
+
+    audienceFor() used to read "not a poaching sound, therefore residents",
+    which fanned every unmapped class out to every opted-in phone within
+    3 km. message.test.ts pins the function; this pins the data, so adding
+    a resident-facing entry for something the registry does not consider a
+    deterrence target fails here.
+    """
+    resident_facing = {
+        name
+        for name, audience in _message_ts_audiences().items()
+        if audience == "staff_and_residents"
+    }
+    allowed = {
+        label.lower()
+        for label, species in config.SPECIES_REGISTRY.items()
+        if species.alert_audience == "residents"
+    }
+    assert resident_facing == allowed

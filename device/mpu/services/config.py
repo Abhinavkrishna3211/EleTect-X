@@ -124,10 +124,12 @@ class Species:
             web/backend. It lives here so that adding a species is one
             entry rather than one entry plus a cloud change nobody
             remembers. tests/test_species_registry.py checks the value
-            against the closed vocabulary the routing table uses; the
-            backend does not consult this column yet, and wiring
-            send-alert's audienceFor() to agree with it is what closes
-            the loop.
+            against the closed vocabulary the routing table uses and
+            against the audience map in send-alert's message.ts, so the
+            two cannot disagree without a test failing. The backend keeps
+            its own map rather than importing this one - it runs in Deno
+            and cannot read Python - but it is no longer free to differ
+            from it.
     """
 
     label: str
