@@ -14,7 +14,7 @@ import threading
 
 import pytest
 
-from perception.seismic_stream import SeismicGap, SeismicStream
+from perception.seismic_stream import _INDEX_MODULUS, SeismicGap, SeismicStream, _signed_offset
 from services import config
 
 BATCH = config.SEISMIC_CAPTURE_BATCH_SAMPLES
@@ -454,3 +454,160 @@ def test_pushing_and_slicing_from_two_threads_does_not_corrupt_the_record():
     assert not errors
     assert stream.stats.batches == total
     assert stream.stats.gaps == 0
+
+
+# -- placing the record on the clock ---------------------------------------
+#
+# span() is the recorder's only read (ADR 0035): it asks in monotonic seconds,
+# because that is the clock the camera frames carry, and gets back samples. The
+# failures worth testing are the quiet ones - a window that silently returns
+# the wrong samples, or returns nothing where it should have clamped - because
+# both produce a record whose waveform does not match its boxes and nothing
+# downstream can tell.
+
+RATE = config.SEISMIC_SAMPLE_RATE_HZ
+
+
+def _timed(stream, first, at, count=BATCH):
+    """Push a batch whose last sample was taken at `at`."""
+    _push(stream, first, count, at=at)
+
+
+def _three_batches(stream):
+    """96 samples, indices 0-95, ending at monotonic 10.256."""
+    period = BATCH / RATE
+    for i in range(3):
+        _timed(stream, i * BATCH, 10.0 + i * period)
+    return 10.0 - period, 10.0 + 2 * period
+
+
+def test_sample_index_at_inverts_monotonic_at_exactly():
+    """The round trip has to be exact, or a box lands on the wrong footfall.
+
+    Both directions share one nominal rate and one arrival stamp, so whatever
+    the unmeasured transport latency turns out to be, it cancels: a frame
+    placed at a sample and read back lands on the same sample.
+    """
+    stream = SeismicStream(capacity=256)
+    _three_batches(stream)
+
+    for index in range(96):
+        when = stream.monotonic_at(index)
+        assert when is not None
+        assert stream.sample_index_at(when) == index
+
+
+def test_sample_index_at_extrapolates_past_the_newest_batch():
+    """Total by construction, because the recorder asks about `now`.
+
+    span()'s end is time.monotonic() at the moment of the write, which is
+    always after the last sample that arrived. Returning None there would
+    throw away the whole record rather than clamping to what is held.
+    """
+    stream = SeismicStream(capacity=256)
+    _three_batches(stream)
+
+    assert stream.sample_index_at(10.256 + 1.0) == 96 + RATE
+
+
+def test_sample_index_at_extrapolates_before_the_oldest_batch():
+    """The pre-roll reaches back before anything the stream holds."""
+    stream = SeismicStream(capacity=256)
+    _three_batches(stream)
+
+    assert stream.sample_index_at(10.0 - BATCH / RATE - 1.0) == (-RATE) % _INDEX_MODULUS
+
+
+def test_sample_index_at_on_an_empty_stream_is_none():
+    """Nothing has arrived, so there is no clock to place anything against."""
+    assert SeismicStream(capacity=256).sample_index_at(10.0) is None
+
+
+def test_span_returns_exactly_the_window_asked_for():
+    """The ordinary case: a window wholly inside what is held."""
+    stream = SeismicStream(capacity=256)
+    _three_batches(stream)
+
+    got = stream.span(stream.monotonic_at(10), stream.monotonic_at(20))
+    assert got is not None
+    assert got.first_sample_index == 10
+    assert list(got.counts) == _ramp(10, 11)
+
+
+def test_span_clamps_a_pre_roll_that_reaches_before_the_buffer():
+    """A 5 s pre-roll against a 1 s buffer must return the 1 s, not nothing.
+
+    This is the normal state early in a run and after a restart. Failing the
+    read instead of clamping it would lose every record until the ring filled.
+    """
+    stream = SeismicStream(capacity=256)
+    first_s, last_s = _three_batches(stream)
+
+    got = stream.span(first_s - 5.0, last_s)
+    assert got is not None
+    assert got.first_sample_index == 0
+    assert len(got) == 96
+
+
+def test_span_clamps_an_end_that_runs_past_the_newest_sample():
+    """time.monotonic() at write time is always after the last batch."""
+    stream = SeismicStream(capacity=256)
+    first_s, last_s = _three_batches(stream)
+
+    got = stream.span(first_s, last_s + 5.0)
+    assert got is not None
+    assert len(got) == 96
+
+
+def test_span_wholly_before_the_buffer_is_none_not_a_clamped_lie():
+    """An empty intersection must read as empty.
+
+    Clamping both ends of a window that ended before the first sample arrived
+    would hand back the oldest samples held and date them to the request -
+    a record whose waveform is minutes away from its own boxes.
+    """
+    stream = SeismicStream(capacity=256)
+    _three_batches(stream)
+
+    assert stream.span(1.0, 2.0) is None
+
+
+def test_span_wholly_after_the_buffer_is_none():
+    """The mirror case, which a naive modular comparison gets wrong."""
+    stream = SeismicStream(capacity=256)
+    _three_batches(stream)
+
+    assert stream.span(30.0, 31.0) is None
+
+
+def test_span_on_an_empty_stream_is_none():
+    """No registration yet, or no geophone - the common state today."""
+    assert SeismicStream(capacity=256).span(0.0, 100.0) is None
+
+
+def test_span_survives_the_uint32_sample_counter_wrapping():
+    """198 days of uptime must not cost a night's records.
+
+    The counter wraps, so the oldest sample held can have a *higher* raw index
+    than the newest. Comparing them unsigned turns a routine under-run into a
+    four-billion-sample gap.
+    """
+    stream = SeismicStream(capacity=256)
+    start = _INDEX_MODULUS - BATCH
+    period = BATCH / RATE
+    _timed(stream, start, 10.0)
+    _timed(stream, 0, 10.0 + period)
+
+    got = stream.span(10.0 - period, 10.0 + period)
+    assert got is not None
+    assert got.first_sample_index == start
+    assert len(got) == 2 * BATCH
+    assert got.gaps == ()
+
+
+def test_signed_offset_reads_a_wrapped_index_as_a_small_negative():
+    """The one line that makes the wrap case work, asserted on its own."""
+    assert _signed_offset(5, 3) == 2
+    assert _signed_offset(3, 5) == -2
+    assert _signed_offset(_INDEX_MODULUS - 1, 1) == -2
+    assert _signed_offset(1, _INDEX_MODULUS - 1) == 2

@@ -60,6 +60,7 @@ from comms.lora_uplink import LoraUplink, direct_alert_event, event_from_footfal
 from perception.camera import Camera
 from perception.detector import HttpVisionDetector
 from perception.night import frames_are_night
+from perception.seismic_dataset import SeismicDatasetWriter, clear_part_files
 from perception.seismic_stream import SeismicStream
 from perception.storage import clear_orphaned_scratch, save_burst
 from perception.video import EventVideoRecorder
@@ -129,6 +130,14 @@ Bridge.provide("debug_stream_raw_seismic_sample", debug_stream_raw_seismic_sampl
 # It only ever touches the scratch directory (perception/storage.py); a
 # committed capture is not reachable from it.
 clear_orphaned_scratch()
+
+# The same cleanup for the dataset's own half-written records (ADR 0035).
+# A .part file is a write a brown-out caught between the bytes landing and
+# the rename, so it is incomplete by definition and there is nothing to
+# recover from it. Separate call rather than folded into the one above
+# because they clean different directories under different retention rules,
+# and a capture must never be removed by dataset housekeeping.
+clear_part_files()
 
 # One camera per process, reused across events - not opened here. Both
 # constructors below do no I/O (perception/camera.py, perception/video.py),
@@ -245,6 +254,8 @@ def _run_footfall_event(
         save_frames=save_burst,
         experience=_experience,
         event_video=_event_video,
+        seismic_stream=_seismic_stream,
+        seismic_dataset=_seismic_dataset,
         **extra,
     )
     if outcome is None:
@@ -283,6 +294,14 @@ def _on_footfall_event(
 # exists once the registration below is uncommented is a buffer whose first
 # run happens on the one night it matters.
 _seismic_stream = SeismicStream()
+
+# Where the camera-labelled records land. Also unconditional, and for a
+# stronger reason than the buffer above: with no stream it still writes the
+# vision half of every watch - the boxes, the species, and whether the
+# camera could see at all - which is the labelled half and the half that
+# cannot be reconstructed afterwards. The waveform appears in those records
+# the moment report_seismic_batch is registered, with no other change.
+_seismic_dataset = SeismicDatasetWriter()
 
 
 def _on_seismic_batch(

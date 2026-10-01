@@ -40,6 +40,7 @@ waveform-to-video alignment that carries the unknown.
 from __future__ import annotations
 
 import logging
+import math
 import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -53,6 +54,11 @@ logger = logging.getLogger(__name__)
 # accumulator's is: a false four-billion-sample gap once every 198 days of
 # uptime would corrupt a night's record for no reason.
 _INDEX_MODULUS = 1 << 32
+
+# How close to a whole sample counts as being on it, in samples. See
+# _sample_index_at_locked() - this exists only to keep double-rounding from
+# costing a sample at a batch boundary, never to paper over real timing error.
+_SNAP_SAMPLES = 1e-6
 
 
 @dataclass(frozen=True)
@@ -304,34 +310,35 @@ class SeismicStream:
         300 of the 512 samples it asked for, starting somewhere other than
         where it asked, would write a record whose index stamps were lies.
         """
-        if count <= 0:
-            return None
         with self._lock:
-            if self._start_index is None:
-                return None
-            start_offset = (first_sample_index - self._start_index) % _INDEX_MODULUS
-            if start_offset + count > self._buffered_locked():
-                return None
+            return self._slice_locked(first_sample_index, count)
 
-            counts = []
-            for i in range(count):
-                slot = (first_sample_index + i) % self.capacity
-                counts.append(self._counts[slot] if self._present[slot] else 0)
+    def _slice_locked(self, first_sample_index: int, count: int) -> SeismicSlice | None:
+        if count <= 0 or self._start_index is None:
+            return None
+        start_offset = (first_sample_index - self._start_index) % _INDEX_MODULUS
+        if start_offset + count > self._buffered_locked():
+            return None
 
-            end = first_sample_index + count
-            gaps = tuple(
-                clipped
-                for g in self._gaps
-                if (clipped := _clip(g, first_sample_index, end)) is not None
-            )
-            unhealthy = any(_clip(u, first_sample_index, end) is not None for u in self._unhealthy)
-            return SeismicSlice(
-                first_sample_index=first_sample_index,
-                counts=tuple(counts),
-                gaps=gaps,
-                geophone_ok=not unhealthy and not gaps,
-                lsb_volts=self.lsb_volts,
-            )
+        counts = []
+        for i in range(count):
+            slot = (first_sample_index + i) % self.capacity
+            counts.append(self._counts[slot] if self._present[slot] else 0)
+
+        end = first_sample_index + count
+        gaps = tuple(
+            clipped
+            for g in self._gaps
+            if (clipped := _clip(g, first_sample_index, end)) is not None
+        )
+        unhealthy = any(_clip(u, first_sample_index, end) is not None for u in self._unhealthy)
+        return SeismicSlice(
+            first_sample_index=first_sample_index,
+            counts=tuple(counts),
+            gaps=gaps,
+            geophone_ok=not unhealthy and not gaps,
+            lsb_volts=self.lsb_volts,
+        )
 
     def latest(self, count: int) -> SeismicSlice | None:
         """The most recent `count` samples, or None if that many are not held."""
@@ -339,7 +346,53 @@ class SeismicStream:
             if self._end_index is None or count <= 0 or count > self._buffered_locked():
                 return None
             start = (self._end_index - count) % _INDEX_MODULUS
-        return self.slice(start, count)
+            return self._slice_locked(start, count)
+
+    def span(self, start_monotonic_s: float, end_monotonic_s: float) -> SeismicSlice | None:
+        """The ground motion between two instants on time.monotonic().
+
+        The recorder's read, and the reason the inverse below exists. Every
+        other clock in this event - the frame stamps, the trigger, the horn -
+        is a monotonic timestamp, and only this module knows where those sit
+        on the sample axis.
+
+        **Clamps rather than failing.** `slice()` deliberately refuses a
+        request that runs off the end of the ring, because a short slice
+        wearing the indices of a long one is a lie. This does not refuse,
+        because the thing it is asked for is different: a watch may be 45 s
+        long against a 60 s ring and may finish writing some seconds after
+        that, so asking for the whole window and getting None would throw
+        away a complete encounter over a missing first second. What comes
+        back is the intersection of the request with what is still held, and
+        `first_sample_index` on the result says exactly where it starts, so
+        the truncation is visible rather than implied. None means the
+        intersection is empty - nothing of that window survives.
+
+        Both ends are resolved with `sample_index_at()`, so both carry its
+        error band. That is the right band for *locating* a window; the
+        samples inside it are still indexed exactly.
+        """
+        with self._lock:
+            if self._start_index is None:
+                return None
+            held_count = self._buffered_locked()
+            if held_count <= 0:
+                return None
+            first = self._sample_index_at_locked(start_monotonic_s)
+            last = self._sample_index_at_locked(end_monotonic_s)
+            if first is None or last is None:
+                return None
+            # Measured from the oldest held sample so the comparisons below
+            # stay inside one modular frame rather than straddling the
+            # uint32 wrap.
+            first_offset = _signed_offset(first, self._start_index)
+            last_offset = _signed_offset(last, self._start_index)
+            first_offset = max(first_offset, 0)
+            last_offset = min(last_offset, held_count - 1)
+            if last_offset < first_offset:
+                return None
+            start = (self._start_index + first_offset) % _INDEX_MODULUS
+            return self._slice_locked(start, last_offset - first_offset + 1)
 
     def monotonic_at(self, sample_index: int) -> float | None:
         """Best estimate of when `sample_index` was taken, on time.monotonic().
@@ -361,6 +414,79 @@ class SeismicStream:
                     remaining = (arrival.count - offset) / config.SEISMIC_SAMPLE_RATE_HZ
                     return arrival.received_monotonic - remaining
         return None
+
+    def sample_index_at(self, monotonic_s: float) -> int | None:
+        """Which sample was being taken at `monotonic_s` - `monotonic_at()` inverted.
+
+        Exact round trip for any sample a retained batch carried:
+        `sample_index_at(monotonic_at(i)) == i`. That is the property the
+        recorder needs, because it has to put the vision track's frame
+        stamps and the actuator-on windows onto the same sample axis as the
+        waveform, and an inverse that disagreed with the forward map by even
+        a few samples would mark the horn as starting somewhere it did not.
+
+        Extrapolates linearly from the *nearest* batch rather than requiring
+        one to contain the instant, and so answers for times that fall in a
+        dropped batch's hole or just outside the retained window. Both are
+        ordinary: a vision watch starts before the batch that covers its
+        first frame has arrived, and the pre-roll deliberately reaches back
+        past the trigger. The further the extrapolation, the more of
+        SEISMIC_SAMPLE_RATE_HZ's nominal-versus-real drift it accumulates -
+        at the documented 226.98 Hz field rate against a nominal 250, a
+        second of extrapolation is worth about 23 samples - so callers that
+        care about the edges should clamp, which is what `span()` does.
+
+        Returns None only when no batch has ever arrived, since there is
+        then no sample axis to answer on at all.
+        """
+        with self._lock:
+            return self._sample_index_at_locked(monotonic_s)
+
+    def _sample_index_at_locked(self, monotonic_s: float) -> int | None:
+        if not self._arrivals:
+            return None
+        # Distance from `monotonic_s` to the closed interval a batch covers:
+        # zero for the batch that contains it, otherwise how far outside it
+        # falls. Picking the minimum keeps the extrapolation below as short
+        # as it can be, which is the only thing that bounds its error.
+        def _distance(arrival: _Arrival) -> float:
+            last_s = arrival.received_monotonic
+            first_s = last_s - arrival.count / config.SEISMIC_SAMPLE_RATE_HZ
+            if monotonic_s < first_s:
+                return first_s - monotonic_s
+            if monotonic_s > last_s:
+                return monotonic_s - last_s
+            return 0.0
+
+        nearest = min(self._arrivals, key=_distance)
+        # The arrival stamp belongs to the sample one past the batch's last,
+        # which is what makes this the exact inverse of monotonic_at().
+        past_end = (monotonic_s - nearest.received_monotonic) * config.SEISMIC_SAMPLE_RATE_HZ
+        # Snap to a sample boundary before flooring. monotonic_at() computes
+        # this same quantity in the other direction and returns a double that
+        # can sit a few parts in 1e15 below the integer it means; floor() then
+        # turns that into a whole sample of error, always in the same
+        # direction, and always at exactly the batch boundaries - which is
+        # where the vision track's frames land most often. _SNAP_SAMPLES is a
+        # millionth of a sample interval, four nanoseconds, orders of
+        # magnitude below any timing this record claims.
+        rounded = round(past_end)
+        if abs(past_end - rounded) < _SNAP_SAMPLES:
+            past_end = float(rounded)
+        index = nearest.first_sample_index + nearest.count + math.floor(past_end)
+        return int(index) % _INDEX_MODULUS
+
+
+def _signed_offset(index: int, origin: int) -> int:
+    """`index - origin`, taken the short way round the uint32 sample counter.
+
+    A raw modular subtraction cannot tell "two samples before the oldest one
+    held" from "four billion samples after it", and span() has to, because
+    the first is a routine under-run it clamps and the second is nonsense it
+    must reject.
+    """
+    delta = (index - origin) % _INDEX_MODULUS
+    return delta - _INDEX_MODULUS if delta > _INDEX_MODULUS // 2 else delta
 
 
 def _clip(gap: SeismicGap, start: int, end: int) -> SeismicGap | None:

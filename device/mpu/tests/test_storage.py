@@ -14,12 +14,14 @@ with no scratch path has nothing to record to.
 """
 
 import os
+import pathlib
 import sys
 
 import pytest
 
 from perception.storage import (
     CaptureEventTag,
+    atomic_write_bytes,
     clear_orphaned_scratch,
     commit_video,
     discard_video,
@@ -285,3 +287,75 @@ def test_clear_orphaned_scratch_leaves_subdirectories_alone(tmp_path):
 
     assert clear_orphaned_scratch(scratch) == 1
     assert (nested / "keep.txt").exists()
+
+
+# -- durable small-file writes (ADR 0035) ----------------------------------
+#
+# The seismic dataset writes one self-contained JSON file per encounter, and
+# this board browns out mid-write as a documented, observed event. The
+# contract is the one the video path already has: a reader finds the old file
+# or the new one, never a half-written one, and a fault returns False rather
+# than raising into a handler that has just fired the deterrents.
+
+
+def test_atomic_write_bytes_creates_the_file_and_its_directory(tmp_path):
+    """The first record of a bucket arrives before the bucket exists."""
+    path = tmp_path / "elephant" / "record.json"
+
+    assert atomic_write_bytes(path, b'{"a":1}') is True
+    assert path.read_bytes() == b'{"a":1}'
+
+
+def test_atomic_write_bytes_replaces_an_existing_file_whole(tmp_path):
+    """os.replace, not a truncate-and-write - the old bytes stay readable."""
+    path = tmp_path / "record.json"
+    _write(path, b"previous contents, longer than the new ones")
+
+    assert atomic_write_bytes(path, b"new") is True
+    assert path.read_bytes() == b"new"
+
+
+def test_atomic_write_bytes_leaves_no_scratch_behind_on_success(tmp_path):
+    """A .part file surviving a good write would be cleared as a crash later."""
+    path = tmp_path / "record.json"
+
+    assert atomic_write_bytes(path, b"x") is True
+    assert list(tmp_path.iterdir()) == [path]
+
+
+def test_atomic_write_bytes_returns_false_when_the_directory_cannot_be_made(tmp_path):
+    """A file where the bucket directory should be - returns, does not raise."""
+    blocker = tmp_path / "elephant"
+    _write(blocker, b"not a directory")
+
+    assert atomic_write_bytes(blocker / "record.json", b"x") is False
+
+
+def test_atomic_write_bytes_returns_false_when_the_rename_fails(tmp_path, monkeypatch):
+    """The failure that matters: bytes written, never put in place.
+
+    The target keeps whatever it had, which is the whole point of writing
+    through a scratch file, and the caller is told so rather than believing
+    a record landed.
+    """
+    path = tmp_path / "record.json"
+    _write(path, b"survivor")
+
+    def _boom(src, dst):
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(os, "replace", _boom)
+
+    assert atomic_write_bytes(path, b"new") is False
+    assert path.read_bytes() == b"survivor"
+
+
+def test_atomic_write_bytes_never_raises_on_a_write_fault(tmp_path, monkeypatch):
+    """By the time this runs the deterrents have fired; nothing may escape."""
+
+    def _boom(self, data):
+        raise OSError("disk went away")
+
+    monkeypatch.setattr(pathlib.Path, "write_bytes", _boom)
+
+    assert atomic_write_bytes(tmp_path / "record.json", b"x") is False

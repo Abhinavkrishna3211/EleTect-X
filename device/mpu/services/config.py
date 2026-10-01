@@ -1135,3 +1135,60 @@ SEISMIC_STREAM_CAPACITY_SAMPLES = int(SEISMIC_STREAM_RETAIN_S * SEISMIC_SAMPLE_R
 # noise, not provenance.
 SEISMIC_STREAM_MAX_GAP_SAMPLES = SEISMIC_STREAM_CAPACITY_SAMPLES
 
+# ---------------------------------------------------------------------------
+# Camera-labelled seismic dataset (ADR 0035, perception/seismic_dataset.py)
+# ---------------------------------------------------------------------------
+# One JSON record per vision watch: the ground motion the geophone saw, the
+# boxes the camera drew over the same seconds, and the bucket the camera's
+# answer puts the record in. The whole point of the exercise is that the
+# label is free - the camera is already open, already looking at the animal
+# that made the ground motion, and already finished before the record is
+# written.
+
+# Written beside the captures rather than into them. Module-relative for the
+# same reason CAPTURE_DIR is - it lands inside the App's own folder on the
+# board, on the 18G /home/arduino partition, not on the ~1G root overlay -
+# but a separate directory, because the retention rules are different: a
+# capture is evidence about one event and a record is one row of a training
+# corpus, and the first must never be evicted to make room for the second.
+SEISMIC_DATASET_DIR = _MODULE_DIR / "data" / "seismic"
+
+# Master switch. Default ON, unlike EVENT_VIDEO_ENABLED, because this path
+# cannot affect an animal: it reads a buffer that is already in memory and
+# writes a file after every actuator call has returned. The thing that
+# actually decides whether records appear is whether report_seismic_batch is
+# registered at all (device/mpu/main.py), and nothing is registered today -
+# so with no stream the recorder writes nothing and logs that it had
+# nothing, which is the honest state of the feature until the Bridge
+# registration comes up on hardware.
+SEISMIC_DATASET_ENABLED = True
+
+# How far back before the trigger a record reaches. The STA/LTA detector
+# fires *after* the onset it detected - that is what a short-term average
+# crossing a long-term one means - so a record that started at the trigger
+# would be missing the first footfall of the approach, and the first
+# footfall is the cleanest impulse in the whole encounter. Five seconds at
+# an elephant's walking cadence is several strides of lead-in.
+SEISMIC_DATASET_PRE_ROLL_S = 5.0
+
+# Total size the dataset directory may occupy before the writer starts
+# evicting. INVENTED, like CAPTURE_LOW_DISK_HEADROOM_BYTES above and for the
+# same reason - there is no measured encounter rate for a real site yet.
+# Sized against what a record costs: 50 s of 250 Hz int16 is ~25 kB of
+# samples, ~34 kB base64, call it 40 kB with the track and the metadata, so
+# 256 MB is on the order of 6000 records. At even a hundred triggers a night
+# that is two months of unattended collection, which is longer than the
+# interval between site visits.
+SEISMIC_DATASET_MAX_BYTES = 256 * 1024 * 1024  # 256 MB
+
+# Which buckets are given up first when the cap is hit, hardest-to-replace
+# last. `unlabelled` goes first because it is the one bucket that can never
+# be trained on - the camera could not look, so nothing in it has a label to
+# learn from. `ambiguous` next: two species in one frame is real data but
+# needs hand-adjudication before it is worth anything. `no_animal` is a free
+# negative that every quiet night regenerates. The species buckets are last
+# and are evicted oldest-first among themselves, because a confirmed
+# elephant on a geophone is the entire scarce resource this corpus exists to
+# accumulate - see the plan's note that dataset volume, not dataset quality,
+# is the residual risk.
+SEISMIC_DATASET_EVICTION_ORDER = ("unlabelled", "ambiguous", "no_animal")

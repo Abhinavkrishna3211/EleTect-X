@@ -164,14 +164,20 @@ def save_burst(
 # (services/config.py's EVENT_VIDEO_SCRATCH_DIR comment has the full
 # reasoning, including why the container's /tmp is the wrong choice here).
 #
-# These three functions are the only place in device/mpu that calls
-# os.fsync/os.replace. The durability recipe is deliberate and worth stating
-# once: fsync the finished file so its bytes are on the medium, rename it
-# into place, then fsync the *directory* so the rename itself is on the
-# medium too. Skipping the last step leaves a window where a power cut loses
-# the directory entry and the clip becomes unreachable even though its data
-# survived - and on this board a power cut is a documented, observed event
-# (docs/KNOWN_GAPS.md's 2 Sept brown-out entry), not a theoretical one.
+# These four functions - the two below, commit_video(), and
+# atomic_write_bytes() at the end of this module - are the only place in
+# device/mpu that calls os.fsync/os.replace. The durability recipe is
+# deliberate and worth stating once: fsync the finished file so its bytes
+# are on the medium, rename it into place, then fsync the *directory* so the
+# rename itself is on the medium too. Skipping the last step leaves a window
+# where a power cut loses the directory entry and the clip becomes
+# unreachable even though its data survived - and on this board a power cut
+# is a documented, observed event (docs/KNOWN_GAPS.md's 2 Sept brown-out
+# entry), not a theoretical one.
+#
+# Keeping it to one list is the point. A second copy of that recipe written
+# somewhere else gets the directory fsync wrong, because the directory fsync
+# is the step whose absence never shows up in testing.
 
 
 def _fsync_file(path: Path) -> None:
@@ -446,3 +452,56 @@ def clear_orphaned_scratch(scratch_dir: Path = config.EVENT_VIDEO_SCRATCH_DIR) -
             scratch_dir,
         )
     return removed
+
+
+# ---------------------------------------------------------------------------
+# Durable small-file writes (ADR 0035)
+# ---------------------------------------------------------------------------
+
+
+def atomic_write_bytes(path: Path, data: bytes) -> bool:
+    """Write `data` at `path` so a power cut leaves the old file or the new one.
+
+    The non-video half of this module's durability discipline, added for the
+    seismic dataset (perception/seismic_dataset.py) and deliberately put
+    here rather than there: the recipe above is subtle enough that a second
+    copy of it elsewhere in the tree would eventually drift, and the
+    directory fsync is exactly the step a second copy forgets.
+
+    A dataset record is one self-contained JSON file of tens of kilobytes,
+    written minutes after an encounter the node may not survive. Writing it
+    in place would leave a truncated, unparseable file where a brown-out
+    caught it - and a half-written record is worse than a missing one,
+    because an export script has to decide what to do with it. The scratch
+    file this leaves behind on a failed rename is named `.part` for the same
+    reason: it is visibly not a record.
+
+    Never raises. Every caller here is on a path where the deterrents have
+    already fired, and a storage fault must be logged and survived exactly
+    as `save_burst`'s per-frame failures are.
+
+    Args:
+        path: Final destination. Its parent is created if missing.
+        data: The complete file contents.
+
+    Returns:
+        True if `path` now holds exactly `data`, False otherwise.
+    """
+    scratch = path.with_name(path.name + ".part")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        scratch.write_bytes(data)
+    except OSError as exc:
+        logger.warning("capture storage: cannot write %s: %s", scratch, exc)
+        return False
+
+    _fsync_file(scratch)
+    try:
+        os.replace(scratch, path)
+    except OSError as exc:
+        logger.warning(
+            "capture storage: failed to put %s in place (left at %s): %s", path, scratch, exc
+        )
+        return False
+    _fsync_directory(path.parent)
+    return True

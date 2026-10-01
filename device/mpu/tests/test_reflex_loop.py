@@ -41,8 +41,10 @@ from cognition import config as cognition_config
 from cognition.bandit import Tier
 from cognition.experience import IN_MEMORY_PATH, ExperienceStore
 from cognition.fusion import Modality, sigmoid
+from perception import seismic_dataset
 from perception.camera import CameraError, Frame
 from perception.detector import Detection, DetectionError
+from perception.seismic_stream import SeismicSlice
 from perception.storage import CaptureEventTag
 from services import config as services_config
 from services import reflex_loop
@@ -4128,3 +4130,366 @@ def test_an_unconfirmed_watch_s_track_is_ordered_the_same_way():
     assert keys == [(p, f) for p in (1, 2, 3) for f in (0, 1)]
     stamps = [s.timestamp_s for s in watch.track]
     assert stamps == sorted(stamps)
+
+
+# ---------------------------------------------------------------------------
+# The camera-labelled seismic recorder (ADR 0035, item 11c)
+# ---------------------------------------------------------------------------
+#
+# What is under test here is the *wiring*, not the writer - the buckets, the
+# encoding and the retention cap have their own file. The questions that can
+# only be answered from inside the event path are: does a record get written
+# at all, on which exits, with the actuator spans filled in, and does a watch
+# the geophone never triggered still produce one. That last is the whole
+# reason the recorder exists: a 5-8 kg fox may never cross a threshold tuned
+# for a 3-tonne elephant, so "the camera confirmed an animal over ground
+# motion that stayed sub-threshold" is itself the training signal, and it is
+# the only way fox data exists.
+
+
+class _FakeDatasetWriter:
+    """Recording stand-in for perception.seismic_dataset.SeismicDatasetWriter."""
+
+    def __init__(self, raises: Exception | None = None):
+        self.records = []
+        self._raises = raises
+
+    def write(self, record):
+        self.records.append(record)
+        if self._raises is not None:
+            raise self._raises
+        return None
+
+
+class _FakeSeismicStream:
+    """Two reads, which is all SeismicStreamProtocol declares.
+
+    `span` returns a fixed slice so a test can assert it reached the record
+    unchanged; `sample_index_at` is a linear fake at the nominal rate, which
+    makes placed indices arithmetic a test can state by hand.
+    """
+
+    def __init__(self, slice_=None, rate=services_config.SEISMIC_SAMPLE_RATE_HZ):
+        self.slice = slice_ if slice_ is not None else _dataset_slice()
+        self.rate = rate
+        self.spans = []
+
+    def span(self, start_monotonic_s, end_monotonic_s):
+        self.spans.append((start_monotonic_s, end_monotonic_s))
+        return self.slice
+
+    def sample_index_at(self, monotonic_s):
+        return int(monotonic_s * self.rate)
+
+
+def _dataset_slice(counts=(1, 2, 3)):
+    """A SeismicSlice of the shape perception/seismic_stream.py produces."""
+    return SeismicSlice(
+        first_sample_index=0, counts=tuple(counts), gaps=(), geophone_ok=True
+    )
+
+
+def _fire_recording(**fakes):
+    """_fire() with a dataset writer attached; returns it alongside the rest."""
+    writer = fakes.pop("seismic_dataset", _FakeDatasetWriter())
+    outcome, kwargs, log = _fire(seismic_dataset=writer, **fakes)
+    return outcome, writer, kwargs, log
+
+
+def test_a_watch_that_fired_nothing_still_writes_a_record():
+    """Wind, rain and cattle are most of what a geophone reports.
+
+    They are also the negative class, so the exit that fires nothing is the
+    one that produces the bulk of the corpus. A recorder hung only off the
+    actuation path would collect nothing but elephants.
+    """
+    _, writer, _, _ = _fire_recording(probability=0.05, is_night=lambda frames: False)
+
+    assert len(writer.records) == 1
+    assert writer.records[0].actuators == ()
+
+
+@TIER_FLOOR_OVERRIDE
+def test_an_event_that_fired_writes_exactly_one_record():
+    """Both exits write, and neither writes twice.
+
+    Two records for one encounter would double-count that encounter in
+    training and, worse, the second would carry a waveform the first had
+    already claimed.
+    """
+    _, writer, _, _ = _fire_recording()
+
+    assert len(writer.records) == 1
+
+
+@TIER_FLOOR_OVERRIDE
+def test_the_record_carries_the_actuator_spans_of_the_fire():
+    """The horn and the geophone share one structure.
+
+    If every confirmed record contains horn energy and no negative one does,
+    a future model learns to detect its own deterrent. The marks are what
+    let training exclude those samples instead.
+    """
+    _, writer, _, _ = _fire_recording(seismic_stream=_FakeSeismicStream())
+
+    spans = writer.records[0].actuators
+    assert {s.actuator for s in spans} == {"horn", "led"}
+    for span in spans:
+        assert span.end_monotonic_s >= span.start_monotonic_s
+        assert span.start_index is not None
+        assert span.count >= 1
+
+
+def test_a_sub_threshold_watch_the_geophone_never_triggered_still_records():
+    """The only way fox data exists.
+
+    `seismic_available=False` is the cold-trigger and acoustic-initiated
+    case - nothing crossed STA/LTA, so there is no footfall event in the
+    usual sense, only a camera that looked. The ground motion underneath it
+    is exactly the sub-threshold signal a lighter species produces, and it
+    is recorded with the camera's answer attached.
+    """
+    stream = _FakeSeismicStream()
+    _, writer, _, _ = _fire_recording(
+        probability=0.0,
+        sta_lta_ratio=0.0,
+        seismic_available=False,
+        is_night=lambda frames: False,
+        seismic_stream=stream,
+    )
+
+    assert len(writer.records) == 1
+    record = writer.records[0]
+    assert record.seismic_available is False
+    assert record.sta_lta_ratio == 0.0
+    assert record.seismic is stream.slice
+
+
+def test_the_record_reaches_back_before_the_trigger():
+    """STA/LTA fires *after* the onset it detected.
+
+    A record starting at the trigger is missing the cleanest impulse of the
+    approach, which is the one a gait model most wants.
+    """
+    stream = _FakeSeismicStream()
+    _fire_recording(
+        probability=0.05, is_night=lambda frames: False,
+        seismic_stream=stream, seismic_pre_roll_s=5.0,
+    )
+
+    (start, end), = stream.spans
+    assert end - start >= 5.0
+
+
+def test_no_record_is_written_when_the_camera_never_opened():
+    """An unlabelled record from a node that cannot see is a file nobody trains on."""
+    camera = _FakeCamera(fail_open=True)
+    _, writer, _, _ = _fire_recording(camera=camera)
+
+    assert writer.records == []
+
+
+def test_safe_mode_writes_no_record():
+    """No watch ran, so there is nothing a camera could have labelled."""
+    writer = _FakeDatasetWriter()
+    reflex_loop.handle_footfall_event(
+        1, 0.9,
+        sta_lta_ratio=6.0,
+        feature_vector=[0.0] * 8,
+        safe_mode=True,
+        drive_horn=_FakeDriveHorn(),
+        drive_led=_FakeDriveLed(),
+        pulse_ir=_FakePulseIr(),
+        camera=_FakeCamera(),
+        is_night=lambda frames: False,
+        detect_vision=_FakeVisionDetect(),
+        save_frames=_FakeSaveFrames(),
+        experience=ExperienceStore(IN_MEMORY_PATH),
+        seismic_dataset=writer,
+    )
+
+    assert writer.records == []
+
+
+def test_a_writer_that_raises_never_reaches_the_event():
+    """By the time this runs the deterrents have fired.
+
+    An exception escaping here would take down the handler for the *next*
+    event, trading a real elephant for a disk fault.
+    """
+    writer = _FakeDatasetWriter(raises=OSError("read-only filesystem"))
+    outcome, _, _ = _fire(
+        probability=0.05, is_night=lambda frames: False, seismic_dataset=writer
+    )
+
+    assert outcome is not None
+    assert len(writer.records) == 1
+
+
+def test_a_stream_that_raises_still_leaves_the_event_intact():
+    """Same contract on the read side, which runs on a different thread's data."""
+
+    class _Exploding:
+        def span(self, start, end):
+            raise RuntimeError("buffer corrupted")
+
+        def sample_index_at(self, when):
+            raise RuntimeError("buffer corrupted")
+
+    outcome, writer, _, _ = _fire_recording(
+        probability=0.05, is_night=lambda frames: False, seismic_stream=_Exploding()
+    )
+
+    assert outcome is not None
+    assert writer.records == []
+
+
+def test_no_stream_still_writes_the_labelled_vision_half():
+    """The normal state today - nothing registers report_seismic_batch yet.
+
+    The boxes and the species are the half that cannot be reconstructed
+    afterwards, so a node with no geophone feed still produces a usable
+    corpus of its own camera track.
+    """
+    _, writer, _, _ = _fire_recording(
+        probability=0.05, is_night=lambda frames: False, seismic_stream=None
+    )
+
+    record = writer.records[0]
+    assert record.seismic is None
+    assert record.track != ()
+
+
+def test_the_record_carries_the_boxes_the_camera_drew():
+    """Item 11b kept them; this is what kept them is for."""
+    stream = _FakeSeismicStream()
+    _, writer, _, _ = _fire_recording(
+        detect_vision=_FakeVisionDetect([ELEPHANT]),
+        is_night=lambda frames: False,
+        seismic_stream=stream,
+    )
+
+    track = writer.records[0].track
+    assert track
+    assert any(b.label == "Elephant" for frame in track for b in frame.boxes)
+    # Co-sampled, not merely simultaneous: every frame is placed on the
+    # waveform's own axis, which is what lets a reader scrub to a box.
+    assert all(frame.sample_index is not None for frame in track)
+
+
+def test_a_confirmed_species_decides_the_bucket():
+    """The bucket names what the camera confirmed, not what the node targets."""
+    _, writer, _, _ = _fire_recording(
+        detect_vision=_FakeVisionDetect([ELEPHANT]), is_night=lambda frames: False
+    )
+
+    record = writer.records[0]
+    assert record.bucket == "elephant"
+    assert record.source == seismic_dataset.SOURCE_CONFIRMED
+    assert record.could_see is True
+
+
+def test_a_daylight_watch_that_saw_nothing_is_the_negative_class():
+    """The camera looked properly and there was nothing there."""
+    _, writer, _, _ = _fire_recording(is_night=lambda frames: False)
+
+    record = writer.records[0]
+    assert record.bucket == seismic_dataset.NEGATIVE_BUCKET
+    assert record.source == seismic_dataset.SOURCE_LOOKED
+
+
+def test_an_unlit_night_watch_is_unlabelled_and_never_the_negative_class():
+    """The trap, asserted from inside the event path.
+
+    A night watch with no illumination is blindness, not absence. Filing it
+    as no_animal/ fills the negative class with the night elephants the IR
+    never lit - and all three target species are largely nocturnal, so that
+    is most of the corpus, not an edge case.
+    """
+    _, writer, _, _ = _fire_recording(is_night=lambda frames: True)
+
+    record = writer.records[0]
+    assert record.could_see is False
+    assert record.bucket == seismic_dataset.BLIND_BUCKET
+    assert record.bucket != seismic_dataset.NEGATIVE_BUCKET
+
+
+def test_a_detector_outage_is_unlabelled_rather_than_no_animal():
+    """The same distinction, reached the other way.
+
+    An empty species list looks identical whether the model found nothing or
+    never ran. Only could_see tells them apart, and getting it wrong here
+    would poison the negative class on exactly the nights the hardware was
+    misbehaving.
+    """
+    _, writer, _, _ = _fire_recording(
+        detect_vision=_FakeVisionDetect(raises=DetectionError("model not loaded")),
+        is_night=lambda frames: False,
+    )
+
+    assert writer.records[0].bucket == seismic_dataset.BLIND_BUCKET
+
+
+def test_the_record_carries_the_events_own_seismic_context():
+    """What the MCU believed, stored beside the waveform rather than instead of it.
+
+    The 8-feature vector is a documented placeholder; keeping the raw
+    waveform is what makes the corpus re-featurisable, and keeping the
+    features alongside is what makes the MCU's own decision reproducible.
+    """
+    _, writer, _, _ = _fire_recording(
+        probability=0.05, sta_lta_ratio=4.5, is_night=lambda frames: False
+    )
+
+    record = writer.records[0]
+    assert record.sta_lta_ratio == 4.5
+    assert record.mcu_probability == 0.05
+    assert len(record.feature_vector) == 8
+    assert record.node_scope == services_config.NODE_DETERRENCE_SCOPE
+    assert record.calibrated is False
+
+
+def test_an_event_with_no_writer_runs_exactly_as_before():
+    """The recorder is optional everywhere, including in this suite's defaults."""
+    outcome, _, _ = _fire(probability=0.05, is_night=lambda frames: False)
+
+    assert outcome is not None
+
+
+# -- _confirming_species(), which decides the bucket -------------------------
+
+
+def test_confirming_species_returns_every_species_in_registry_order():
+    """Two species in one watch must both survive to the bucket decision.
+
+    _confirmed_species() collapses them because the horn can play one
+    species' content and the frame can carry one class. Collapsing them here
+    too would file a waveform holding an elephant *and* a boar under
+    whichever won the deterrence tie-break, quietly poisoning that class.
+    """
+    check = _check(confirmed=True, species=("Boar", "Elephant"))
+    both = ("Elephant", "Boar")
+
+    assert reflex_loop._confirming_species(check, both) == ("Elephant", "Boar")
+    assert (
+        seismic_dataset.bucket_for(reflex_loop._confirming_species(check, both), True)[0]
+        == seismic_dataset.AMBIGUOUS_BUCKET
+    )
+    # And the deterrence path still gets its single answer out of the same
+    # resolution - one function, so the two can never name different species.
+    assert reflex_loop._confirmed_species(check, both) == "Elephant"
+
+
+def test_confirming_species_is_empty_when_the_watch_did_not_confirm():
+    """Boxes drawn are not a confirmation; only the gate's verdict is."""
+    check = _check(confirmed=False, species=("Elephant",))
+
+    assert reflex_loop._confirming_species(check) == ()
+
+
+def test_confirming_species_never_names_a_species_the_node_does_not_target():
+    """One resolution, so the bucket can never disagree with the deterrence path."""
+    check = _check(confirmed=True, species=("Elephant", "Boar"))
+
+    assert reflex_loop._confirming_species(check, ("Boar",)) == ("Boar",)
+    assert reflex_loop._confirmed_species(check, ("Boar",)) == "Boar"

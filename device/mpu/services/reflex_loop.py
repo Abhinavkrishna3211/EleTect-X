@@ -258,6 +258,15 @@ from cognition.experience import UNATTRIBUTED, SettledAttempt
 from cognition.fusion import FusionResult, Modality, ModalityReading, fuse, logit
 from perception.camera import CameraError, Frame
 from perception.detector import Detection, DetectionError, VisionDetectFn
+from perception.seismic_dataset import (
+    ActuatorSpan,
+    SeismicDatasetWriter,
+    SeismicRecord,
+    bucket_for,
+    place_actuator,
+    track_frames,
+)
+from perception.seismic_stream import SeismicSlice
 from perception.storage import CaptureEventTag
 from services import config as services_config
 
@@ -1554,6 +1563,24 @@ def _worth_filming(watch: VisionWatch) -> bool:
     return any(label in VISION_VIDEO_LABELS for label in watch.species)
 
 
+class SeismicStreamProtocol(Protocol):
+    """The two reads the recorder needs from perception.seismic_stream.
+
+    Narrowed to a protocol for the same reason ExperienceStoreProtocol is:
+    the tests drive this loop hundreds of times and must be able to hand it
+    a two-method fake, and nothing here needs the ring buffer, the lock or
+    the ingest half of the real class.
+    """
+
+    def span(self, start_monotonic_s: float, end_monotonic_s: float) -> SeismicSlice | None:
+        """The ground motion between two instants on time.monotonic()."""
+        ...
+
+    def sample_index_at(self, monotonic_s: float) -> int | None:
+        """Which sample was being taken at `monotonic_s`."""
+        ...
+
+
 def _vision_could_see(
     watch: VisionWatch,
     night_of_event: Callable[[], bool | None],
@@ -1802,21 +1829,41 @@ def _confirmed_species(
             global so it always matches whatever target_labels the caller's
             own _watch_for_vision() call used.
     """
-    if not vision_check.confirmed:
-        return None
-    # Registry order, not detector order, so the multi-species tie-break is
-    # a property of the table rather than of whichever label came back
-    # first from a given frame.
-    confirming = [
-        label
-        for label in services_config.DETERRABLE_LABELS
-        if label in vision_check.species and label in target_labels
-    ]
+    confirming = _confirming_species(vision_check, target_labels)
     if not confirming:
         return None
     if "Elephant" in confirming:
         return "Elephant"
     return confirming[0]
+
+
+def _confirming_species(
+    vision_check: VisionCheck, target_labels: tuple[str, ...] = VISION_TARGET_LABELS
+) -> tuple[str, ...]:
+    """Every species this watch confirmed, in registry order - usually one.
+
+    Split out of _confirmed_species() above, which collapses this to a
+    single answer because the horn can only play one species' content and
+    the frame can only carry one class. The dataset recorder needs the
+    uncollapsed list, because two species confirmed at once is its own
+    bucket: a record whose waveform holds an elephant *and* a boar is real
+    data and bad training data, and filing it under whichever one won the
+    deterrence tie-break would quietly poison that species' class.
+
+    One function rather than two resolutions of the same question, so the
+    bucket a record is filed under can never name a species the deterrence
+    path did not also see.
+    """
+    if not vision_check.confirmed:
+        return ()
+    # Registry order, not detector order, so the multi-species tie-break is
+    # a property of the table rather than of whichever label came back
+    # first from a given frame.
+    return tuple(
+        label
+        for label in services_config.DETERRABLE_LABELS
+        if label in vision_check.species and label in target_labels
+    )
 
 
 def _deterrence_species(
@@ -1939,6 +1986,9 @@ def handle_footfall_event(
     target_labels: tuple[str, ...] = VISION_TARGET_LABELS,
     seismic_available: bool = True,
     acoustic_confidence: float | None = None,
+    seismic_stream: SeismicStreamProtocol | None = None,
+    seismic_dataset: SeismicDatasetWriter | None = None,
+    seismic_pre_roll_s: float = services_config.SEISMIC_DATASET_PRE_ROLL_S,
 ) -> FootfallOutcome | None:
     """Sense -> fuse -> decide -> actuate for one report_footfall_event notify.
 
@@ -2121,6 +2171,24 @@ def handle_footfall_event(
             than scoring as "acoustic says no". handle_acoustic_event() is
             the only caller that passes a value, via main.py's
             _start_vision_event (ADR 0033).
+        seismic_stream: The reassembled ground-motion buffer
+            (perception.seismic_stream.SeismicStream), or None. None is the
+            normal state today and not a degraded one: nothing registers
+            report_seismic_batch yet, so there is no stream to read, and the
+            recorder still writes the labelled vision half of each record.
+            Read only after every actuator call has returned.
+        seismic_dataset: Where records go
+            (perception.seismic_dataset.SeismicDatasetWriter), or None to
+            record nothing at all. Separate from `seismic_stream` so the
+            two can be absent independently - a node with no geophone
+            stream still produces a usable labelled corpus of the camera's
+            own track, and a bench run can take the stream without writing
+            to disk.
+        seismic_pre_roll_s: How far before the trigger a record reaches.
+            STA/LTA fires after the onset it detected, so the first and
+            cleanest footfall of an approach lands before
+            trigger_monotonic; without this the corpus would systematically
+            omit it (ADR 0035).
 
     Returns:
         A FootfallOutcome carrying the fusion result, the decision, the
@@ -2356,6 +2424,87 @@ def handle_footfall_event(
             species_repeat_count=species_repeat_count,
         )
 
+    def _write_seismic_record(actuators: tuple[ActuatorSpan, ...] = ()) -> None:
+        """File this watch's ground motion under what the camera made of it.
+
+        ADR 0035, and the reason item 11b kept the boxes. Runs on every
+        watch that actually happened, whatever started it and whatever it
+        concluded - a seismic trigger, an acoustic elephant call, or a cold
+        HOME_TEST trigger with no geophone reading at all - and records the
+        ground motion even where it never crossed the STA/LTA threshold.
+
+        That last part is not a nicety, it is the only way fox data exists.
+        A fox is 5-8 kg against a threshold tuned for a 3-tonne elephant and
+        may never trigger the geophone in its life, so "an animal the camera
+        confirmed, over ground motion that stayed sub-threshold" is itself
+        the training signal. It costs nothing: the camera is already open,
+        the buffer is already in memory, and this runs after every actuator
+        call has returned.
+
+        Called on both exits that follow a watch. Not called when no watch
+        ran - SAFE_MODE, or a camera that would not open - because the
+        label is the entire product here and an unlabelled record from a
+        node that cannot see is a file nobody will ever train on.
+
+        Never raises. Everything inside is best-effort by construction, and
+        this is called from a path where the deterrents have already fired.
+        """
+        if seismic_dataset is None or not camera_opened:
+            return
+        try:
+            locate = None if seismic_stream is None else seismic_stream.sample_index_at
+            ground_motion = None
+            if seismic_stream is not None:
+                # Reaches back before the trigger on purpose: STA/LTA fires
+                # *after* the onset it detected, so a record starting at
+                # trigger_monotonic is missing the cleanest impulse in the
+                # encounter. span() clamps to what the ring still holds, so
+                # asking for more than survives costs nothing.
+                ground_motion = seismic_stream.span(
+                    trigger_monotonic - seismic_pre_roll_s, time.monotonic()
+                )
+                if ground_motion is None:
+                    logger.info(
+                        "seismic dataset: no ground motion held for this watch - "
+                        "recording the vision half alone"
+                    )
+            # The camera's chance to see, asked with the illumination this
+            # watch actually had. The ADR 0022 gate further up deliberately
+            # asks the same question with illuminated=False, because its
+            # conservative direction is "fire the deterrent anyway"; here
+            # the conservative direction is the opposite one, "file it
+            # unlabelled rather than train on it", and a night watch the
+            # illuminator did light is a watch the camera could see on.
+            could_see = _vision_could_see(
+                watch, _night_of_event, illuminated=bool(watch.ir_pulses and watch.ir_ack)
+            )
+            bucket, source = bucket_for(
+                _confirming_species(vision_check, target_labels), could_see
+            )
+            record = SeismicRecord(
+                bucket=bucket,
+                source=source,
+                event_wall_s=event_wall_s,
+                event_monotonic_s=trigger_monotonic,
+                node_scope=services_config.NODE_DETERRENCE_SCOPE,
+                sta_lta_ratio=sta_lta_ratio,
+                mcu_probability=probability,
+                feature_vector=tuple(feature_vector),
+                seismic_available=seismic_available,
+                seismic=ground_motion,
+                track=track_frames(watch.track, locate),
+                actuators=tuple(place_actuator(a, locate) for a in actuators),
+                vision_polls=watch.polls,
+                vision_watch_s=watch_s,
+                confirmed_on_poll=watch.confirmed_on_poll,
+                species_seen=watch.species,
+                illuminated=bool(watch.ir_pulses and watch.ir_ack),
+                could_see=could_see,
+            )
+            seismic_dataset.write(record)
+        except Exception as exc:  # noqa: BLE001 - a dataset write must not cost an event
+            logger.warning("seismic dataset: record for this event was not written: %s", exc)
+
     # is_night() is a real image computation - an HSV conversion over the
     # whole burst (perception/night.py) - and ADR 0022 gave it a second
     # caller, the blindness gate immediately below, on top of the pulse_ir
@@ -2446,6 +2595,12 @@ def handle_footfall_event(
                 alert=decision.alert,
             ),
         )
+        # No deterrent fired on this path, so the waveform is clean and
+        # the actuator list is empty rather than merely unknown. This is
+        # also where the overwhelming majority of records come from - wind,
+        # rain and cattle are most of what a geophone reports, and they are
+        # the negative class.
+        _write_seismic_record()
         return _no_actuation_outcome(frames=tuple(vision_frames), video_path=video_path)
 
     # Read here rather than at trigger time because this is the first
@@ -2521,20 +2676,50 @@ def handle_footfall_event(
             "vision watch illuminated: %d pulse(s), last ack=%s", watch.ir_pulses, ir_ack
         )
 
-    horn_ack = drive_horn(
-        schema_version,
-        action.horn_gain_pct,
-        action.horn_duration_ms,
-        action.horn_track_id,
+    # When each actuator was driving, on the same time.monotonic() base the
+    # frames and the seismic batches carry. The horn and the geophone sit on
+    # one structure, so a fire puts its own vibration into the signal being
+    # recorded - and a corpus where every elephant record contains horn
+    # energy and no no_animal record does teaches a model to detect its own
+    # horn. Recording continues through the fire regardless, because marked
+    # samples can be filtered out later and missing ones cannot be
+    # recovered; these are the marks (ADR 0035).
+    actuator_spans: list[ActuatorSpan] = []
+
+    def _timed(actuator: str, fire: Callable[[], bool]) -> bool:
+        """Record when an actuator call started and returned, ack or not."""
+        started = time.monotonic()
+        try:
+            return fire()
+        finally:
+            actuator_spans.append(
+                ActuatorSpan(
+                    actuator=actuator,
+                    start_monotonic_s=started,
+                    end_monotonic_s=time.monotonic(),
+                )
+            )
+
+    horn_ack = _timed(
+        "horn",
+        lambda: drive_horn(
+            schema_version,
+            action.horn_gain_pct,
+            action.horn_duration_ms,
+            action.horn_track_id,
+        ),
     )
     logger.info("drive_horn ack=%s", horn_ack)
 
-    led_ack = drive_led(
-        schema_version,
-        action.led_channel_id,
-        action.led_pattern_id,
-        action.led_gain_pct,
-        action.led_duration_ms,
+    led_ack = _timed(
+        "led",
+        lambda: drive_led(
+            schema_version,
+            action.led_channel_id,
+            action.led_pattern_id,
+            action.led_gain_pct,
+            action.led_duration_ms,
+        ),
     )
     logger.info("drive_led ack=%s", led_ack)
 
@@ -2557,6 +2742,14 @@ def handle_footfall_event(
         fused_probability=fusion_result.probability,
         alert=decision.alert,
     )
+
+    # Written here rather than at the end for one reason: the ring holds
+    # SEISMIC_STREAM_RETAIN_S of ground motion, and the retreat tail below
+    # sleeps for seconds before the frames are even saved. Pulling the
+    # waveform now is what keeps the pre-roll from ageing out of the buffer
+    # on exactly the events that matter most. Both actuator calls have
+    # returned above, so the spans are complete.
+    _write_seismic_record(tuple(actuator_spans))
 
     if camera_opened:
         # The tail runs *after* every actuator call above has returned, so
