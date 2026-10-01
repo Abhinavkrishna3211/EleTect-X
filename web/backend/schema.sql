@@ -47,9 +47,18 @@ create table events (
   fusion       jsonb,                 -- per-modality log-odds breakdown (see comment)
   corridor     jsonb,                 -- coordinated-corridor activation breakdown (see comment)
   uplink       jsonb,                 -- LoRaWAN frame this event arrived in (see comment)
+  -- Which officer took a 'critical' event, and when. Written only by
+  -- acknowledge_event() (migration 0006) so acked_by is always the caller;
+  -- null means nobody has said they are going yet.
+  acked_by     uuid references profiles,
+  acked_at     timestamptz,
   created_at   timestamptz not null default now()
 );
 create index on events (node_id, ts desc);
+-- The open-critical queue is the only reader of the ack columns, and it wants
+-- a handful of rows out of a table that grows with every detection.
+create index events_unacked_critical_idx
+  on events (ts desc) where priority = 'critical' and acked_at is null;
 
 -- Explainable-AI breakdown behind `confidence`. CONTEXT.md §4 fuses the sensors
 -- as L = L_prior + Σ aᵢ wᵢ (ℓᵢ − ℓ₀ᵢ), P = σ(L). `confidence` stays the scalar
@@ -226,7 +235,13 @@ create policy n_admin_all  on nodes for all using (is_admin()) with check (is_ad
 create policy e_staff_read on events for select using (is_staff());
 create policy e_admin_all  on events for all using (is_admin()) with check (is_admin());
 create policy a_staff_read on alerts for select using (is_staff());
-create policy a_staff_ack  on alerts for update using (is_staff());
+-- No staff UPDATE policy on alerts, deliberately. This is the delivery audit
+-- log - who was warned and whether it arrived - and RLS selects rows, not
+-- columns, so a `for update using (is_staff())` policy here would let any
+-- officer rewrite status, channel, recipient and event_id on any row. An
+-- acknowledgement is recorded on the event instead, through
+-- acknowledge_event() (migration 0006). Admins keep full write below; the edge
+-- function writes as service_role and is not subject to RLS.
 create policy a_admin_all  on alerts for all using (is_admin()) with check (is_admin());
 create policy h_staff_read on health for select using (is_staff());
 create policy h_admin_all  on health for all using (is_admin()) with check (is_admin());
@@ -238,6 +253,31 @@ create policy m_staff_rw   on maintenance for all using (is_staff()) with check 
 -- all SECURITY DEFINER, so a request can't be self-approved via a direct write.
 create policy or_self_read  on officer_requests for select using (user_id = auth.uid());
 create policy or_admin_all  on officer_requests for all using (is_admin()) with check (is_admin());
+
+-- Staff acknowledgement of an event: "I have this one". SECURITY DEFINER for
+-- the same reason as the approval actions below - RLS gives officers select on
+-- events and write to admins only, and widening that so an officer could
+-- acknowledge would also let them edit species, confidence and priority on any
+-- event. This sets three columns on one row for a caller it checks itself.
+--
+-- acked_by is auth.uid() and never a parameter: an officer saying they are
+-- going is only worth recording if it cannot be recorded for them. The
+-- `acked_at is null` guard makes the first ack win, so a second officer
+-- pressing it does not overwrite who actually committed first.
+create function acknowledge_event(p_event_id bigint) returns void
+language plpgsql security definer
+set search_path = public as $$
+begin
+  if not is_staff() then
+    raise exception 'not authorized';
+  end if;
+  update events
+     set acked_by = auth.uid(), acked_at = now()
+   where id = p_event_id and acked_at is null;
+end;
+$$;
+revoke execute on function public.acknowledge_event(bigint) from public, anon;
+grant  execute on function public.acknowledge_event(bigint) to authenticated;
 
 -- Admin-only approval actions. SECURITY DEFINER lets these update profiles.role
 -- despite the column-grant restriction above; the is_admin() check inside

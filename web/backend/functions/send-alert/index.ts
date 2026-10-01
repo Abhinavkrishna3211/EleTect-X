@@ -62,8 +62,12 @@ Deno.serve(async (req) => {
   const byId = new Map<string, { id: string; phone: string | null }>();
   for (const p of [...(staff ?? []), ...near]) byId.set(p.id, { id: p.id, phone: p.phone ?? null });
 
-  const { sent, byChannel } = await fanOut(db, [...byId.values()], msg, ev.id ?? null);
-  return new Response(JSON.stringify({ sent, total: byId.size, byChannel }), {
+  // A 'critical' event goes out on every channel a recipient has rather than the first that
+  // works - see deliver(). The dashboard's open-critical queue is the other half of this: the
+  // email asks for a team, and acknowledge_event() records that one is coming.
+  const critical = ev.priority === "critical";
+  const { sent, byChannel } = await fanOut(db, [...byId.values()], msg, ev.id ?? null, critical);
+  return new Response(JSON.stringify({ sent, total: byId.size, byChannel, critical }), {
     headers: { "Content-Type": "application/json" },
   });
 });

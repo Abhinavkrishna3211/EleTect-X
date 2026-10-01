@@ -153,12 +153,28 @@ const smsChannel: Channel = {
 // Priority order: recipients are reached over the first enabled channel they have an address for.
 const CHANNELS: Channel[] = [emailChannel, whatsappChannel, smsChannel];
 
-// Deliver to one recipient over the first enabled+addressable channel; fall back to the next on
-// failure. Logs one `alerts` row per attempt (the existing audit behaviour). Returns the channel
-// name a message was accepted on, or null if none delivered.
+// Deliver to one recipient. Normally this stops at the first enabled channel that accepts, and
+// falls through to the next only on failure.
+//
+// `everyChannel` sends on all of them instead, for a 'critical' event — the node fired its top
+// tier and the animal stayed, so someone has to physically go. The ordinary rule optimises for
+// not sending the same thing twice, which is right for the alerts that arrive every night and
+// wrong for the one that needs a person to look at their phone now. A duplicate is a far cheaper
+// failure here than an unread email.
+//
+// It changes nothing today, and that is worth stating rather than discovering: email is the only
+// enabled channel (WhatsApp is a stub, SMS waits on TRAI DLT registration), so every recipient
+// has exactly one channel either way. It is the behaviour that should already be in place for
+// when SMS clears, because that is the moment the distinction starts mattering and the worst
+// time to be deciding it.
+//
+// Logs one `alerts` row per attempt (the existing audit behaviour). Returns the channel names
+// that accepted, newest attempt last — empty if nothing delivered.
 export async function deliver(
   db: SupabaseClient, to: Recipient, msg: AlertMessage, eventId: number | null,
-): Promise<string | null> {
+  everyChannel = false,
+): Promise<string[]> {
+  const accepted: string[] = [];
   for (const ch of CHANNELS) {
     if (!ch.enabled()) continue;
     const addr = ch.address(to);
@@ -167,15 +183,19 @@ export async function deliver(
     await db.from("alerts").insert({
       event_id: eventId, channel: ch.name, recipient: addr, status: ok ? "sent" : "failed",
     });
-    if (ok) return ch.name;
+    if (ok) {
+      accepted.push(ch.name);
+      if (!everyChannel) break;
+    }
   }
+  if (accepted.length) return accepted;
   // No enabled channel had a reachable address (or every attempt bounced). Record the
   // terminal outcome so a recipient who received nothing is queryable as `undeliverable`,
   // distinct from a single channel attempt that was logged `failed` above.
   await db.from("alerts").insert({
     event_id: eventId, channel: null, recipient: to.email ?? to.phone ?? to.id, status: "undeliverable",
   });
-  return null;
+  return accepted;
 }
 
 // Fan out one message to a deduped recipient list. Each recipient's email is resolved from
@@ -186,6 +206,7 @@ export async function fanOut(
   people: { id: string; phone: string | null }[],
   msg: AlertMessage,
   eventId: number | null,
+  everyChannel = false,
 ): Promise<{ sent: number; byChannel: Record<string, number> }> {
   let sent = 0;
   const byChannel: Record<string, number> = {};
@@ -198,8 +219,12 @@ export async function fanOut(
       continue;   // lookup failed for this recipient only; don't 500 and drop the rest of the batch
     }
     const to: Recipient = { id: p.id, phone: p.phone, email };
-    const via = await deliver(db, to, msg, eventId);
-    if (via) { sent++; byChannel[via] = (byChannel[via] ?? 0) + 1; }
+    const via = await deliver(db, to, msg, eventId, everyChannel);
+    // `sent` counts people reached, not messages sent - one recipient reached on two channels
+    // is still one person warned, and a count that says otherwise would read as better coverage
+    // than there is. byChannel counts attempts accepted, so the two differ under everyChannel.
+    if (via.length) sent++;
+    for (const ch of via) byChannel[ch] = (byChannel[ch] ?? 0) + 1;
   }
   return { sent, byChannel };
 }

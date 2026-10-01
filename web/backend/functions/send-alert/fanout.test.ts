@@ -5,7 +5,7 @@
 //  the type-only supabase-js import so the run is fully offline.)
 
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { fanOut, kmBetween, withinRadius } from "./fanout.ts";
+import { deliver, fanOut, kmBetween, withinRadius } from "./fanout.ts";
 
 // Minimal stand-in for the two SupabaseClient surfaces fanOut/deliver touch: alerts inserts and
 // auth.admin.getUserById. getUserById rejects for `poisonId` to simulate a lookup failure.
@@ -151,4 +151,103 @@ Deno.test("kmBetween is zero at a point and symmetric", () => {
   assertEquals(kmBetween(NODE, NODE), 0);
   const a = { lat: 10.06, lng: 76.63 }, b = { lat: 10.12, lng: 76.70 };
   assertEquals(kmBetween(a, b)!.toFixed(9), kmBetween(b, a)!.toFixed(9));
+});
+
+
+// ---------------------------------------------------------------------------
+// Multi-channel delivery. A 'critical' event sends on every channel a recipient
+// has rather than stopping at the first that works.
+//
+// These stub globalThis.fetch rather than reaching a provider, so the run stays
+// offline. The test is deliberately run without --allow-net: if a channel ever
+// escapes the stub, it fails on a permission error instead of quietly sending a
+// real message from a test.
+// ---------------------------------------------------------------------------
+
+function withStubbedChannels<T>(run: () => Promise<T>): Promise<T> {
+  const realFetch = globalThis.fetch;
+  const before = {
+    email: Deno.env.get("CHANNEL_EMAIL"),
+    sms: Deno.env.get("CHANNEL_SMS"),
+    whatsapp: Deno.env.get("CHANNEL_WHATSAPP"),
+    resend: Deno.env.get("RESEND_API_KEY"),
+    smsKey: Deno.env.get("SMS_API_KEY"),
+  };
+  Deno.env.delete("CHANNEL_EMAIL");          // email is on whenever RESEND_API_KEY is set
+  Deno.env.set("RESEND_API_KEY", "test-key");
+  Deno.env.set("CHANNEL_SMS", "on");
+  Deno.env.set("SMS_API_KEY", "test-key");
+  Deno.env.delete("CHANNEL_WHATSAPP");       // stays off: its send() is a stub that always fails
+  globalThis.fetch = () => Promise.resolve(new Response("{}", { status: 200 }));
+
+  const restore = () => {
+    globalThis.fetch = realFetch;
+    for (const [k, v] of Object.entries({
+      CHANNEL_EMAIL: before.email, CHANNEL_SMS: before.sms, CHANNEL_WHATSAPP: before.whatsapp,
+      RESEND_API_KEY: before.resend, SMS_API_KEY: before.smsKey,
+    })) v === undefined ? Deno.env.delete(k) : Deno.env.set(k, v);
+  };
+  return run().finally(restore);
+}
+
+const REACHABLE = { id: "aaaaaaaa-0000-0000-0000-000000000001", phone: "+919999999999", email: "a@example.test" };
+
+Deno.test("deliver: an ordinary alert stops at the first channel that accepts", async () => {
+  await withStubbedChannels(async () => {
+    const { client, inserts } = makeStub("none");
+    const via = await deliver(
+      client as unknown as Parameters<typeof deliver>[0], REACHABLE, { subject: "s", body: "b" }, 7,
+    );
+    assertEquals(via, ["email"]);
+    // One attempt logged, and SMS was never tried even though the number is reachable.
+    assertEquals(inserts.map((i) => i.row.channel), ["email"]);
+  });
+});
+
+Deno.test("deliver: a critical alert sends on every channel the recipient has", async () => {
+  await withStubbedChannels(async () => {
+    const { client, inserts } = makeStub("none");
+    const via = await deliver(
+      client as unknown as Parameters<typeof deliver>[0], REACHABLE, { subject: "s", body: "b" }, 7, true,
+    );
+    assertEquals(via, ["email", "sms"]);
+    assertEquals(inserts.map((i) => i.row.channel), ["email", "sms"]);
+    // Both are 'sent' - neither is a fallback after a failure.
+    assertEquals(inserts.map((i) => i.row.status), ["sent", "sent"]);
+  });
+});
+
+Deno.test("deliver: everyChannel still records undeliverable when nothing accepts", async () => {
+  const before = Deno.env.get("CHANNEL_EMAIL");
+  Deno.env.set("CHANNEL_EMAIL", "off");
+  Deno.env.delete("CHANNEL_SMS");
+  try {
+    const { client, inserts } = makeStub("none");
+    const via = await deliver(
+      client as unknown as Parameters<typeof deliver>[0], REACHABLE, { subject: "s", body: "b" }, 7, true,
+    );
+    assertEquals(via, []);
+    assertEquals(inserts.length, 1);
+    assertEquals(inserts[0].row.status, "undeliverable");
+    assertEquals(inserts[0].row.channel, null);
+  } finally {
+    before === undefined ? Deno.env.delete("CHANNEL_EMAIL") : Deno.env.set("CHANNEL_EMAIL", before);
+  }
+});
+
+// The count that goes back to the webhook caller. One person reached twice is
+// one person warned; reporting 2 would read as better coverage than there is.
+Deno.test("fanOut: sent counts people reached, byChannel counts accepted attempts", async () => {
+  await withStubbedChannels(async () => {
+    const { client } = makeStub("none");
+    const result = await fanOut(
+      client as unknown as Parameters<typeof fanOut>[0],
+      [{ id: REACHABLE.id, phone: REACHABLE.phone }],
+      { subject: "s", body: "b" },
+      7,
+      true,
+    );
+    assertEquals(result.sent, 1);
+    assertEquals(result.byChannel, { email: 1, sms: 1 });
+  });
 });
