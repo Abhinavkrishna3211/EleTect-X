@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRealtimeTable } from '@/hooks/useRealtimeTable'
 import { LiveMap } from '@/components/dashboard/LiveMap'
-import { geoPoints, isUrgent, toLatLng, type EventRow, type NodeRow } from '@/lib/dashboard'
+import {
+  geoPoints,
+  headlineSpecies,
+  isCritical,
+  isUrgent,
+  speciesLabel,
+  speciesShort,
+  toLatLng,
+  type EventRow,
+  type NodeRow,
+} from '@/lib/dashboard'
 import { herdAt, incidentPath, istHM, latestActivation, latestCluster, ms } from '@/lib/incident'
 
 // Wall-clock advance rate of the auto-play head: replay one incident over ~14 s.
@@ -23,8 +33,10 @@ function logText(e: EventRow): string {
     const who = e.node_id ? `${e.node_id} · ` : ''
     return `${who}${e.corridor.note}`
   }
-  const species = e.species ? e.species[0].toUpperCase() + e.species.slice(1) : 'Detection'
-  const bits = [e.node_id, species, e.action, e.outcome].filter(Boolean)
+  // A no-retreat step is the one line in a replay log that must not read like
+  // the others: it is where the node ran out of options.
+  const bits = [e.node_id, speciesLabel(e.species), e.action, e.outcome].filter(Boolean)
+  if (isCritical(e.priority)) bits.push('did not retreat')
   return bits.join(' · ')
 }
 
@@ -96,9 +108,12 @@ export function Replay() {
   const herdPoint = useMemo(() => herdAt(incident, points, tMs), [incident, points, tMs])
   const corridor = useMemo(() => path.map(toLatLng), [path])
 
-  const speciesLabel = incident.find((e) => e.species)?.species?.toUpperCase() ?? 'DETECTION'
+  // The species the incident is *about*, not whichever one happened to walk
+  // past first - a fox ahead of a herd used to title the replay FOX INCURSION.
+  const headline = headlineSpecies(incident)
   const subtitle = window
-    ? `${speciesLabel} INCURSION · ${istHM(window.start)}–${istHM(window.end)} IST`
+    ? `${headline ? speciesShort(headline) : 'DETECTION'} INCURSION · ` +
+      `${istHM(window.start)}–${istHM(window.end)} IST`
     : 'NO INCIDENT IN RANGE'
 
   const clock = window ? istHM(tMs) : '--:--'

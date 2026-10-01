@@ -100,3 +100,34 @@ describe('buildTrendModel', () => {
     }
   })
 })
+
+
+describe('scoring an outcome', () => {
+  // The rate is read as "this deterrent works", so a negated outcome counted
+  // as a retreat inverts the one number the chart exists to show.
+  // 'no-retreat'.includes('retreat') is true, and D8 made that string
+  // something the node can actually report.
+  const nonRetreats = ['no-retreat', 'no retreat', 'not retreated', 'never retreated']
+
+  for (const outcome of nonRetreats) {
+    it(`counts "${outcome}" as a failure, not a success`, () => {
+      const model = buildTrendModel(
+        Array.from({ length: 4 }, () => ev(0, 'Horn', outcome)),
+      )
+      expect(model.series[0].current).toBe(0)
+    })
+  }
+
+  it('still counts a plain retreat', () => {
+    const model = buildTrendModel(Array.from({ length: 4 }, () => ev(0, 'Horn', 'retreated')))
+    expect(model.series[0].current).toBe(1)
+  })
+
+  it('scores a mixed bucket on the retreats alone', () => {
+    const model = buildTrendModel([
+      ...Array.from({ length: 3 }, () => ev(0, 'Horn', 'retreated')),
+      ...Array.from({ length: 1 }, () => ev(0, 'Horn', 'no-retreat')),
+    ])
+    expect(model.series[0].current).toBeCloseTo(0.75, 10)
+  })
+})

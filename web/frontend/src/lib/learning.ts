@@ -39,8 +39,16 @@ const WK_LABEL = new Intl.DateTimeFormat('en-GB', {
   month: 'short',
 })
 
+// Substring matching on a free-text column, with one trap: the outcome of a
+// top-tier event where the animal stayed is written as a negation, and
+// 'no-retreat'.includes('retreat') is true. Scoring that as a success would
+// invert the one number this chart exists to show, so negations are rejected
+// before the match.
+const NOT_RETREATED = /\b(no|not|never|non)[\s_-]*retreat/
 function retreated(e: EventRow): boolean {
-  return (e.outcome ?? '').toLowerCase().includes('retreat')
+  const outcome = (e.outcome ?? '').toLowerCase()
+  if (NOT_RETREATED.test(outcome)) return false
+  return outcome.includes('retreat')
 }
 
 export function buildTrendModel(events: EventRow[]): TrendModel {

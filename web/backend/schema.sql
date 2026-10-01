@@ -43,7 +43,7 @@ create table events (
   media_url    text,
   action       text,                  -- deterrent chosen
   outcome      text,                  -- retreated / no-response / ...
-  priority     text default 'normal', -- normal | high
+  priority     text default 'normal', -- normal | high | critical (ADR 0034)
   fusion       jsonb,                 -- per-modality log-odds breakdown (see comment)
   corridor     jsonb,                 -- coordinated-corridor activation breakdown (see comment)
   uplink       jsonb,                 -- LoRaWAN frame this event arrived in (see comment)

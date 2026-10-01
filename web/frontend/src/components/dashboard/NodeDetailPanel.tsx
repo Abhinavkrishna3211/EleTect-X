@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import {
   relativeTime,
+  speciesLabel,
   statusDisplay,
   type EventRow,
   type HealthRow,
@@ -55,7 +56,7 @@ export function NodeDetailPanel({ node, latestEvent, onClose }: NodeDetailPanelP
 
   const battLow = node.battery_pct != null && node.battery_pct < 40
   const lastDetection = latestEvent
-    ? `${latestEvent.species ?? 'Detection'} · ${relativeTime(latestEvent.ts)}`
+    ? `${speciesLabel(latestEvent.species)} · ${relativeTime(latestEvent.ts)}`
     : 'None recorded'
 
   return (

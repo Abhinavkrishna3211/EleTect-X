@@ -1,7 +1,8 @@
 // Public-facing area risk, derived from the public_area_risk view.
 //
-// That view is deliberately aggregate-only — `day` and a count of high-priority
-// detections, nothing else. Species, node id, and coordinates are withheld from
+// That view is deliberately aggregate-only — `day` and a count of the
+// detections that paged someone ('high' or, since ADR 0034, 'critical'),
+// nothing else. Species, node id, and coordinates are withheld from
 // the public role on purpose (see schema.sql), so anything shown to a resident
 // has to be built from these two columns. Resist the temptation to enrich this
 // with per-event detail: the detail belongs in the alert message sent to the

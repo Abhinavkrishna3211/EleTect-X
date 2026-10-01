@@ -1,0 +1,35 @@
+{
+  /* The suite runs under Vitest with `environment: 'node'` (vite.config.ts), so
+     it is node code, not browser code, and it was being type-checked as part of
+     the app project with only `vite/client` types. That was wrong in both
+     directions: a test could not read a file, and app code could have picked up
+     a node global from a test file without anything objecting. Own the tests
+     here instead, with node types and no DOM lib. `vite/client` stays for
+     the `?raw` imports Login.test.ts uses to read a source file. */
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.test.tsbuildinfo",
+    "target": "es2023",
+    "lib": ["ES2023"],
+    "types": ["node", "vite/client", "vitest/globals"],
+    "skipLibCheck": true,
+
+    /* Bundler mode — matches the app project so the modules under test resolve
+       the same way they do in the real build. */
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+
+    /* Linting */
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src/**/*.test.ts"]
+}

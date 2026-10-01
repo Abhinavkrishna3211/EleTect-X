@@ -25,5 +25,8 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  /* The suite is its own project (tsconfig.test.json): node environment,
+     node types, no DOM. */
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }

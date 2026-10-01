@@ -48,8 +48,12 @@ export function Overview() {
     () => [...eventRows.values()].sort((a, b) => b.ts.localeCompare(a.ts)),
     [eventRows],
   )
-  // The decision card explains the most recent event that carries a fusion pass.
-  const decisionEvent = useMemo(() => events.find((e) => e.fusion) ?? null, [events])
+  // The card explains the detection in front of the officer: the most recent
+  // event, full stop. It used to pick the most recent event carrying a fusion
+  // breakdown, which no real uplink has - an 11-byte frame cannot hold one - so
+  // on live traffic the card either sat empty or explained a much older demo
+  // row while a critical elephant scrolled past above it.
+  const decisionEvent = useMemo(() => events[0] ?? null, [events])
 
   const selectedNode = selectedNodeId ? (nodeRows.get(selectedNodeId) ?? null) : null
   const selectedNodeEvent = useMemo(

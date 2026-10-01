@@ -72,7 +72,7 @@ export function ResidentView() {
         <h2 className="m-0 mb-4 font-sans text-base font-semibold">Recent activity near you</h2>
         {state === 'ready' && activity.length === 0 ? (
           <p className="text-brand-fg/45 m-0 font-mono text-[12.5px]">
-            No high-priority detections recorded near villages.
+            No detections recorded near villages recently.
           </p>
         ) : state === 'ready' ? (
           <div className="flex flex-col gap-3">
@@ -83,7 +83,10 @@ export function ResidentView() {
                   i < activity.length - 1 ? 'border-brand-fg/6 border-b pb-3' : ''
                 }`}
               >
-                <span className="text-lg">🐘</span>
+                <span
+                  aria-hidden="true"
+                  className="bg-brand-gold/70 mt-1.75 h-2 w-2 shrink-0 rounded-full"
+                />
                 <div className="flex-1">
                   <p className="m-0 font-sans text-sm font-semibold">
                     {a.detections} {a.detections === 1 ? 'detection' : 'detections'} near villages

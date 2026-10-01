@@ -168,6 +168,11 @@ export const otherWildlife = [
     body: 'Rooting and crop damage in paddy and tapioca fields, deterred before the boar breaks the fence line.',
   },
   {
+    icon: '🦊',
+    name: 'Fox',
+    body: 'Poultry and small-livestock raids, and the hardest case for any detector — light enough to cross a geophone without tripping it, so the camera carries the confirmation.',
+  },
+  {
     icon: '🐃',
     name: 'Gaur (Indian bison)',
     body: 'Large, powerful, and unpredictable near settlements, given room and steered calmly away.',

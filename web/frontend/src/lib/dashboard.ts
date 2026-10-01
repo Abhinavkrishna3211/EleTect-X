@@ -79,13 +79,179 @@ export interface EventRow {
   priority: string | null // normal | high | critical
   fusion: Fusion | null
   corridor: Corridor | null
+  uplink: UplinkMeta | null
   created_at: string
 }
 
-// 'critical' is a no-retreat event (ADR 0034) - it pages like 'high' and is
-// drawn like one, so the dashboard never shows the most urgent alert as routine.
+// The LoRaWAN frame the event arrived in (events.uplink), as web/ingest writes
+// it. Worth typing rather than ignoring: a real uplinked event carries no
+// `fusion` breakdown - the frame has 11 bytes and cannot - so for everything
+// that is not a demo row this is the only account of what the node did.
+export interface UplinkMeta {
+  seq?: number
+  class?: number
+  tier?: number
+  flags?: number
+  vision_confirmed?: boolean
+  deterrent_fired?: boolean
+  safe_mode?: boolean
+  no_retreat?: boolean
+  capture_ref?: number
+}
+
+// 'critical' is a no-retreat event (ADR 0034): the node fired its top tier and
+// the animal was still there when it stopped watching. It pages like a 'high'
+// and must not be *drawn* like one - "we have run out of options" is a
+// different message from "an elephant is near the village", and a feed that
+// renders them identically loses the distinction the device went to the
+// trouble of measuring.
 export function isUrgent(priority: string | null): boolean {
   return priority === 'high' || priority === 'critical'
+}
+
+export function isCritical(priority: string | null): boolean {
+  return priority === 'critical'
+}
+
+export interface PriorityDisplay {
+  label: string // short, upper case, for a pill
+  color: string
+  // Non-null only where the priority earns a filled badge rather than
+  // coloured text. Only 'critical' does.
+  fill: string | null
+}
+
+const PRIORITY_DISPLAY: Record<string, PriorityDisplay> = {
+  critical: { label: 'NO RETREAT', color: '#070d0a', fill: '#e25b4a' },
+  high: { label: 'HIGH', color: '#e25b4a', fill: null },
+  normal: { label: 'ROUTINE', color: '#e2a13c', fill: null },
+}
+
+export function priorityDisplay(priority: string | null): PriorityDisplay {
+  return PRIORITY_DISPLAY[priority ?? 'normal'] ?? PRIORITY_DISPLAY.normal
+}
+
+// Did the animal stay through a full deterrence sequence? Read from the routed
+// priority rather than from the frame flag, because the priority is the value
+// every other layer - the fan-out, the public risk view, the officer page -
+// already acted on. The flag is kept as a cross-check for the detail card.
+export function noRetreat(event: EventRow): boolean {
+  return isCritical(event.priority) || event.uplink?.no_retreat === true
+}
+
+// How a species reads on screen. The six keys below are the entire vocabulary
+// the wire format can carry (web/ingest/src/payload.ts's EVENT_CLASS_SPECIES);
+// anything else reaching here is a legacy free-text row, a maintenance row that
+// borrows the column, or a class from firmware newer than this build.
+export interface SpeciesDisplay {
+  label: string // sentence case, for a feed row or a detail line
+  short: string // upper case, for the replay headline and the filter chips
+  icon: string
+  // Ordering only, for picking which species headlines a mixed incident. Not a
+  // risk score and never shown.
+  rank: number
+}
+
+const SPECIES_DISPLAY: Record<string, SpeciesDisplay> = {
+  // Poaching sounds outrank the animals: they are the only classes that mean
+  // people, and an incident holding both is about the people.
+  gunshot: { label: 'Gunshot', short: 'GUNSHOT', icon: '\u{1F52B}', rank: 7 },
+  chainsaw: { label: 'Chainsaw', short: 'CHAINSAW', icon: '\u{1FA9A}', rank: 6 },
+  elephant: { label: 'Elephant', short: 'ELEPHANT', icon: '\u{1F418}', rank: 5 },
+  // Heard and not seen, and deliberately given its own word and its own glyph.
+  // The old icon lookup matched on substring, so 'elephant_call' drew the same
+  // elephant as a camera confirmation - an officer deciding whether to drive
+  // out was shown a photograph's certainty for a microphone's evidence.
+  elephant_call: {
+    label: 'Elephant heard',
+    short: 'ELEPHANT HEARD',
+    icon: '\u{1F4E3}',
+    rank: 4,
+  },
+  boar: { label: 'Wild boar', short: 'BOAR', icon: '\u{1F417}', rank: 3 },
+  fox: { label: 'Fox', short: 'FOX', icon: '\u{1F98A}', rank: 2 },
+}
+
+// Glyphs for species strings that are not wire classes: the demo's rejected
+// cattle detection, and animals the hardware may meet but the device cannot
+// name today. Matched by substring, which is what the feed has always done for
+// free-text rows - but only *after* an exact wire-class lookup fails, so no
+// entry here can shadow a real class again.
+const FALLBACK_ICON: Record<string, string> = {
+  cattle: '\u{1F404}',
+  gaur: '\u{1F403}',
+  deer: '\u{1F98C}',
+  monkey: '\u{1F412}',
+  leopard: '\u{1F406}',
+  tiger: '\u{1F405}',
+}
+
+const UNKNOWN_ICON = '\u{1F4E1}'
+
+function speciesKey(species: string | null | undefined): string {
+  return (species ?? '').trim().toLowerCase()
+}
+
+export function speciesDisplay(species: string | null | undefined): SpeciesDisplay | null {
+  return SPECIES_DISPLAY[speciesKey(species)] ?? null
+}
+
+// Every species the wire can carry, worst first. Exported so a test can assert
+// this table covers the decoder, and so the filter chips have a stable order.
+export function knownSpecies(): string[] {
+  return Object.keys(SPECIES_DISPLAY).sort(
+    (a, b) => SPECIES_DISPLAY[b].rank - SPECIES_DISPLAY[a].rank,
+  )
+}
+
+// Never the raw column value: 'elephant_call' read as "Elephant_call", which
+// is both ugly and wrong about what happened. An unrecognised value is
+// de-snaked and sentence-cased rather than guessed at or hidden - a row the
+// dashboard cannot name still has to be legible.
+export function speciesLabel(species: string | null | undefined): string {
+  const known = speciesDisplay(species)
+  if (known) return known.label
+  const key = speciesKey(species)
+  if (!key) return 'Detection'
+  const words = key.replace(/_/g, ' ')
+  return words[0].toUpperCase() + words.slice(1)
+}
+
+export function speciesShort(species: string | null | undefined): string {
+  return speciesDisplay(species)?.short ?? speciesLabel(species).toUpperCase()
+}
+
+export function speciesIcon(species: string | null | undefined): string {
+  const known = speciesDisplay(species)
+  if (known) return known.icon
+  const key = speciesKey(species)
+  if (!key) return UNKNOWN_ICON
+  // Longest key first so the match is deterministic rather than dependent on
+  // object insertion order.
+  for (const name of Object.keys(FALLBACK_ICON).sort((a, b) => b.length - a.length)) {
+    if (key.includes(name)) return FALLBACK_ICON[name]
+  }
+  return UNKNOWN_ICON
+}
+
+// Which species an incident is *about*. Replay used the earliest event that
+// carried one, so a fox that walked past first titled an elephant incursion
+// "FOX INCURSION". With six classes on the wire instead of two, a mixed cluster
+// stopped being a corner case.
+export function headlineSpecies(events: EventRow[]): string | null {
+  let best: string | null = null
+  let bestRank = -Infinity
+  for (const e of events) {
+    const key = speciesKey(e.species)
+    if (!key) continue
+    // An unrecognised species still beats nothing, but loses to any named one.
+    const rank = SPECIES_DISPLAY[key]?.rank ?? 0
+    if (rank > bestRank) {
+      bestRank = rank
+      best = e.species
+    }
+  }
+  return best
 }
 
 export interface HealthRow {
