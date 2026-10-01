@@ -554,3 +554,85 @@ def test_widening_a_scope_opens_a_different_database():
 def test_elephant_only_experience_db_path_is_todays_unqualified_filename():
     """The shipped default must resolve to exactly today's DB, unqualified."""
     assert config.EXPERIENCE_DB_PATH == config.DATA_DIR / "experience.sqlite3"
+
+
+# ---------------------------------------------------------------------------
+# Camera-labelled seismic capture (ADR 0035)
+#
+# These constants exist twice - once in device/mcu/src/config.h, where the
+# firmware uses them, and once in services/config.py, where the stream
+# assembler does. Nothing in either build would notice them drifting apart:
+# the MPU would simply reassemble the waveform against the wrong sample rate
+# and the wrong scale, and write a corpus that looks well-formed and is
+# wrong by a constant factor. A dataset is not something you re-derive later
+# by noticing it was off, so the mirror is pinned rather than trusted.
+# ---------------------------------------------------------------------------
+
+
+def test_the_seismic_batch_size_mirrors_the_mcu():
+    """Every size assumption downstream was computed against one number."""
+    assert config.SEISMIC_CAPTURE_BATCH_SAMPLES == _read_mcu_define(
+        "SEISMIC_CAPTURE_BATCH_SAMPLES"
+    ), (
+        "The MPU splits each notify at a fixed batch length and the MCU fills "
+        "it at another. A mismatch does not raise - the MPU reads `count` and "
+        "carries on - but every size assumption downstream, including the "
+        "Bridge's 256-byte budget, was computed against one number."
+    )
+
+
+def test_the_seismic_sample_rate_mirrors_the_mcu():
+    """This is what turns a sample index back into a duration."""
+    assert config.SEISMIC_SAMPLE_RATE_HZ == _read_mcu_define("SEISMIC_SAMPLE_RATE_HZ"), (
+        "This is what turns a sample index back into a duration. Wrong here "
+        "and every gait cadence in the corpus is wrong by the same ratio, "
+        "consistently enough that nothing looks suspicious."
+    )
+
+
+def test_the_seismic_window_length_mirrors_the_mcu():
+    """The record is sliced window-aligned, so both sides must mean the same window."""
+    assert config.SEISMIC_WINDOW_SAMPLES == _read_mcu_define("SEISMIC_WINDOW_SAMPLES")
+
+
+def test_the_seismic_scale_mirrors_the_mcu_adc():
+    """The batch carries raw counts, so this is the only path back to volts."""
+    assert config.SEISMIC_LSB_VOLTS == _read_mcu_define("ADS1115_LSB_VOLTS"), (
+        "Raw ADS1115 counts are stored, not volts - deliberately, because "
+        "counts are lossless and dodge the Bridge type map's float width "
+        "ambiguity. The price is that this constant is the whole calibration."
+    )
+
+
+def test_a_batch_tiles_a_window_exactly():
+    """So a batch boundary never falls inside a window boundary."""
+    assert config.SEISMIC_WINDOW_SAMPLES % config.SEISMIC_CAPTURE_BATCH_SAMPLES == 0
+
+
+def test_the_stream_outlasts_the_longest_vision_watch():
+    """The recorder slices the stream after the watch resolves, not during it.
+
+    A buffer shorter than the watch would have already evicted the approach
+    by the time the camera named the species - which is the one part of the
+    record a species-labelled corpus is for.
+    """
+    assert config.SEISMIC_STREAM_RETAIN_S > config.VISION_WATCH_EXTENDED_S, (
+        f"{config.SEISMIC_STREAM_RETAIN_S}s of buffer cannot outlast a "
+        f"{config.VISION_WATCH_EXTENDED_S}s watch."
+    )
+    assert (
+        config.SEISMIC_STREAM_CAPACITY_SAMPLES
+        == int(config.SEISMIC_STREAM_RETAIN_S * config.SEISMIC_SAMPLE_RATE_HZ)
+    )
+
+
+def test_a_recorded_gap_can_never_exceed_what_the_buffer_holds():
+    """Past that, there is nothing on both sides of the hole left to join.
+
+    If the ceiling were raised above the buffer, the assembler would record a
+    gap spanning samples it had already evicted and then hand out slices
+    claiming provenance it does not have.
+    """
+    assert (
+        config.SEISMIC_STREAM_MAX_GAP_SAMPLES <= config.SEISMIC_STREAM_CAPACITY_SAMPLES
+    )

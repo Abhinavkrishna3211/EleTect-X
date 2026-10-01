@@ -1088,3 +1088,50 @@ EVENT_VIDEO_FRAME_TIMEOUT_S = 2.0
 # enough to see wake/event/Bridge activity on the bench without extra
 # configuration.
 LOG_LEVEL = "INFO"
+
+
+# ---------------------------------------------------------------------------
+# Camera-labelled seismic capture (ADR 0035)
+# ---------------------------------------------------------------------------
+# Mirrors of device/mcu/src/config.h. Every one of these is read back out of
+# that file by tests/test_config.py rather than trusted here - three of the
+# four describe how bytes are laid out on the wire, and a silent divergence
+# would not fail, it would decode garbage that looks like ground motion.
+
+# device/mcu/src/config.h's SEISMIC_CAPTURE_BATCH_SAMPLES - how many samples
+# arrive in one report_seismic_batch notify.
+SEISMIC_CAPTURE_BATCH_SAMPLES = 32
+
+# device/mcu/src/config.h's SEISMIC_SAMPLE_RATE_HZ. Nominal, not measured:
+# GEOPHONE_WINDOW_STALE_MS is derived against a real 226.98 Hz field rate, so
+# anything that needs true elapsed time must use the arrival timestamps this
+# module records, never this number multiplied by a sample count.
+SEISMIC_SAMPLE_RATE_HZ = 250
+
+# device/mcu/src/config.h's SEISMIC_WINDOW_SAMPLES - the MCU's own STA/LTA
+# window length, kept here because the recorder slices the stream into
+# window-aligned records to match what the MCU believed at trigger time.
+SEISMIC_WINDOW_SAMPLES = 512
+
+# device/mcu/src/config.h's ADS1115_LSB_VOLTS. The batch carries the ADC's
+# raw int16 conversions, so this is the only thing that turns them back into
+# volts. Stored alongside every record for exactly that reason: a corpus of
+# counts with no scale is not re-analysable later.
+SEISMIC_LSB_VOLTS = 0.0000625
+
+# How much ground motion the stream keeps in memory. 60 s at the nominal
+# rate, which covers the 45 s extended vision watch
+# (VISION_WATCH_EXTENDED_S) end to end with room for the recorder to drain
+# it afterwards rather than racing the watch. At 2 bytes a sample this is
+# ~30 kB - negligible next to one video frame.
+SEISMIC_STREAM_RETAIN_S = 60.0
+SEISMIC_STREAM_CAPACITY_SAMPLES = int(SEISMIC_STREAM_RETAIN_S * SEISMIC_SAMPLE_RATE_HZ)
+
+# A forward jump larger than the buffer could ever hold is not a gap worth
+# recording - there is nothing on either side of it to join. It is the MCU
+# having restarted (its sample counter resets to 0) or the stream having
+# been off for minutes. Either way the buffer is dropped and collection
+# starts clean, because a "gap" of four billion samples in a record is
+# noise, not provenance.
+SEISMIC_STREAM_MAX_GAP_SAMPLES = SEISMIC_STREAM_CAPACITY_SAMPLES
+

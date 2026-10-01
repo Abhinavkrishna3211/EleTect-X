@@ -217,6 +217,63 @@
 #define GEOPHONE_WINDOW_STALE_MS 3384
 
 // ---------------------------------------------------------------------------
+// Camera-labelled seismic capture (ADR 0035)
+// ---------------------------------------------------------------------------
+// When 1: geophone.cpp streams every accepted ADC sample to the MPU in
+// batches over Bridge.notify("report_seismic_batch") (seismic_capture.h), so
+// the MPU can store the raw ground motion and let the camera label it
+// afterwards. This is the dataset the species-specific footfall model was
+// deferred for want of - CONTEXT.md 3 - and it is collected on every vision
+// watch, including the sub-threshold ones, because an animal too light to
+// trigger STA/LTA is itself the training signal.
+//
+// Distinct from SEISMIC_DEBUG_STREAM_RAW above, which is bench tooling: that
+// one decimates to a human-watchable rate and sends one float per notify for
+// a live plot. This one is lossless, batched, carries the sample index so
+// gaps are detectable, and is meant to run unattended for whole nights.
+//
+// Left at 0 until a live session registers the MPU-side handler. The MPU can
+// only receive this once device/mpu/main.py's Bridge.provide() for it is
+// uncommented, and that is one registration per hardware session under
+// docs/DEVICE_DEVELOPMENT_WORKFLOW.md 3 - the same gate get_system_state and
+// report_acoustic_event are already waiting behind. Streaming into a handler
+// that is not registered would spend link budget to produce
+// "method not available" and nothing else.
+//
+// Guarded so platformio.ini's native_seismic_capture env (and config_local.h)
+// can force it on. That env exists for one reason: at 0 the Bridge.notify()
+// call in geophone.cpp is not compiled at all, so without a build that sets
+// this the only line that actually puts a batch on the wire would never see
+// a compiler.
+#ifndef SEISMIC_CAPTURE_ENABLED
+#define SEISMIC_CAPTURE_ENABLED 0
+#endif
+
+// Samples per Bridge.notify(). Three constraints meet here:
+//
+//  - It must fit BRIDGE_MAX_MESSAGE_BYTES, which seismic_capture.h's
+//    seismic_capture_encoded_bytes() static_asserts. At 32 the worst-case
+//    notify is 133 of the 256 bytes available.
+//  - It must not crowd the actuator calls off lpuart1. 32 samples is 128 ms
+//    at SEISMIC_SAMPLE_RATE_HZ, so ~7.8 notifies/s at 133 B = ~1.0 kB/s, or
+//    about 9% of the 115200 bps link - leaving the drive_horn/drive_led acks
+//    mid-encounter the headroom they need.
+//  - It should divide SEISMIC_WINDOW_SAMPLES evenly (16 batches per window),
+//    so a batch boundary never falls inside a window boundary and the MPU's
+//    stitching has one alignment case instead of two.
+//
+// 64 also fits the first two (227 B worst case, ~5% of the link) and halves
+// the notify count, so it is the tempting choice. It is not taken, because
+// the two numbers above are *arithmetic*, not measurements: nothing in this
+// repo has ever encoded a Bridge message and counted the bytes, and the
+// penalty for being wrong is not an error - an oversized notify is dropped
+// silently, so a few bytes of drift would present as a geophone that simply
+// stopped reporting, discovered at the bench weeks later with the nights of
+// data already gone. 32 buys 123 bytes of margin for 1% more link, which is
+// the right side of that trade until someone measures a real frame.
+#define SEISMIC_CAPTURE_BATCH_SAMPLES 32
+
+// ---------------------------------------------------------------------------
 // Manual fire-test harness - MUST be 0 before any field sync
 // ---------------------------------------------------------------------------
 // Serial-command-triggered single fire of horn/LED/IR for hardware bring-up
@@ -939,5 +996,16 @@
 // which unpacks correctly on this library version. Mirrors device/mpu/
 // services/config.py's SCHEMA_VERSION; both sides must bump together.
 #define BRIDGE_SCHEMA_VERSION 128
+
+// Hard limit the arduino-router enforces on a single Bridge message, from
+// Arduino's own Bridge reference (docs/research/platform/
+// app-lab-flash-and-routerbridge.md). This is not a tunable: the router
+// applies it, and the two failure modes are asymmetric and both bad -
+// Bridge.notify() drops an oversized message *silently*, while the Python
+// Bridge.call() raises ValueError. Anything that builds a payload whose size
+// depends on a constant must check itself against this at compile time
+// rather than discover it in the field; seismic_capture.h is the worked
+// example.
+#define BRIDGE_MAX_MESSAGE_BYTES 256
 
 #endif  // CONFIG_H

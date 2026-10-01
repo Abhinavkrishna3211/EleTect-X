@@ -76,12 +76,16 @@ def _parse_schema_functions() -> dict[str, list[str]]:
     return functions
 
 
-# The eight real Bridge functions schema.md defines. Anchoring the parser to
+# The nine real Bridge functions schema.md defines. Anchoring the parser to
 # this explicit set (rather than "any backticked-name table row") keeps a
 # same-side contract table row (e.g. read_seismic_window) from ever being
-# mistaken for a Bridge function.
+# mistaken for a Bridge function. read_seismic_window is the live example:
+# report_seismic_batch now pushes that window's samples over the Bridge,
+# but read_seismic_window itself stayed MCU-internal, so its row below the
+# tables must keep being ignored.
 KNOWN_BRIDGE_FUNCTIONS = {
     "report_footfall_event",
+    "report_seismic_batch",
     "report_acoustic_event",
     "report_system_status",
     "drive_horn",
@@ -94,7 +98,7 @@ KNOWN_BRIDGE_FUNCTIONS = {
 SCHEMA_FUNCTIONS = _parse_schema_functions()
 
 
-def test_schema_parse_found_all_eight_functions():
+def test_schema_parse_found_every_bridge_function():
     """Sanity-check the parser itself before trusting it to check anything else."""
     assert set(SCHEMA_FUNCTIONS) == KNOWN_BRIDGE_FUNCTIONS, (
         f"Expected to parse exactly {sorted(KNOWN_BRIDGE_FUNCTIONS)} out of "
@@ -146,6 +150,7 @@ def test_no_extra_bridge_shaped_stubs():
 
 EXPECTED_RETURN_ANNOTATIONS = {
     "report_footfall_event": None,
+    "report_seismic_batch": None,
     "report_acoustic_event": None,
     "report_system_status": None,
     "drive_horn": bool,

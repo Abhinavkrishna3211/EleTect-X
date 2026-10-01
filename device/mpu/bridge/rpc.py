@@ -99,6 +99,53 @@ def report_footfall_event(
     raise NotImplementedError
 
 
+def report_seismic_batch(
+    schema_version: int,
+    first_sample_index: int,
+    count: int,
+    samples: list[int],
+    geophone_ok: bool,
+) -> None:
+    """Handle one batch of raw ground-motion samples (ADR 0035).
+
+    Bridge target: `notify`. Pushed continuously by the MCU's geophone
+    service while SEISMIC_CAPTURE_ENABLED is set, so that the camera can
+    label the waveform minutes later and build the species-specific
+    footfall dataset the MCU-side model was deferred for want of.
+
+    This is a push rather than a `read_seismic_window()` pull because the
+    Bridge caps a message at 256 bytes (BRIDGE_MAX_MESSAGE_BYTES) and a
+    512-sample window is roughly 2.5 kB. Chunking a pull would fit, but it
+    would put a dozen blocking round trips per second onto the link that
+    `drive_horn`/`drive_led` need an ack from mid-encounter. A notify never
+    blocks the MCU's reflex loop, which is what makes it safe to keep
+    recording straight through a deterrence fire.
+
+    Args:
+        schema_version: Wire schema version; must equal SCHEMA_VERSION.
+        first_sample_index: Position of `samples[0]` in
+            `geophone_sample_count()`'s monotonic sequence. uint32, and it
+            wraps - `geophone.h` documents the counter as never saturating.
+            This is what lets the MPU join two batches arithmetically and
+            name a missing one instead of splicing across it.
+        count: How many leading entries of `samples` are real.
+        samples: Fixed-length array of SEISMIC_CAPTURE_BATCH_SAMPLES raw
+            ADS1115 conversions, zero-padded past `count`. Counts, not
+            volts: they are the ADC's native output, lossless, and they
+            sidestep the float32/float64 width ambiguity in the Bridge's
+            type map, which a size budget this tight cannot absorb. Scale
+            with ADS1115_LSB_VOLTS.
+        geophone_ok: False if the sensor was unhealthy for *any* sample in
+            the batch - a sensor that recovers mid-batch must not relabel
+            the stale samples in front of it as good.
+
+    Returns:
+        None - this is a notify target, the MCU does not read a return
+        value.
+    """
+    raise NotImplementedError
+
+
 def report_acoustic_event(
     schema_version: int,
     class_label: AcousticClass,

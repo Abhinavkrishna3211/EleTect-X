@@ -5,12 +5,18 @@
 #include "Arduino.h"
 #include "Wire.h"
 
-#if SEISMIC_DEBUG_STREAM_RAW
-// Bench-only dependency, compiled out entirely at SEISMIC_DEBUG_STREAM_RAW=0
-// - arduino-cli's library-discovery preprocess pass strips this #include
-// along with everything else in this #if, so the field build never links
-// Bridge code. See config.h for why this exists.
+#if SEISMIC_DEBUG_STREAM_RAW || SEISMIC_CAPTURE_ENABLED
+// Optional dependency, compiled out entirely when both flags are 0 -
+// arduino-cli's library-discovery preprocess pass strips this #include along
+// with everything else in this #if, so a build with neither flag never links
+// Bridge code. See config.h for why this exists. Two independent consumers
+// share it: SEISMIC_DEBUG_STREAM_RAW's live bench plot, and
+// SEISMIC_CAPTURE_ENABLED's batched dataset stream.
 #include "Arduino_RouterBridge.h"
+#endif
+
+#if SEISMIC_CAPTURE_ENABLED
+#include "seismic_capture.h"
 #endif
 
 namespace {
@@ -29,6 +35,13 @@ uint32_t g_last_poll_ms = 0;   // millis() at last *accepted* ADC poll attempt
 // for the life of the device.
 uint32_t g_sample_count = 0;
 bool g_ok = false;
+
+#if SEISMIC_CAPTURE_ENABLED
+// Batch under construction for the MPU-bound dataset stream. Zero-initialized
+// at file scope, which is seismic_capture_reset()'s post-state, so no init
+// call is needed before the first push.
+seismic_capture_state g_capture = {};
+#endif
 
 // Writes the ADS1115 config register, starting a continuous conversion at the
 // settings config.h defines. Returns false if the I2C transaction did not
@@ -202,6 +215,26 @@ void geophone_service() {
   ++g_sample_count;
   g_last_fill_ms = millis();
   g_ok = true;
+
+#if SEISMIC_CAPTURE_ENABLED
+  // Dataset stream (ADR 0035). Placed after g_sample_count and g_ok are
+  // current so the batch is stamped with this sample's own index and this
+  // sample's own health, not the previous one's. The index passed is
+  // g_sample_count - 1 because the increment above has already run and this
+  // sample is the one it counted.
+  //
+  // Nothing here can block the reflex loop: seismic_capture_push() is pure
+  // arithmetic over a fixed buffer, and Bridge.notify() is fire-and-forget
+  // (Arduino_RouterBridge's bridge.h takes a write mutex and returns after a
+  // one-way send - it does not wait on an MPU reply the way Bridge.call()
+  // does). Worst case this costs one mutex acquisition every
+  // SEISMIC_CAPTURE_BATCH_SAMPLES samples, ~4 times a second.
+  seismic_batch batch;
+  if (seismic_capture_push(&g_capture, raw, g_sample_count - 1, g_ok, &batch)) {
+    Bridge.notify("report_seismic_batch", static_cast<uint8_t>(BRIDGE_SCHEMA_VERSION),
+                  batch.first_sample_index, batch.count, batch.samples, batch.geophone_ok);
+  }
+#endif
 }
 
 void read_seismic_window(float out[SEISMIC_WINDOW_SAMPLES]) {

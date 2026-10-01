@@ -35,6 +35,14 @@ actuator registrations (device/mcu/src/main.cpp). Do not uncomment more
 than one per test cycle; confirm the existing registrations still work
 after each addition before moving to the next.
 
+`_on_seismic_batch` (ADR 0035) is the second function waiting behind that
+same gate, and it is further from running than `_on_acoustic_event` is:
+its producer, the MCU's `SEISMIC_CAPTURE_ENABLED`, is also 0, so neither
+half of that path has ever executed on hardware. Both have to come up in
+one session, and the Bridge drops an oversized notify silently rather than
+erroring, so the first check after enabling them is whether batches arrive
+at all.
+
 Same UNVERIFIED caveat this file has always carried: it is not confirmed
 whether App Lab's own runtime keeps the process alive after registration
 alone or whether the script itself must block - blocking is the safe
@@ -52,6 +60,7 @@ from comms.lora_uplink import LoraUplink, direct_alert_event, event_from_footfal
 from perception.camera import Camera
 from perception.detector import HttpVisionDetector
 from perception.night import frames_are_night
+from perception.seismic_stream import SeismicStream
 from perception.storage import clear_orphaned_scratch, save_burst
 from perception.video import EventVideoRecorder
 from services import config, reflex_loop
@@ -268,6 +277,48 @@ def _on_footfall_event(
     _run_footfall_event(schema_version, probability, sta_lta_ratio, feature_vector)
 
 
+# The MCU's ground-motion stream, reassembled from its batched notifies
+# (ADR 0035). Built unconditionally even though nothing feeds it yet: it is
+# ~30 kB of list and holds no handle on anything, and a buffer that only
+# exists once the registration below is uncommented is a buffer whose first
+# run happens on the one night it matters.
+_seismic_stream = SeismicStream()
+
+
+def _on_seismic_batch(
+    schema_version: int,
+    first_sample_index: int,
+    count: int,
+    samples: list[int],
+    geophone_ok: bool,
+) -> None:
+    """Bridge.provide() adapter for report_seismic_batch - see schema.md.
+
+    Deliberately does almost nothing. This runs on the Bridge's RPC thread
+    at roughly 8 Hz, and that thread also carries the drive_horn/drive_led
+    acks the reflex loop blocks on mid-encounter; anything slow here shows
+    up as deterrence latency. SeismicStream.push() is a bounded copy under
+    a lock with no I/O, and it swallows a malformed batch rather than
+    raising, because an exception on this thread is a dropped handler, not
+    a visible failure.
+
+    A mismatched schema_version is logged and the batch is kept, matching
+    what every MCU-side handler does in the other direction
+    (device/mcu/src/bridge_handlers.cpp). The alternative - discarding the
+    ground motion because a version byte disagrees - throws away the one
+    thing on this path that cannot be recovered later.
+    """
+    if schema_version != config.SCHEMA_VERSION:
+        logger.warning(
+            "report_seismic_batch schema mismatch: got %s, expected %s - keeping the batch",
+            schema_version,
+            config.SCHEMA_VERSION,
+        )
+    _seismic_stream.push(
+        first_sample_index, count, samples, geophone_ok, time.monotonic()
+    )
+
+
 def _start_vision_event(confidence: float) -> reflex_loop.FootfallOutcome | None:
     """Start a full vision-gated event from an acoustic elephant call.
 
@@ -358,6 +409,14 @@ _lora_uplink.start()
 # the other.
 Bridge.provide("report_footfall_event", _on_footfall_event)
 # Bridge.provide("report_acoustic_event", _on_acoustic_event)
+# Bridge.provide("report_seismic_batch", _on_seismic_batch)
+#
+# report_seismic_batch has a second gate on top of that one: its MCU half
+# (SEISMIC_CAPTURE_ENABLED in device/mcu/src/config.h) is 0, so nothing is
+# being sent for this to receive. Both halves have to be turned on in the
+# same hardware session, and the Bridge drops an oversized notify silently,
+# so the first thing to check afterwards is that batches are arriving at
+# all - not that they look right.
 
 # UNVERIFIED: whether App Lab's own runtime keeps this process alive after
 # registration, or whether the script itself must block. Blocking here is
