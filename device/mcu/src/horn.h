@@ -38,9 +38,11 @@ struct horn_ack {
 void horn_init();
 
 // Runs the fire/stop sequence documented at the top of horn.cpp, subject to
-// rule_gate_apply()'s clamp-and-cooldown. Blocks for HORN_AMP_ENABLE_DELAY_MS
-// (a bounded, documented delay - not an unbounded/hardware wait) plus the
-// resolved duration; the reflex loop calling this must expect that.
+// rule_gate_apply()'s clamp-and-cooldown. Blocks for four
+// DFPLAYER_AT_COMMAND_GAP_MS send gaps plus HORN_AMP_ENABLE_DELAY_MS plus the
+// resolved duration - all bounded, documented delays, not unbounded hardware
+// waits. At the HORN_BURST_MAX_MS clamp that is ~3.8 s, which is the figure
+// the reflex loop calling this must budget for.
 horn_ack drive_horn(horn_request req, uint32_t now_ms);
 
 // Bench-only debug helper: runs the identical fire/stop sequence as

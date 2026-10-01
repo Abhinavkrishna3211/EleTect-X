@@ -616,29 +616,27 @@
 // (KNOWN_GAPS).
 #define HORN_COOLDOWN_MS 10000
 
-// A single HORN_BURST_MAX_MS (3 s) roar was field-tested 7 Sept against a
-// real elephant/wild-boar encounter and judged an insufficient deterrent
-// stimulus on the spot - one short burst did not read as convincingly as
-// multiple. horn_fire_sequence() now replays the track HORN_REPEAT_COUNT
-// times per drive_horn() call, each repeat re-triggering AT+PLAYNUM (see
-// horn.cpp) rather than looping playback on the DFPlayer itself, with
-// HORN_REPEAT_GAP_MS of amp-off silence between repeats so they read as
-// distinct roars and not one long one.
+// Field record, 7 Sept: a single HORN_BURST_MAX_MS (3 s) roar was tested
+// against a real elephant/wild-boar encounter and judged an insufficient
+// deterrent stimulus on the spot - one short burst did not read as
+// convincingly as several would. A three-roar replay was specified in
+// response (re-trigger AT+PLAYNUM per roar with amp-off silence between, so
+// they read as distinct roars rather than one long one) and HORN_REPEAT_COUNT
+// / HORN_REPEAT_GAP_MS were added here for it.
 //
-// Trade-off, not yet field-validated (KNOWN_GAPS): this multiplies the
-// single-fire stall horn_fire_sequence() already imposes on the MCU's
-// single-threaded loop() (starving geophone_service()/lora_service() for the
-// duration). At the worst case - HORN_BURST_MAX_MS clamp hit on every
-// repeat - three repeats at 3 s plus per-repeat AT-command/amp-enable
-// overhead (4 AT sends at DFPLAYER_AT_COMMAND_GAP_MS each, plus
-// HORN_AMP_ENABLE_DELAY_MS - about 0.8 s) plus two HORN_REPEAT_GAP_MS gaps
-// runs to roughly 12.2 s: 3*(0.8+3.0) + 2*0.4. This is now the MCU's
-// worst-case single-fire stall, longer than the LED path's - see
-// LED_BURST_MAX_MS below, deliberately raised past it. The gate's
-// cooldown/g_last_fire_ms bookkeeping is unaffected - one repeated fire is
-// still exactly one drive_horn() call for cooldown purposes, same as before.
-#define HORN_REPEAT_COUNT 3
-#define HORN_REPEAT_GAP_MS 400
+// It was never implemented. horn_fire_sequence() (horn.cpp) plays the track
+// exactly once per drive_horn() call and has no repeat loop, so the two
+// constants had no reader and have been removed rather than left looking
+// live. The field finding itself still stands and is still unaddressed
+// (KNOWN_GAPS) - whoever picks it up should treat the paragraph above as the
+// requirement and note that it changes the MCU's worst-case single-fire stall
+// by roughly 3x, which is the reason it is not a one-line change.
+//
+// The real worst-case stall today is ~3.8 s: 4 AT sends at
+// DFPLAYER_AT_COMMAND_GAP_MS (200 ms) + HORN_AMP_ENABLE_DELAY_MS (600 ms) +
+// HORN_BURST_MAX_MS (3000 ms), all of it inside one cooperatively scheduled
+// loop() iteration, so geophone_service() and lora_service() are starved for
+// that window.
 
 // Software gain ceiling, as a percentage of the channel's full output. ADR
 // 0003 limits delivered power to roughly 6-8 W of the channel's ~12 W at the
@@ -663,12 +661,20 @@
 // HORN_COOLDOWN_MS's 6 Sept reduction, same deterrence-responsiveness trade,
 // not yet field-validated (KNOWN_GAPS).
 //
-// Raised from 10000 to 12500 on 7 Sept, same day as HORN_REPEAT_COUNT above:
-// field feedback wanted the light illusion running "as long as the sound
-// gets played," and a fixed 10 s cap would go dark before the horn's new
-// ~12.2 s worst-case multi-roar fire finishes. 12500 clears that worst case
-// with a little headroom; re-check this bound if HORN_REPEAT_COUNT,
-// HORN_REPEAT_GAP_MS, or HORN_BURST_MAX_MS change. Tier 2/3 already select
+// Raised from 10000 to 12500 on 7 Sept, alongside the three-roar horn replay
+// specified the same day: field feedback wanted the light illusion running
+// "as long as the sound gets played," and a fixed 10 s cap would have gone
+// dark before a ~12.2 s multi-roar fire finished.
+//
+// That replay was never implemented (see the horn section above), so this cap
+// is currently sized against a fire that cannot happen. The horn's real
+// worst case is ~3.8 s, and the LED therefore outruns it by ~8.7 s. Left at
+// 12500 deliberately: shortening it is a change to deterrence behaviour on a
+// node heading for a real deployment, not a comment fix, and a light that
+// runs longer than the horn is the safe direction to be wrong in - it is the
+// cheaper and less aversive of the two actuators (ADR 0014). Re-check this
+// bound if the replay is implemented or HORN_BURST_MAX_MS changes.
+// Tier 2/3 already select
 // led_pattern_id 4/5 (kSweep / kPulseBothSync, cognition/config.py) - the
 // antiphase dual-wing "apparent-movement cue" ADR 0014 E.1 calls out - so the
 // movement/predator-presence illusion this is meant to run alongside is
@@ -876,9 +882,16 @@
 // the uplink (CONTEXT.md 4).
 #define LORA_JOIN_MAX_RETRIES 5
 
-// First retry waits 5 s, then doubles: 5, 10, 20, 40, 80 s. Backoff rather
-// than a fixed interval so a node that comes up while the gateway is down does
-// not hammer the channel.
+// Multiplied by the retry count, so the waits are linear rather than
+// exponential: mac.cpp computes LORA_JOIN_BACKOFF_BASE_MS * (g_retry_count +
+// 1), giving 5, 10, 15, 20, 25 s across LORA_JOIN_MAX_RETRIES - about 75 s to
+// spend the budget. Backoff rather than a fixed interval so a node that comes
+// up while the gateway is down does not hammer the channel; linear rather
+// than doubling because the point is to stop retrying at a fixed cadence, not
+// to reach long waits, and 80 s of silence on the fifth attempt would delay
+// the retry-from-the-top path in lora_service() for no benefit on a node that
+// detects and deters locally regardless (CONTEXT.md 4). The comment here
+// previously described doubling, which the code has never done.
 #define LORA_JOIN_BACKOFF_BASE_MS 5000
 
 // Longest single line the E5 sends back. Fixed buffer, no dynamic allocation

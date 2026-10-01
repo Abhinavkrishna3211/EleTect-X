@@ -60,8 +60,12 @@ void fire_test_init();
 // waiting. Non-blocking when Serial has nothing available. When a byte
 // resolves to kHorn/kLedWingLeft/kLedWingRight/kIr, blocks for that actuator's own
 // resolved fire duration because it calls the real driver function directly
-// (drive_horn/drive_led/pulse_ir - up to ~3.15s in the horn case, see
-// horn.h/led.h/ir.h's own blocking notes); geophone_service()/lora_service()
+// (drive_horn/drive_led/pulse_ir - up to ~3.8s in the horn case: the
+// HORN_BURST_MAX_MS clamp plus HORN_AMP_ENABLE_DELAY_MS plus the four
+// DFPLAYER_AT_COMMAND_GAP_MS send gaps; the harness's own
+// FIRE_TEST_HORN_DURATION_MS request resolves to ~3.3s, but the bound a
+// caller must budget for is the driver's. See horn.h/led.h/ir.h's own
+// blocking notes); geophone_service()/lora_service()
 // in the same loop() iteration are starved for that window, same as any
 // other actuator fire. kDfplayerAt blocks up to FIRE_TEST_AT_LINE_TIMEOUT_MS
 // waiting for the human to finish typing a command line, then up to

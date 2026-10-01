@@ -34,8 +34,11 @@
 // left the wrong playmode latched (as "configured") for the rest of the
 // session. Observed on the bench as clips auto-advancing into each other
 // (Stage C) instead of playing one and stopping. Sending both AT commands on
-// every fire costs two more UART round-trips inside HORN_AMP_ENABLE_DELAY_MS's
-// existing budget and removes the fragile assumption entirely. Play mode also
+// every fire costs two more UART round-trips - 2 * DFPLAYER_AT_COMMAND_GAP_MS,
+// added to the fire sequence rather than absorbed inside
+// HORN_AMP_ENABLE_DELAY_MS, since dfplayer_send() settles before the
+// amp-enable wait starts - and removes the fragile assumption entirely. 100 ms
+// on a ~3.8 s worst-case fire. Play mode also
 // does not reliably persist across a power cycle on its own (DFRobot forum
 // "DFPlayer Pro Playmode Resets"), which is the other reason not to rely on a
 // single send ever sticking.
