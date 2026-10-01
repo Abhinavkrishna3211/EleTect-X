@@ -222,6 +222,7 @@ fire-test harness and seismic debug-stream flags.
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import random
@@ -1504,6 +1505,59 @@ def _deterrence_species(
     return services_config.deterrence_content_for(confirmed)
 
 
+# One footfall event at a time, for the whole process.
+#
+# The node has one USB camera and one set of actuators, and an event owns
+# both for as long as it runs - up to VISION_WATCH_EXTENDED_S of watch plus
+# the horn's ~3.8s and the retreat tail. Two events overlapping is not a
+# busy node: it is two readers on one /dev/video node (perception/camera.py
+# is explicitly "one Camera instance per device, used from one thread") and
+# two horn bursts fighting over the same UART share.
+#
+# Two threads can arrive here today - the Bridge callback serving
+# report_footfall_event, and, under HOME_TEST_MODE, home_test.py's
+# deterrence worker - and ADR 0033's acoustic path will be a third.
+EVENT_LOCK = threading.Lock()
+
+
+def _one_event_at_a_time(fn):
+    """Drop, never queue, an event that arrives while another one owns the hardware.
+
+    Dropped rather than queued because a queued event fires late at an
+    animal that has already gone, and because the overlapping trigger is
+    almost always the *same* animal - the event already running is
+    watching it, and will deter it. Queueing would turn one encounter into
+    two responses several minutes apart, which is both wasted power and a
+    worse deterrent: ADR 0017's whole escalation design assumes one
+    response per encounter.
+
+    Non-blocking for the same reason. Waiting on a 45s watch inside a
+    Bridge callback would hold that callback open past
+    BRIDGE_CALL_TIMEOUT_S and look, from the MCU's side, like an MPU that
+    had stopped answering.
+
+    The drop is logged at warning, not info: it is rare by design, and if
+    it stops being rare that is a finding about the node's trigger rate,
+    not noise to be filtered out.
+    """
+
+    @functools.wraps(fn)
+    def guarded(*args, **kwargs):
+        if not EVENT_LOCK.acquire(blocking=False):
+            logger.warning(
+                "footfall event dropped: another event already owns the camera "
+                "and actuators - not queued, see reflex_loop._one_event_at_a_time"
+            )
+            return None
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            EVENT_LOCK.release()
+
+    return guarded
+
+
+@_one_event_at_a_time
 def handle_footfall_event(
     schema_version: int,
     probability: float,
@@ -1533,7 +1587,7 @@ def handle_footfall_event(
     rng: random.Random = _DEFAULT_RNG,
     household_proximity: bool = services_config.NODE_HOUSEHOLD_PROXIMITY,
     target_labels: tuple[str, ...] = VISION_TARGET_LABELS,
-) -> FootfallOutcome:
+) -> FootfallOutcome | None:
     """Sense -> fuse -> decide -> actuate for one report_footfall_event notify.
 
     Precondition: none - schema_version mismatches are logged, not raised,
@@ -1699,7 +1753,10 @@ def handle_footfall_event(
     Returns:
         A FootfallOutcome carrying the fusion result, the decision, the
         selected action and its context, the three actuator acks, and this
-        event's capture outcome.
+        event's capture outcome - or None if another event already owned
+        the camera and the actuators, in which case nothing here ran at
+        all: no trigger recorded, no watch, no uplink. See
+        _one_event_at_a_time for why that is a drop rather than a queue.
     """
     if schema_version != services_config.SCHEMA_VERSION:
         logger.warning(

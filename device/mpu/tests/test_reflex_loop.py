@@ -29,6 +29,7 @@ turns it back on deliberately.
 
 import dataclasses
 import math
+import threading
 import time
 from pathlib import Path
 
@@ -2874,6 +2875,88 @@ def test_a_held_event_still_records_its_trigger_for_habituation():
     assert later.species_repeat_count == 0
     assert later.action.tier is Tier.TIER_1
     experience.close()
+
+
+# --- one event at a time -----------------------------------------------------
+
+
+class _BlockingVisionDetect:
+    """Holds an event open inside handle_footfall_event until released.
+
+    The only way to test the mutex is to have two events genuinely
+    overlap, and the only way to do that deterministically is to park one
+    of them somewhere in the middle. The vision check is the right place:
+    it is where a real event spends most of its time, and it is already an
+    injected dependency, so nothing in the module under test has to change
+    shape to be tested.
+    """
+
+    def __init__(self):
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def __call__(self, images):
+        self.entered.set()
+        assert self.release.wait(timeout=5.0), "test deadlock: never released"
+        return [[] for _ in images]
+
+
+def test_a_second_event_is_dropped_rather_than_queued():
+    """Two readers on one /dev/video node, which is the failure this prevents.
+
+    Asserts the drop is total, not partial: the second event records no
+    trigger, opens no camera and fires nothing. A half-run event would be
+    worse than either outcome - it would move the habituation window for
+    an encounter the node never actually responded to.
+    """
+    blocker = _BlockingVisionDetect()
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    first: list = []
+
+    def run_first() -> None:
+        outcome, _, _ = _fire(0.9, experience=experience, detect_vision=blocker)
+        first.append(outcome)
+
+    worker = threading.Thread(target=run_first)
+    worker.start()
+    try:
+        assert blocker.entered.wait(timeout=5.0)
+
+        log: list = []
+        second, _, _ = _fire(0.9, call_log=log, experience=experience)
+    finally:
+        blocker.release.set()
+        worker.join(timeout=5.0)
+
+    assert not worker.is_alive()
+    assert second is None
+    assert log == []
+    # One trigger in the store, not two: the dropped event left no trace.
+    assert first[0] is not None
+    assert first[0].repeat_count == 0
+    assert experience.repeat_count(time.time() + 1.0, 600.0, "") == 1
+    experience.close()
+
+
+def test_the_slot_is_released_when_an_event_raises():
+    """A node that drops every event after one failure is worse than one that crashes.
+
+    handle_footfall_event() swallows actuator and camera faults by design,
+    but not a store fault - and whatever escapes, the next event has to be
+    able to run.
+    """
+
+    class _ExplodingStore:
+        def record_trigger(self, event_ts_s, window_s):
+            raise RuntimeError("disk gone")
+
+    with pytest.raises(RuntimeError):
+        _fire(0.9, experience=_ExplodingStore())
+
+    assert not reflex_loop.EVENT_LOCK.locked()
+    # ... and the next event really does run, rather than only looking free.
+    outcome, _, _ = _fire(0.9)
+    assert outcome is not None
 
 
 # --- per-species attribution (ADR 0034) --------------------------------------

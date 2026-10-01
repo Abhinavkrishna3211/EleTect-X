@@ -226,6 +226,12 @@ def _on_footfall_event(
         experience=_experience,
         event_video=_event_video,
     )
+    if outcome is None:
+        # Another event already owned the camera and the actuators, so
+        # this notify ran nothing at all - no trigger recorded, no watch,
+        # no deterrence. There is no outcome to put on air, and inventing
+        # one would tell a ranger a node responded when it did not.
+        return
     _lora_uplink.submit(
         event_from_footfall(
             outcome,
