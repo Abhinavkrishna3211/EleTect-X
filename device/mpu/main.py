@@ -48,7 +48,7 @@ from arduino.app_utils import Bridge
 
 from bridge.rpc import AcousticClass
 from cognition.experience import ExperienceStore
-from comms.lora_uplink import LoraUplink, event_from_footfall, gunshot_event
+from comms.lora_uplink import LoraUplink, direct_alert_event, event_from_footfall
 from perception.camera import Camera
 from perception.detector import HttpVisionDetector
 from perception.night import frames_are_night
@@ -250,8 +250,9 @@ def _on_acoustic_event(
 
     Discards the returned AcousticOutcome: a notify has no return channel,
     so the outcome exists for tests and for a future caller that wants to
-    branch on the routing, not for this adapter. A gunshot's uplink is
-    already sent from inside the handler, through send_lora_alert.
+    branch on the routing, not for this adapter. A direct alert's uplink -
+    gunshot or chainsaw - is already sent from inside the handler, through
+    send_lora_alert.
     """
     reflex_loop.handle_acoustic_event(
         schema_version,
@@ -262,15 +263,27 @@ def _on_acoustic_event(
     )
 
 
-def _send_lora_alert(schema_version: int, confidence: float, capture_ref: int) -> bool:
-    """Gunshot branch's uplink: a GUNSHOT event on the LoRa uplink queue.
+def _send_lora_alert(
+    schema_version: int, acoustic_class: str, confidence: float, capture_ref: int
+) -> bool:
+    """Direct-alert branch's uplink: a GUNSHOT or CHAINSAW event on the queue.
+
+    The class comes from the handler rather than being decided here, so
+    there is exactly one place that says which acoustic classes alert
+    directly (reflex_loop._DIRECT_ALERT_ACOUSTIC_CLASSES) and exactly one
+    that says which EventClass each becomes (lora_uplink's own table). An
+    unroutable class raises out of direct_alert_event rather than becoming a
+    silent UNCONFIRMED frame, which would read to an officer as a confirmed
+    sighting of nothing.
 
     Returns whether the event was queued on this side; the radio reports
     delivery on its own.
     """
     del schema_version  # the uplink sends config.SCHEMA_VERSION itself
     return _lora_uplink.submit(
-        gunshot_event(confidence, capture_ref, safe_mode=reflex_loop.SAFE_MODE)
+        direct_alert_event(
+            acoustic_class, confidence, capture_ref, safe_mode=reflex_loop.SAFE_MODE
+        )
     )
 
 

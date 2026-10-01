@@ -148,16 +148,16 @@ by design, not oversight:
   animal-welfare/battery tradeoff ADR 0003 has not signed off on) is built.
   See docs/KNOWN_GAPS.md.
 - **Acoustic**: handle_acoustic_event() now implements ADR 0007 5's
-  routing split, so acoustic does reach fuse() - but never on the footfall
-  path above, which still passes it as unavailable because no acoustic
-  reading is in hand at that moment. Elephant_call/chainsaw convert
-  to log-odds and fuse as the single ACOUSTIC modality; gunshot never
-  touches fuse() at all (it is an anti-poaching alert, not evidence that
-  an elephant is present); ambient fuses as unavailable. The gunshot
-  branch calls the injected send_lora_alert when safe_mode is False, and
-  logs a dry-run line instead when it is True - the callable itself is a
-  scaffolded Bridge.call stub with no real transport behind it yet, since
-  comms/ is empty and the LoRa module is not joining, so its ack means
+  routing split as ADR 0033 amends it, so acoustic does reach fuse() - but
+  never on the footfall path above, which still passes it as unavailable
+  because no acoustic reading is in hand at that moment. Elephant_call
+  converts to log-odds and fuses as the single ACOUSTIC modality; gunshot
+  and chainsaw never touch fuse() at all (each is an alert about people,
+  not evidence that an elephant is present); ambient fuses as unavailable.
+  The direct-alert branch calls the injected send_lora_alert when safe_mode
+  is False, and logs a dry-run line instead when it is True - that callable
+  is bound to the LoRa uplink queue with no real transport behind it yet,
+  since the LoRa module is not joining, so its ack means
   "queued/logged", never "delivered" (see docs/KNOWN_GAPS.md). Two
   caveats stand: no acoustic classifier runs on the MCU yet, so nothing
   calls this path in the field, and fuse() is stateless per event, so an
@@ -380,10 +380,24 @@ class NightDecideFn(Protocol):
 
 
 class SendLoraAlertFn(Protocol):
-    """Callable shape matching bridge.rpc.send_lora_alert's real signature."""
+    """Callable shape for the direct-alert uplink, injected into this module.
 
-    def __call__(self, schema_version: int, confidence: float, capture_ref: int) -> bool:
-        """Request a direct gunshot alert uplink.
+    Not a Bridge RPC: there is no send_lora_alert in bridge/rpc.py and never
+    was. main.py binds this to a function that puts a LoraEvent on the
+    uplink queue, which is why schema_version is accepted and ignored there
+    - the uplink stamps its own.
+    """
+
+    def __call__(
+        self, schema_version: int, acoustic_class: str, confidence: float, capture_ref: int
+    ) -> bool:
+        """Request a direct officer alert uplink for one acoustic class.
+
+        acoustic_class is a bridge.rpc.AcousticClass *value* rather than the
+        enum, so this protocol stays a plain shape with no import of its
+        own. It is carried because the two classes on this path mean
+        entirely different things to the officer who receives them, and the
+        uplink has a distinct EventClass for each (ADR 0033).
 
         ack means queued/logged on the MCU, not delivered - no real LoRa
         transport exists yet (module not joining, see docs/KNOWN_GAPS.md).
@@ -2283,21 +2297,35 @@ def handle_footfall_event(
 
 
 # Which AcousticClass values are evidence toward "is an elephant present".
-# They feed one shared WEIGHT_ACOUSTIC/BASELINE_ACOUSTIC pair in
-# cognition/config.py rather than one weight each, per ADR 0007 5. The other
-# two classes are each excluded for their own distinct reason - see
-# handle_acoustic_event().
 #
-# ADR 0007 5 named chainsaw/vehicle/animal_call. Two of those no longer exist:
-# the trained model is 4-class and can emit neither `vehicle` nor a generic
-# `animal_call` (ADR 0027), so those branches were unreachable. `elephant_call`
-# replaces them and is the strongest member of this set by a wide margin - it
-# is the only class here that is direct evidence of an elephant rather than a
-# correlate of one.
-_FUSING_ACOUSTIC_CLASSES = frozenset(
+# ADR 0007 5 named chainsaw/vehicle/animal_call. None of those three is here
+# any more. `vehicle` and a generic `animal_call` do not exist - the trained
+# model is 4-class (ADR 0027) - and ADR 0033 took `chainsaw` out, because a
+# chainsaw is evidence of *people*, not of an elephant. Treating it as
+# elephant-presence evidence was a modelling error that ADR 0027 flagged and
+# deferred ("deserves its own decision with field evidence"): it let a
+# chainsaw at 0.9 fuse past the alert threshold on its own, and it forced one
+# shared WEIGHT_ACOUSTIC onto two classes that are not remotely comparable in
+# what they imply.
+#
+# What is left is the one class that is direct evidence rather than a
+# correlate. The set is kept as a set, rather than collapsed to an equality
+# check, because ADR 0007 5's shape - a named set of fusing classes, routed
+# through one shared modality weight - is the thing being described, and a
+# future model with more than four classes will add to it.
+_FUSING_ACOUSTIC_CLASSES = frozenset({AcousticClass.ELEPHANT_CALL})
+
+# Which AcousticClass values bypass fusion and alert forest officers
+# directly (ADR 0033). Neither is a deterrence problem - you do not answer a
+# gunshot or a chainsaw with a horn and LEDs - and neither says anything
+# about whether an elephant is present, so neither reaches fuse() or
+# decide(). comms/lora_uplink.py gives each its own EventClass, and
+# web/backend's send-alert already routes both to officers and to no
+# residents.
+_DIRECT_ALERT_ACOUSTIC_CLASSES = frozenset(
     {
+        AcousticClass.GUNSHOT,
         AcousticClass.CHAINSAW,
-        AcousticClass.ELEPHANT_CALL,
     }
 )
 
@@ -2316,22 +2344,22 @@ def handle_acoustic_event(
     Which of three branches an event takes is the whole point of this
     function:
 
-    - **gunshot** never reaches fuse(). ADR 0007 5 is explicit that a
-      gunshot is not evidence toward "is an elephant present" - it is a
-      categorically different alert (anti-poaching, human safety), and
-      folding it into the elephant-presence score would be a modeling
-      error, not just an oversimplification. It takes its own direct alert
-      path to forest officers, independent of fusion and of the deterrence
-      decision entirely: you do not deter a gunshot with a horn and LEDs.
-    - **elephant_call/chainsaw** convert to log-odds via
-      _confidence_log_odds() and fuse as the single ACOUSTIC modality. One
-      modality for both, per ADR 0007 - they share cognition/config.py's
+    - **gunshot and chainsaw** never reach fuse(). ADR 0007 5 is explicit
+      that a gunshot is not evidence toward "is an elephant present" - it is
+      a categorically different alert (anti-poaching, human safety) - and
+      ADR 0033 says the same of a chainsaw: it means people, and illegal
+      felling is its own emergency with its own audience. Folding either
+      into the elephant-presence score is a modelling error, not just an
+      oversimplification. Both take the direct alert path to forest
+      officers, independent of fusion and of the deterrence decision
+      entirely: you do not deter a chainsaw with a horn and LEDs.
+    - **elephant_call** converts to log-odds via _confidence_log_odds() and
+      fuses as the single ACOUSTIC modality, through cognition/config.py's
       WEIGHT_ACOUSTIC and BASELINE_ACOUSTIC, whose magnitudes are themselves
-      still invented (docs/KNOWN_GAPS.md). Note the two are not equally
-      informative and this shared weight does not distinguish them: an
-      elephant call is direct evidence of an elephant, a chainsaw is evidence
-      of people who often precede one. Splitting the weight is tracked in
-      docs/KNOWN_GAPS.md, not decided here.
+      still invented (docs/KNOWN_GAPS.md). It is the only fusing class left,
+      and the only one that was ever direct evidence of an elephant rather
+      than a correlate of one. Splitting WEIGHT_ACOUSTIC is no longer a gap:
+      with chainsaw gone there is nothing left to split it between.
     - **ambient** fuses as unavailable. INVENTED mapping: ADR 0007 names only
       four classes and never assigns ambient a route at all, but ADR 0001's
       addendum settles the shape - a modality with nothing to say is excluded
@@ -2344,20 +2372,20 @@ def handle_acoustic_event(
     - **It never calls decide() and never actuates.** fuse() is stateless
       per event, so an acoustic classification arrives with no concurrent
       seismic or vision reading to corroborate. With both unavailable, a
-      chainsaw at confidence 0.9 fuses on its own past
+      single high-confidence acoustic reading fuses on its own past
       ALERT_PROBABILITY_THRESHOLD - which would make acoustic a standalone
       elephant detector, exactly what ADR 0007/0009 scope it out of being.
       The missing piece is cross-modality temporal state, tracked as its own
       entry in docs/KNOWN_GAPS.md rather than papered over here with a
       threshold tweak.
-    - **The gunshot alert it does send is not a real uplink.** send_lora_alert
-      is a scaffolded Bridge.call stub (bridge/rpc.py) with no MCU-side
-      transport behind it yet - comms/ is empty and the LoRa module is not
-      answering AT probes (docs/KNOWN_GAPS.md, 18 Aug). Outside safe_mode
-      this branch calls it for real and logs whatever ack comes back, same
-      [SAFE_MODE]-adjacent discipline handle_footfall_event() uses above for
-      actuators; under safe_mode it logs a dry-run line instead and never
-      calls send_lora_alert at all.
+    - **The direct alert it does send is not a real uplink.** send_lora_alert
+      is bound in main.py to the LoRa uplink queue, and there is no MCU-side
+      transport behind that yet - the module is not answering AT probes
+      (docs/KNOWN_GAPS.md, 18 Aug). Outside safe_mode this branch calls it
+      for real and logs whatever ack comes back, same [SAFE_MODE]-adjacent
+      discipline handle_footfall_event() uses above for actuators; under
+      safe_mode it logs a dry-run line instead and never calls
+      send_lora_alert at all.
 
     Precondition: none - schema_version mismatches are logged, not raised,
     same reasoning as handle_footfall_event(). Never blocks: no Bridge call
@@ -2372,15 +2400,17 @@ def handle_acoustic_event(
             being logged.
         capture_ref: Index into the MCU's raw-window ring buffer.
         send_lora_alert: Injected callable matching SendLoraAlertFn, bound in
-            main.py to a real Bridge.call. Only ever invoked on the gunshot
-            branch, and only when safe_mode is False.
-        safe_mode: When True (the default), the gunshot branch logs a
+            main.py to the LoRa uplink queue. Only ever invoked on the
+            direct-alert branch, and only when safe_mode is False. It is
+            handed class_label.value so the uplink can pick the right
+            EventClass.
+        safe_mode: When True (the default), the direct-alert branch logs a
             dry-run line and never calls send_lora_alert. When False, it
             calls send_lora_alert for real and logs whatever ack comes back.
 
     Returns:
         An AcousticOutcome carrying the class, the FusionResult (None on the
-        gunshot branch), and whether this event took the direct-alert path.
+        direct-alert branch), and whether this event took that path.
     """
     if schema_version != services_config.SCHEMA_VERSION:
         logger.warning(
@@ -2389,29 +2419,33 @@ def handle_acoustic_event(
             services_config.SCHEMA_VERSION,
         )
 
-    if class_label is AcousticClass.GUNSHOT:
+    if class_label in _DIRECT_ALERT_ACOUSTIC_CLASSES:
         if safe_mode:
             logger.info(
-                "[SAFE_MODE] would send direct gunshot alert: confidence=%.3f "
+                "[SAFE_MODE] would send direct %s alert: confidence=%.3f "
                 "capture_ref=%d - not calling send_lora_alert (dry run). "
-                "Never fused: a gunshot is not elephant-presence evidence "
-                "(ADR 0007 5)",
+                "Never fused: %s is not elephant-presence evidence "
+                "(ADR 0007 5, ADR 0033)",
+                class_label.value,
                 confidence,
                 capture_ref,
+                class_label.value,
             )
             return AcousticOutcome(
                 class_label=class_label, fusion=None, direct_alert=True, lora_ack=None
             )
-        ack = send_lora_alert(schema_version, confidence, capture_ref)
+        ack = send_lora_alert(schema_version, class_label.value, confidence, capture_ref)
         logger.info(
-            "send_lora_alert ack=%s: confidence=%.3f capture_ref=%d - ack "
-            "reflects queued/logged on the MCU, not delivered - no real "
+            "send_lora_alert ack=%s: class_label=%s confidence=%.3f capture_ref=%d "
+            "- ack reflects queued/logged on the MCU, not delivered - no real "
             "LoRa transport exists yet (module not joining, see "
-            "docs/KNOWN_GAPS.md). Never fused: a gunshot is not "
-            "elephant-presence evidence (ADR 0007 5)",
+            "docs/KNOWN_GAPS.md). Never fused: %s is not elephant-presence "
+            "evidence (ADR 0007 5, ADR 0033)",
             ack,
+            class_label.value,
             confidence,
             capture_ref,
+            class_label.value,
         )
         return AcousticOutcome(
             class_label=class_label, fusion=None, direct_alert=True, lora_ack=ack

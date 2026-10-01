@@ -11,9 +11,9 @@ first's provenance:
   REPLAY_EVENTS below is a number the real board genuinely reported that
   day.
 - **Pass 2 (acoustic routing, illustrative).** Calls the real
-  handle_acoustic_event() once per AcousticClass value to make ADR 0007 5's
-  three-way routing split watchable rather than merely provable: gunshot
-  bypasses fuse() entirely, elephant_call/chainsaw fuse as one shared
+  handle_acoustic_event() once per AcousticClass value to make the
+  routing split watchable rather than merely provable: gunshot and
+  chainsaw bypass fuse() entirely (ADR 0033), elephant_call fuses as the
   ACOUSTIC modality, ambient fuses as unavailable. The routing, the fusion
   and every printed number are real -- but the *inputs* are not captured
   data. No acoustic classifier runs on the MCU yet (docs/KNOWN_GAPS.md), so
@@ -484,9 +484,9 @@ def _print_acoustic_summary(style: _Style) -> None:
     rule = "=" * _WIDTH
     print(style.bold + rule + style.reset)
     print(
-        "5 classes, 3 routes (ADR 0007 5): gunshot bypasses fuse() entirely; "
-        "elephant_call/chainsaw fuse as one shared ACOUSTIC modality; "
-        "ambient fuses as unavailable."
+        "5 classes, 3 routes (ADR 0007 5, ADR 0033): gunshot and chainsaw "
+        "bypass fuse() entirely and alert officers directly; elephant_call "
+        "fuses as the ACOUSTIC modality; ambient fuses as unavailable."
     )
     print(
         f"every input above used one fixed synthetic confidence "

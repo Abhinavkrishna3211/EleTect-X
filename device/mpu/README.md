@@ -213,12 +213,11 @@ the terminal. The actuator/camera callables passed in raise if ever called, sinc
 `safe_mode=True`.
 
 **Pass 2 (acoustic routing, illustrative)** calls the real `handle_acoustic_event()` once per
-`AcousticClass` value, to make ADR 0007 §5's three-way routing split (landed alongside this pass)
-watchable rather than just provable: gunshot bypasses `fuse()` entirely and prints the real
-`[SAFE_MODE]` alert line the event actually logged (captured from the real logger, not re-typed);
-elephant_call/chainsaw fuse as one shared ACOUSTIC modality and print the live `fused P`,
-identical across the three; ambient fuses as unavailable, with `acoustic` visible in
-`fusion.dropped`. Every input in this pass uses one fixed synthetic confidence, 0.87 — **this is not
+`AcousticClass` value, to make the three-way routing split (ADR 0007 §5 as ADR 0033 amends it)
+watchable rather than just provable: gunshot and chainsaw bypass `fuse()` entirely and print the
+real `[SAFE_MODE]` alert line each event actually logged (captured from the real logger, not
+re-typed); elephant_call fuses as the ACOUSTIC modality and prints the live `fused P`; ambient
+fuses as unavailable, with `acoustic` visible in `fusion.dropped`. Every input in this pass uses one fixed synthetic confidence, 0.87 — **this is not
 captured bench data**, unlike pass 1: no acoustic classifier runs on the MCU yet, so there is nothing
 real to replay. Only the inputs are synthetic; the routing, the fusion and every printed number come
 from the real function call.

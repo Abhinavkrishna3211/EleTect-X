@@ -184,8 +184,8 @@ class _FakeSendLoraAlert:
         self.calls = []
         self.call_log = call_log if call_log is not None else []
 
-    def __call__(self, schema_version, confidence, capture_ref):
-        self.calls.append((schema_version, confidence, capture_ref))
+    def __call__(self, schema_version, acoustic_class, confidence, capture_ref):
+        self.calls.append((schema_version, acoustic_class, confidence, capture_ref))
         self.call_log.append("send_lora_alert")
         return self.ack
 
@@ -1392,7 +1392,7 @@ def test_exploration_is_reported_when_it_happens():
 
 def _route(
     schema_version=1,
-    class_label=AcousticClass.CHAINSAW,
+    class_label=AcousticClass.ELEPHANT_CALL,
     confidence=0.5,
     capture_ref=0,
     *,
@@ -1471,7 +1471,10 @@ def test_gunshot_calls_send_lora_alert_outside_safe_mode(caplog):
     assert outcome.fusion is None
     assert outcome.direct_alert is True
     assert outcome.lora_ack is True
-    assert fake.calls == [(1, 0.93, 7)]
+    # The class travels with the call: lora_uplink picks the EventClass from
+    # it, and an officer reading GUNSHOT vs CHAINSAW is reading two
+    # different emergencies.
+    assert fake.calls == [(1, "gunshot", 0.93, 7)]
 
     messages = [record.message for record in caplog.records]
     assert any("send_lora_alert ack=True" in m and "confidence=0.930" in m for m in messages)
@@ -1480,13 +1483,12 @@ def test_gunshot_calls_send_lora_alert_outside_safe_mode(caplog):
 @pytest.mark.parametrize(
     "class_label",
     [
-        AcousticClass.CHAINSAW,
         AcousticClass.ELEPHANT_CALL,
         AcousticClass.AMBIENT,
     ],
 )
-def test_send_lora_alert_is_never_called_for_non_gunshot_classes(class_label):
-    """Only a gunshot classification may touch send_lora_alert, safe_mode or not."""
+def test_send_lora_alert_is_never_called_for_the_non_alerting_classes(class_label):
+    """Only a direct-alert classification may touch send_lora_alert, safe_mode or not."""
     outcome, fake, _ = _route(
         class_label=class_label, confidence=0.8, capture_ref=9, safe_mode=False
     )
@@ -1495,44 +1497,73 @@ def test_send_lora_alert_is_never_called_for_non_gunshot_classes(class_label):
     assert fake.calls == []
 
 
-def test_chainsaw_feeds_fusion_as_the_acoustic_modality():
-    """A chainsaw is elephant-presence evidence and fuses at WEIGHT_ACOUSTIC."""
-    expected_log_odds, expected_p = _expected_acoustic_fusion(0.8)
+def test_a_chainsaw_alerts_officers_directly_and_never_fuses():
+    """ADR 0033's whole point, and the regression it exists to stop.
 
-    outcome, _, _ = _route(class_label=AcousticClass.CHAINSAW, confidence=0.8, capture_ref=3)
+    A chainsaw means people, not an elephant. While it fused, two things
+    were wrong at once: it carried the same WEIGHT_ACOUSTIC as an elephant
+    call, which is not a defensible equivalence, and - because fuse() sees
+    no seismic or vision reading on this path - a chainsaw at 0.9 crossed
+    ALERT_PROBABILITY_THRESHOLD on its own, making the acoustic model a
+    standalone elephant detector (docs/KNOWN_GAPS.md).
 
-    assert outcome.direct_alert is False
-    assert outcome.fusion is not None
-    assert outcome.fusion.log_odds == pytest.approx(expected_log_odds)
-    assert outcome.fusion.probability == pytest.approx(expected_p)
-    assert outcome.fusion.used == (Modality.ACOUSTIC,)
-    assert set(outcome.fusion.dropped) == {Modality.SEISMIC, Modality.VISION}
-    assert Modality.SEISMIC not in outcome.fusion.contributions
-    assert Modality.VISION not in outcome.fusion.contributions
-
-
-@pytest.mark.parametrize(
-    "class_label, confidence",
-    [
-        (AcousticClass.CHAINSAW, 0.62),
-        (AcousticClass.ELEPHANT_CALL, 0.91),
-    ],
-)
-def test_the_fusing_classes_share_one_acoustic_modality(class_label, confidence):
-    """ADR 0007 treats the fusing classes as one modality, not one weight each.
-
-    Each class is checked at a *different* confidence deliberately: agreeing
-    on one shared input would not distinguish "both use WEIGHT_ACOUSTIC"
-    from "both happen to coincide at this particular value". Matching
-    the single-modality hand computation across distinct inputs can
-    only hold if each really is routed through the same weight and baseline.
+    `fusion is None` is the assertion that matters: an event that fused with
+    acoustic unavailable still carries a real FusionResult, so None here
+    means fuse() was never reached at all rather than reached and ignored.
     """
-    expected_log_odds, expected_p = _expected_acoustic_fusion(confidence)
+    outcome, fake, _ = _route(
+        class_label=AcousticClass.CHAINSAW, confidence=0.9, capture_ref=3, safe_mode=False
+    )
 
-    outcome, _, _ = _route(class_label=class_label, confidence=confidence, capture_ref=11)
+    assert outcome.direct_alert is True
+    assert outcome.fusion is None
+    assert fake.calls == [(1, "chainsaw", 0.9, 3)]
 
-    assert outcome.class_label is class_label
-    assert outcome.direct_alert is False
+
+def test_the_two_acoustic_routes_are_disjoint_and_cover_the_model():
+    """No class may both fuse and alert, and none may fall off the end.
+
+    The routing is three branches reading two frozensets, which is exactly
+    the shape that rots silently when a class is added to the model: a
+    5th class that is in neither set would quietly take the fusing
+    branch's `else` and be scored as elephant-presence evidence. Asserting
+    against AcousticClass itself rather than against a hand-written list is
+    what makes this test notice that.
+    """
+    fusing = reflex_loop._FUSING_ACOUSTIC_CLASSES
+    direct = reflex_loop._DIRECT_ALERT_ACOUSTIC_CLASSES
+
+    assert fusing.isdisjoint(direct)
+    # AMBIENT is deliberately in neither: it fuses, as unavailable. Every
+    # other class the model can emit must have been routed on purpose.
+    assert set(AcousticClass) - fusing - direct == {AcousticClass.AMBIENT}
+
+
+def test_the_fusing_class_is_routed_through_the_one_acoustic_weight():
+    """ADR 0007 treats acoustic as one modality with one weight and baseline.
+
+    Checked at two different confidences deliberately: agreeing with the
+    hand computation at one value could be coincidence, agreeing at two
+    can only hold if the reading really is routed through
+    WEIGHT_ACOUSTIC/BASELINE_ACOUSTIC rather than through anything that
+    happens to pass through the same point.
+    """
+    for confidence in (0.62, 0.91):
+        expected_log_odds, expected_p = _expected_acoustic_fusion(confidence)
+
+        outcome, _, _ = _route(
+            class_label=AcousticClass.ELEPHANT_CALL, confidence=confidence, capture_ref=11
+        )
+
+        assert outcome.class_label is AcousticClass.ELEPHANT_CALL
+        assert outcome.direct_alert is False
+        assert outcome.fusion is not None
+        assert outcome.fusion.log_odds == pytest.approx(expected_log_odds)
+        assert outcome.fusion.probability == pytest.approx(expected_p)
+        assert outcome.fusion.used == (Modality.ACOUSTIC,)
+        assert set(outcome.fusion.dropped) == {Modality.SEISMIC, Modality.VISION}
+        assert Modality.SEISMIC not in outcome.fusion.contributions
+        assert Modality.VISION not in outcome.fusion.contributions
     assert outcome.fusion.log_odds == pytest.approx(expected_log_odds)
     assert outcome.fusion.probability == pytest.approx(expected_p)
     assert outcome.fusion.used == (Modality.ACOUSTIC,)
@@ -1584,7 +1615,10 @@ def test_acoustic_schema_version_mismatch_is_logged_not_raised(caplog):
     """A mismatched schema_version is a warning, never an exception - and still routes."""
     with caplog.at_level("WARNING"):
         outcome, _, _ = _route(
-            schema_version=99, class_label=AcousticClass.CHAINSAW, confidence=0.8, capture_ref=4
+            schema_version=99,
+            class_label=AcousticClass.ELEPHANT_CALL,
+            confidence=0.8,
+            capture_ref=4,
         )
 
     assert outcome.fusion is not None
