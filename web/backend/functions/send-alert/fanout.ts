@@ -8,6 +8,56 @@
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+// ---------------------------------------------------------------------------
+// Recipient proximity
+// ---------------------------------------------------------------------------
+
+// How close an opted-in resident must be to the node that detected something.
+export const ALERT_RADIUS_KM = 3;
+
+export interface Located { lat: number | null; lng: number | null }
+
+// Null when either point is not fully located, rather than a number that would
+// be wrong. The caller has to decide what an unknown distance means, and this
+// is a join across two tables that are each independently allowed to be
+// incomplete: `nodes.lat/lng` is null until an admin commissions the node, and
+// `profiles.lat/lng` is null until a resident sets their location, which is
+// granted to `authenticated` one column at a time and so can be written half
+// filled. Both are routine, neither is an error, and both must mean "cannot
+// match" rather than "matches at longitude zero".
+//
+// Non-finite values are rejected for the same reason: `double precision`
+// accepts NaN and Infinity, the column grant lets a client write them, and NaN
+// propagating into a `<=` comparison would decide this silently.
+export function kmBetween(a: Located | null | undefined, b: Located | null | undefined): number | null {
+  if (!a || !b) return null;
+  for (const v of [a.lat, a.lng, b.lat, b.lng]) {
+    if (v == null || !Number.isFinite(v)) return null;
+  }
+  const R = 6371, r = Math.PI / 180;                                     // haversine
+  const dLat = (b.lat! - a.lat!) * r, dLng = (b.lng! - a.lng!) * r;
+  const x = Math.sin(dLat / 2) ** 2 +
+    Math.cos(a.lat! * r) * Math.cos(b.lat! * r) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+
+// An unknown distance is not a match. Failing the other way would page every
+// resident whose location the system does not know, which on a fox-quiet night
+// is the whole division; the resident dashboard tells them their location is
+// missing instead.
+export function withinRadius(
+  node: Located | null | undefined,
+  person: Located | null | undefined,
+  radiusKm = ALERT_RADIUS_KM,
+): boolean {
+  const km = kmBetween(node, person);
+  return km != null && km <= radiusKm;
+}
+
+// ---------------------------------------------------------------------------
+// Delivery
+// ---------------------------------------------------------------------------
+
 // A recipient is a profile row; email is resolved from auth.users (profiles has no email column).
 export interface Recipient { id: string; phone: string | null; email: string | null }
 export interface AlertMessage { subject: string; body: string }

@@ -1,13 +1,28 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAlertsOptIn } from '@/hooks/useAlertsOptIn'
+import { useBrowserPosition } from '@/hooks/useBrowserPosition'
 import { deriveAreaRisk, recentActivity, riskDisplay, type AreaRiskRow } from '@/lib/risk'
 
 type LoadState = 'loading' | 'ready' | 'error'
 
 export function ResidentView() {
   // Same opt-in write the Stay Safe page uses — one path to alerts_enabled.
-  const { enabled: alertsOn, saving, error: saveError, setEnabled } = useAlertsOptIn()
+  const {
+    enabled: alertsOn,
+    located,
+    saving,
+    error: saveError,
+    setEnabled,
+    setLocation,
+    clearLocation,
+  } = useAlertsOptIn()
+  const { locating, error: fixError, setError: setFixError, request } = useBrowserPosition()
+
+  function captureLocation() {
+    setFixError(null)
+    request((fix) => void setLocation(fix.lat, fix.lng))
+  }
   const [rows, setRows] = useState<AreaRiskRow[]>([])
   const [state, setState] = useState<LoadState>('loading')
 
@@ -114,9 +129,11 @@ export function ResidentView() {
           <span className="text-left">
             <span className="block font-sans text-[15px] font-semibold">Safety alerts</span>
             <span className="text-brand-fg/50 mt-0.5 block font-sans text-[13px]">
-              {alertsOn
-                ? 'On · you will be alerted when wildlife is detected near you'
-                : 'Off · turn on to be alerted about wildlife near you'}
+              {!alertsOn
+                ? 'Off · turn on to be alerted about wildlife near you'
+                : located
+                  ? 'On · you will be alerted when wildlife is detected near you'
+                  : 'On · but no alert can reach you until you set your location below'}
             </span>
           </span>
           <span
@@ -132,6 +149,46 @@ export function ResidentView() {
           </span>
         </button>
         {saveError && <p className="text-brand-red m-0 mt-3 font-sans text-[13px] font-medium">{saveError}</p>}
+
+        {/* An alert is matched to a resident by distance: send-alert sends to
+            opted-in residents within 3 km of the node that detected something.
+            Without a location there is no distance to measure and the resident
+            is skipped, so this is not an optional extra on the toggle above -
+            it is the other half of it. */}
+        <div className="border-brand-fg/10 mt-5 border-t pt-5">
+          <p className="m-0 font-sans text-[14.5px] font-semibold">Your location</p>
+          <p className="text-brand-fg/50 m-0 mt-1 font-sans text-[13px] leading-relaxed">
+            {located
+              ? 'Set. You will be alerted about detections within 3 km of here.'
+              : 'Not set. Alerts are matched to within 3 km of where you are, so no alert can be sent until this is saved.'}
+          </p>
+          <p className="text-brand-fg/40 m-0 mt-1.5 font-sans text-[12.5px] leading-relaxed">
+            Set this at home, not while you are away — it is the place you will be alerted about. The Forest
+            Department can see it; it is used only to decide which alerts reach you, and you can remove it
+            here at any time.
+          </p>
+          <div className="mt-3.5 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={captureLocation}
+              disabled={locating || saving}
+              className="border-brand-fg/20 hover:border-brand-gold text-brand-fg min-h-11 rounded-xl border bg-[#0B0D0B] px-4 font-sans text-[13.5px] font-semibold disabled:opacity-60"
+            >
+              {locating ? 'Finding you…' : located ? 'Update my location' : 'Use my current location'}
+            </button>
+            {located && (
+              <button
+                type="button"
+                onClick={() => void clearLocation()}
+                disabled={locating || saving}
+                className="text-brand-fg/55 hover:text-brand-fg min-h-11 bg-transparent px-1 font-sans text-[13px] underline underline-offset-2 disabled:opacity-60"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+          {fixError && <p className="text-brand-red m-0 mt-3 font-sans text-[13px] font-medium">{fixError}</p>}
+        </div>
       </div>
 
       <p className="text-brand-fg/40 m-0 font-sans text-[12.5px] leading-relaxed">

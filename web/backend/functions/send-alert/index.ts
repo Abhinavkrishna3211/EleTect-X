@@ -3,9 +3,11 @@
 // Sends to all officers + opted-in Public users near the node, and logs to `alerts`. Gunshot and
 // chainsaw alerts go to officers only (message.ts decides wording and audience).
 //
-// This file is the thin HTTP entrypoint: payload/demo guards, recipient selection, then hand off
-// to fanOut() in fanout.ts (channels + per-recipient delivery + audit). Keeping the delivery logic
-// in fanout.ts lets it be unit-tested with a stub client (fanout.test.ts) with no live project.
+// This file is the thin HTTP entrypoint: payload/demo guards, the queries that gather recipients,
+// then hand off to fanOut() in fanout.ts (channels + per-recipient delivery + audit). Everything
+// that decides anything — who is near enough (withinRadius) and who is in the audience
+// (message.ts) — lives outside this file so it can be unit-tested with no live project; what is
+// left here is the parts that are only I/O.
 //
 // Delivery is channel-pluggable (see fanout.ts). Email is the primary channel today; SMS is
 // implemented but gated off pending TRAI DLT registration; WhatsApp is a registered stub.
@@ -20,18 +22,10 @@
 //   template) via your provider. Until then keep CHANNEL_SMS off. See web/backend/README.md.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { type AlertMessage, fanOut } from "./fanout.ts";
+import { type AlertMessage, fanOut, withinRadius } from "./fanout.ts";
 import { alertText, audienceFor, isPaging } from "./message.ts";
 
-const ALERT_RADIUS_KM = 3;
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SERVICE_ROLE_KEY")!);
-
-function kmBetween(a: number, b: number, c: number, d: number) {         // haversine
-  const R = 6371, r = Math.PI / 180;
-  const dLat = (c - a) * r, dLng = (d - b) * r;
-  const x = Math.sin(dLat / 2) ** 2 + Math.cos(a * r) * Math.cos(c * r) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(x));
-}
 
 Deno.serve(async (req) => {
   const payload = await req.json().catch(() => null);
@@ -58,8 +52,10 @@ Deno.serve(async (req) => {
   const { data: pub } = audienceFor(ev) === "staff_and_residents"
     ? await db.from("profiles").select("id,phone,lat,lng").eq("role", "public").eq("alerts_enabled", true)
     : { data: [] as { id: string; phone: string | null; lat: number | null; lng: number | null }[] };
-  const near = (pub ?? []).filter((p) =>
-    p.lat != null && node?.lat != null && kmBetween(node.lat, node.lng, p.lat!, p.lng!) <= ALERT_RADIUS_KM);
+  // withinRadius checks all four coordinates. The version here checked only the
+  // two latitudes and asserted the longitudes away with `!`, so two half-placed
+  // rows matched on latitude alone.
+  const near = (pub ?? []).filter((p) => withinRadius(node, p));
 
   // Dedupe by profile id (a person is one recipient regardless of how they were matched); email is
   // resolved per recipient inside fanOut() from auth.users — profiles stores no email.

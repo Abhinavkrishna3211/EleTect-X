@@ -5,7 +5,7 @@
 //  the type-only supabase-js import so the run is fully offline.)
 
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { fanOut } from "./fanout.ts";
+import { fanOut, kmBetween, withinRadius } from "./fanout.ts";
 
 // Minimal stand-in for the two SupabaseClient surfaces fanOut/deliver touch: alerts inserts and
 // auth.admin.getUserById. getUserById rejects for `poisonId` to simulate a lookup failure.
@@ -96,4 +96,59 @@ Deno.test("fanOut: undeliverable row carries a recipient identifier and null cha
   assertEquals(row.event_id, 7);
   // email resolves from the stub, so it wins over phone/id as the recorded identifier.
   assertEquals(row.recipient, `${id}@example.test`);
+});
+
+
+// ---------------------------------------------------------------------------
+// Proximity. These decide whether a resident is woken at 2am, and both inputs
+// are routinely incomplete, so the null cases matter as much as the distances.
+// ---------------------------------------------------------------------------
+
+const NODE = { lat: 10.0612, lng: 76.6331 };                 // Kothamangalam sector
+
+Deno.test("withinRadius matches a resident inside the radius", () => {
+  assert(withinRadius(NODE, { lat: 10.0700, lng: 76.6400 })); // ~1.2 km
+});
+
+Deno.test("withinRadius rejects a resident outside the radius", () => {
+  assert(!withinRadius(NODE, { lat: 10.1200, lng: 76.7000 })); // ~9 km
+});
+
+Deno.test("withinRadius is inclusive at the boundary and exclusive past it", () => {
+  // 0.009 deg of latitude is ~1.0 km, so step along a meridian either side of 3 km.
+  assert(withinRadius(NODE, { lat: NODE.lat + 2.9 / 111.32, lng: NODE.lng }));
+  assert(!withinRadius(NODE, { lat: NODE.lat + 3.1 / 111.32, lng: NODE.lng }));
+});
+
+// The defect this replaced: lat was checked on both sides and lng on neither,
+// so two rows with null longitudes had their longitude term collapse to zero
+// and matched on latitude alone.
+Deno.test("withinRadius does not match two rows that are only half located", () => {
+  assert(!withinRadius({ lat: 10.0612, lng: null }, { lat: 10.0620, lng: null }));
+  assert(!withinRadius({ lat: 10.0612, lng: null }, { lat: 10.0620, lng: 76.6331 }));
+  assert(!withinRadius(NODE, { lat: 10.0620, lng: null }));
+});
+
+Deno.test("withinRadius treats an uncommissioned node as unmatchable", () => {
+  assert(!withinRadius({ lat: null, lng: null }, { lat: 10.0620, lng: 76.6340 }));
+  assert(!withinRadius(null, { lat: 10.0620, lng: 76.6340 }));
+  assert(!withinRadius(undefined, { lat: 10.0620, lng: 76.6340 }));
+});
+
+Deno.test("withinRadius treats a resident with no location as unmatchable", () => {
+  assert(!withinRadius(NODE, { lat: null, lng: null }));
+  assert(!withinRadius(NODE, null));
+});
+
+// double precision accepts these and the column grant lets a client write them.
+Deno.test("withinRadius rejects non-finite coordinates rather than comparing NaN", () => {
+  assert(!withinRadius(NODE, { lat: NaN, lng: 76.6331 }));
+  assert(!withinRadius(NODE, { lat: Infinity, lng: 76.6331 }));
+  assertEquals(kmBetween(NODE, { lat: NaN, lng: 76.6331 }), null);
+});
+
+Deno.test("kmBetween is zero at a point and symmetric", () => {
+  assertEquals(kmBetween(NODE, NODE), 0);
+  const a = { lat: 10.06, lng: 76.63 }, b = { lat: 10.12, lng: 76.70 };
+  assertEquals(kmBetween(a, b)!.toFixed(9), kmBetween(b, a)!.toFixed(9));
 });

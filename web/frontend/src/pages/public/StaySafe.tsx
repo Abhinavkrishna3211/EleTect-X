@@ -14,7 +14,7 @@ const howItWorks = [
 ]
 
 export function StaySafe() {
-  const { signedIn, enabled, saving, error, setEnabled } = useAlertsOptIn()
+  const { signedIn, enabled, located, saving, error, setEnabled } = useAlertsOptIn()
   const [riskRows, setRiskRows] = useState<AreaRiskRow[] | null>(null)
 
   // public_area_risk is granted to anon precisely so this page can show a real
@@ -104,9 +104,11 @@ export function StaySafe() {
         <div className="border-brand-gold/35 rounded-[18px] border bg-[rgba(226,161,60,0.05)] p-7">
           <h2 className="mb-1.5 font-serif text-[26px] font-normal">Your safety alerts</h2>
           <p className="text-brand-fg/65 mb-5.5 font-sans text-sm leading-relaxed">
-            {enabled
-              ? 'On — you will be alerted when wildlife is detected near you.'
-              : 'Off — turn them on to be alerted about wildlife near you.'}
+            {!enabled
+              ? 'Off — turn them on to be alerted about wildlife near you.'
+              : located
+                ? 'On — you will be alerted when wildlife is detected near you.'
+                : 'On — but alerts are matched by distance, and your location is not set yet.'}
           </p>
           <button
             type="button"
@@ -131,6 +133,15 @@ export function StaySafe() {
             </span>
           </button>
           {error && <p className="text-brand-red mt-3 font-sans text-[13px] font-medium">{error}</p>}
+          {enabled && !located && (
+            <p className="text-brand-gold mt-3.5 font-sans text-[13px] leading-relaxed">
+              Set your location on{' '}
+              <Link to="/dashboard" className="underline underline-offset-2">
+                your dashboard
+              </Link>{' '}
+              to start receiving them — until then there is no distance to match you on.
+            </p>
+          )}
           <p className="text-brand-fg/45 mt-3.5 font-sans text-[12.5px] leading-relaxed">
             Your contact details and location are used only to alert you, never shared or sold. Turn alerts off
             here at any time.
