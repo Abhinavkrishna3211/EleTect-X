@@ -8,14 +8,16 @@ import { statusDisplay, type NodeRow } from '@/lib/dashboard'
 const SECTOR_CENTER: [number, number] = [10.06, 76.63]
 const SECTOR_ZOOM = 13
 
-// CARTO Voyager, rendered from OpenStreetMap data: road hierarchy, place names,
-// natural colours — what an officer needs to see which road a herd is being
-// steered away from. Free, no API key. The labels_under variant paints place
-// labels beneath Leaflet's overlay panes, so pins, the corridor line and the
-// herd marker are never crossed by a road name.
-const TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+// OpenStreetMap's standard tiles: road hierarchy, place names and forest
+// cover - what an officer needs to see which road a herd is being steered
+// away from. No API key, and the volume a forest division generates is well
+// inside OSM's tile usage policy (attribution kept below). CARTO's free
+// basemaps used to be here but now return an "API key required" watermark
+// for every tile. The tiles are darkened in index.css (.eletect-basemap) to
+// sit under the dashboard's dark theme.
+const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
 const TILE_ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
 
 const GOLD = '#E2A13C'
 // Planner marker language, one colour+shape per meaning:
@@ -183,7 +185,7 @@ export function LiveMap({
       zoomControl: true,
       attributionControl: true,
     })
-    L.tileLayer(TILE_URL, { attribution: TILE_ATTRIBUTION, maxZoom: 20, subdomains: 'abcd' }).addTo(map)
+    L.tileLayer(TILE_URL, { attribution: TILE_ATTRIBUTION, maxZoom: 19, className: 'eletect-basemap' }).addTo(map)
 
     // Leaflet rewrites marker transforms when the zoom settles. With a transition
     // on the herd icon that reposition would animate, sliding the marker off its

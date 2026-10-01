@@ -220,6 +220,12 @@
   background: #070d0a;
   font-family: 'IBM Plex Mono', monospace;
 }
+/* OpenStreetMap only ships a light style; invert it and turn the hues back
+   round so water stays blue and forest stays green, just dark. Applied to the
+   basemap tiles only, never to pins or the herd marker. */
+.eletect-basemap {
+  filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.85) saturate(0.6);
+}
 .et-node-pin,
 .et-herd-marker {
   background: transparent;
