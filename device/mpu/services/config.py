@@ -135,6 +135,28 @@ class Species:
     bandit_policy: str = ""
     deterrence_content: str = ""
     alert_audience: str = "dashboard_only"
+    # -- body plan (ADR 0035, perception/kinematics.py) --------------------
+    #
+    # Nominal adult figures from the literature, not measurements of the
+    # animals at this site, and the records say so: every derived range
+    # carries `calibrated` and every derived behaviour carries the raw
+    # measurement it came from, so all three of these can be re-chosen
+    # later without recapturing anything.
+    #
+    # shoulder_height_m is the only one that scales absolute range, and it
+    # is why absolute range is quoted at +-30-50%: an elephant calf and a
+    # bull differ by more than a factor of two and the detector reports one
+    # label for both. The *relative* range trajectory does not use it at
+    # all - the unknown height cancels - which is why that is the number
+    # the retreat decision is allowed to rest on.
+    shoulder_height_m: float = 0.0
+    # One stride, nose-to-tail gait cycle ignored: cadence x stride is the
+    # seismic speed estimate that cross-checks the vision one.
+    stride_length_m: float = 0.0
+    # Above this the animal is running rather than walking. Deliberately
+    # per species: 1.5 m/s is a brisk walk for an elephant and a sprint for
+    # nothing else on this list.
+    walk_speed_max_mps: float = 0.0
 
     def __post_init__(self) -> None:
         """Fill the alias keys a table entry left blank with the label."""
@@ -175,10 +197,16 @@ SPECIES_REGISTRY: dict[str, Species] = {
             label="Elephant",
             event_class=1,
             alert_audience="residents",
+            shoulder_height_m=2.7,
+            stride_length_m=1.6,
+            walk_speed_max_mps=1.8,
         ),
         Species(
             label="Boar",
             event_class=2,
+            shoulder_height_m=0.8,
+            stride_length_m=0.6,
+            walk_speed_max_mps=1.2,
         ),
         # Fox keeps its own bandit_policy - the default - so that a night
         # of foxes cannot walk the elephant ladder up, which is the whole
@@ -193,6 +221,9 @@ SPECIES_REGISTRY: dict[str, Species] = {
             label="Fox",
             event_class=6,
             deterrence_content="Boar",
+            shoulder_height_m=0.38,
+            stride_length_m=0.4,
+            walk_speed_max_mps=1.0,
         ),
     )
 }
@@ -1192,3 +1223,122 @@ SEISMIC_DATASET_MAX_BYTES = 256 * 1024 * 1024  # 256 MB
 # accumulate - see the plan's note that dataset volume, not dataset quality,
 # is the residual risk.
 SEISMIC_DATASET_EVICTION_ORDER = ("unlabelled", "ambiguous", "no_animal")
+
+
+# ---------------------------------------------------------------------------
+# Derived fields: range, gait and behaviour (ADR 0035, perception/kinematics.py)
+# ---------------------------------------------------------------------------
+# Everything below turns measurements the node already has - box heights
+# across a watch, and the impact train in the waveform - into the three
+# questions a future seismic model has to answer from ground motion alone:
+# what animal, how far, doing what. Every one of these numbers is a
+# threshold over a measurement that is itself stored in the record, so a
+# later reader can re-derive all of it without recapturing anything. That
+# is the whole reason the raw waveform and the raw boxes are kept.
+
+# Horizontal field of view of the lens, in degrees, as the product listing
+# states it. A specification, not a calibration - which is exactly why
+# every range derived from it is stamped `calibrated: false` until
+# CAMERA_CALIBRATION_PATH below exists.
+CAMERA_HORIZONTAL_FOV_DEG = 95.0
+
+# Written by scripts/calibrate_camera.py from a set of chessboard images
+# taken through this enclosure's own window, and read once at writer
+# construction. Absent is the normal state and not an error: the nominal
+# focal length is used, `calibrated` stays false on every record, and a
+# calibration done later can re-derive ranges from the stored boxes rather
+# than invalidating the corpus collected before it.
+CAMERA_CALIBRATION_PATH = _MODULE_DIR / "data" / "camera_calibration.json"
+
+# A box within this many pixels of any frame edge is truncated - part of
+# the animal is outside the image, so its height is a lower bound and the
+# range derived from it would read as too far. Excluded from ranging and
+# counted, rather than dropped silently: a watch where most frames are
+# truncated is a watch where the animal was close, and that is worth
+# knowing even when the numbers are not usable.
+RANGE_EDGE_MARGIN_PX = 4
+
+# A box covering at least this fraction of the frame is excluded from
+# ranging too, for the reason HOME_TEST_MAX_BOX_AREA_FRACTION gives at
+# length: the deployed detector has a degenerate mode where it stops
+# localising and returns a frame-filling box, and a frame-filling box
+# carries no localisation information to range from. Same value, chosen the
+# same way, kept as its own name because the two gates are free to diverge
+# - that one decides whether to fire a horn and this one decides whether a
+# measurement is usable.
+RANGE_MAX_BOX_AREA_FRACTION = 0.85
+
+# Smallest box height worth ranging from, in pixels. Below this one pixel
+# of box-edge noise is several percent of the height and therefore several
+# percent of the range, and the trajectory fit starts following the
+# detector rather than the animal.
+RANGE_MIN_BOX_HEIGHT_PX = 24
+
+# Fewest rangeable frames, and shortest span between the first and last of
+# them, before a trajectory is called at all. Two boxes a tenth of a second
+# apart can show any slope you like; these make "unknown" the honest answer
+# instead of a confident one.
+RANGE_MIN_TRAJECTORY_FRAMES = 3
+RANGE_MIN_TRAJECTORY_SPAN_S = 2.0
+
+# Below this the range is not changing fast enough to call, in fractional
+# range change per second - so 0.02 is 2% of the current distance per
+# second, which at 30 m is 0.6 m/s. Fractional rather than absolute because
+# the fractional rate is the quantity the unknown animal height cancels
+# out of, and so the only one measured rather than estimated.
+BEHAVIOUR_STATIONARY_RATE_PER_S = 0.02
+
+# Near/mid/far band edges in metres, applied to the median absolute range
+# of a track. Bands and not metres anywhere user-facing: the underlying
+# number is +-30-50%, which is good enough to say "close" and not good
+# enough to say "22 m".
+RANGE_BAND_EDGES_M = (15.0, 40.0)
+
+# The two speed estimates - cadence x stride from the waveform, and the
+# rate of change of absolute range from the boxes - are independent and
+# both approximate. They are called in agreement when the larger is within
+# this factor of the smaller. A disagreement is not an error and does not
+# suppress anything; it is recorded as a quality flag, because the records
+# where two independent measurements of the same animal disagree are
+# exactly the ones worth looking at by hand.
+BEHAVIOUR_SPEED_AGREEMENT_FACTOR = 2.5
+
+# -- impact detection -------------------------------------------------------
+#
+# An impact is a footfall. Cadence across several of them is the strongest
+# elephant/boar/fox discriminator available from seismic alone, and it is
+# the thing a single 2 s window cannot see - which is why the recorder
+# stitches the whole watch.
+
+# Envelope window for the impact detector, in seconds. Long enough to
+# smooth the carrier out of a footfall's ring-down, short enough that two
+# steps a quarter-second apart stay two bumps.
+GAIT_ENVELOPE_WINDOW_S = 0.02
+
+# An impact is where the envelope crosses the noise floor by this many
+# robust standard deviations. Median and MAD rather than mean and stdev
+# because the impacts themselves are in the signal being measured, and a
+# mean-based floor rises with the thing it is trying to detect.
+GAIT_IMPACT_SIGMA = 6.0
+
+# Absolute floor under the threshold above, in ADC counts. On genuinely
+# quiet ground the MAD can collapse toward zero and six sigma becomes
+# noise; this keeps quantisation from being read as a herd.
+GAIT_MIN_IMPACT_COUNTS = 12.0
+
+# Two threshold crossings closer together than this are one impact. A
+# footfall rings and reflects, so the envelope can dip below the threshold
+# and back within a few milliseconds; this is short enough to leave a
+# running fox's real steps separate.
+GAIT_REFRACTORY_S = 0.06
+
+# Fewest impacts before a cadence is reported. Two impacts give one
+# interval and no way to tell a gait from a coincidence, so the interval
+# statistics need at least three.
+GAIT_MIN_IMPACTS = 3
+
+# Inter-impact intervals outside this range are not a gait: faster than the
+# low end is ringing the refractory period missed, slower than the high end
+# is two separate events that happen to be in one record.
+GAIT_MIN_INTERVAL_S = 0.10
+GAIT_MAX_INTERVAL_S = 3.0

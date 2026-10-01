@@ -64,10 +64,10 @@ import math
 import os
 import struct
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from perception import storage
+from perception import kinematics, storage
 from perception.seismic_stream import SeismicSlice
 from services import config
 
@@ -76,7 +76,7 @@ logger = logging.getLogger(__name__)
 # Bumped whenever a stored field changes meaning. An export script reads this
 # first and refuses a record it does not understand, rather than quietly
 # misinterpreting one - the corpus will outlive several versions of this file.
-SCHEMA = 1
+SCHEMA = 2
 
 # The two buckets that are not a species name.
 NEGATIVE_BUCKET = "no_animal"
@@ -212,6 +212,24 @@ class SeismicRecord:
     species_seen: tuple[str, ...] = ()
     illuminated: bool = False
     could_see: bool = False
+    # -- derived (schema 2, perception/kinematics.py) ----------------------
+    #
+    # Filled by with_derived() on the way to disk, never by the caller.
+    # Every one of these is a reading of `track`, `seismic` and `actuators`
+    # above and of nothing else, so all three can be recomputed from a
+    # stored record - with a calibrated focal length, a corrected body-plan
+    # table or a better impact detector - without recapturing a single
+    # encounter. That is what makes the raw halves the durable asset and
+    # these a convenience.
+    ranges: tuple[kinematics.RangeTrack, ...] = ()
+    gait: kinematics.GaitSummary | None = None
+    behaviour: kinematics.Behaviour | None = None
+    # Whether the animal left after the deterrent fired, from the same
+    # function plan item 10 reads to decide FLAG_NO_RETREAT - one
+    # implementation, so the corpus and the field cannot disagree about
+    # what retreating looked like. None whenever no actuator fired, or
+    # whenever the post-fire window had too few usable boxes to say.
+    retreat: kinematics.RetreatVerdict | None = None
     # Every range derived from a box in `track` depends on a focal length
     # taken from the lens's nominal 95 degree field of view, which is a
     # specification and not a measurement. Stamped on every record so a
@@ -289,8 +307,197 @@ class SeismicRecord:
                 }
                 for a in self.actuators
             ],
+            "derived": self._derived_dict(),
         }
 
+    def _derived_dict(self) -> dict:
+        """The `derived` section: readings of the two raw halves above.
+
+        Kept in its own top-level key rather than folded into `vision` and
+        `seismic`, because it is the one part of a record that a later
+        reader is entitled to throw away and recompute. Anything that
+        appears here appears beside the measurement it came from.
+        """
+        return {
+            "ranges": [_range_dict(t) for t in self.ranges],
+            "gait": _gait_dict(self.gait),
+            "behaviour": _behaviour_dict(self.behaviour),
+            "retreat": _retreat_dict(self.retreat),
+        }
+
+
+
+def _range_dict(track: kinematics.RangeTrack) -> dict:
+    """One species' range trajectory, samples included.
+
+    The per-sample box height is kept beside its derived range on purpose:
+    the height is the measurement and the range is an interpretation of it
+    through two numbers that may both be revised.
+    """
+    return {
+        "label": track.label,
+        "direction": track.direction,
+        "fractional_rate_per_s": track.fractional_rate_per_s,
+        "relative_range": track.relative_range,
+        "speed_mps": track.speed_mps,
+        "median_range_m": track.median_range_m,
+        "range_band": track.range_band,
+        "span_s": track.span_s,
+        "excluded": dict(track.excluded),
+        "samples": [
+            {
+                "poll": s.poll,
+                "timestamp_s": s.timestamp_s,
+                "sample_index": s.sample_index,
+                "confidence": s.confidence,
+                "height_px": s.height_px,
+                "range_m": s.range_m,
+                "relative_range": s.relative_range,
+            }
+            for s in track.samples
+        ],
+    }
+
+
+def _gait_dict(gait: kinematics.GaitSummary | None) -> dict | None:
+    """The impact train, with the detector's own workings beside it.
+
+    `noise_floor_counts` and `threshold_counts` are stored because without
+    them "no impacts" and "threshold set too high" are the same row, and
+    the negative class is most of this corpus.
+    """
+    if gait is None:
+        return None
+    return {
+        "impact_count": gait.impact_count,
+        "interval_mean_s": gait.interval_mean_s,
+        "interval_stdev_s": gait.interval_stdev_s,
+        "interval_cv": gait.interval_cv,
+        "cadence_hz": gait.cadence_hz,
+        "peak_mean_counts": gait.peak_mean_counts,
+        "peak_max_counts": gait.peak_max_counts,
+        "analysed_from": gait.analysed_from,
+        "analysed_count": gait.analysed_count,
+        "excluded_actuator_samples": gait.excluded_actuator_samples,
+        "noise_floor_counts": gait.noise_floor_counts,
+        "threshold_counts": gait.threshold_counts,
+        "impacts": [
+            {
+                "sample_index": i.sample_index,
+                "offset": i.offset,
+                "time_s": i.time_s,
+                "peak_counts": i.peak_counts,
+                "duration_s": i.duration_s,
+            }
+            for i in gait.impacts
+        ],
+    }
+
+
+def _behaviour_dict(behaviour: kinematics.Behaviour | None) -> dict | None:
+    """What the animal was doing, with both speed estimates kept separate.
+
+    They are not averaged. They measure the same thing by different routes
+    and `agreement` says whether they landed in the same place; collapsing
+    them to one number would delete exactly the information that makes a
+    record worth a human's attention.
+    """
+    if behaviour is None:
+        return None
+    return {
+        "motion": behaviour.motion,
+        "direction": behaviour.direction,
+        "source": behaviour.source,
+        "agreement": behaviour.agreement,
+        "vision_speed_mps": behaviour.vision_speed_mps,
+        "seismic_speed_mps": behaviour.seismic_speed_mps,
+        "label": behaviour.label,
+    }
+
+
+def _retreat_dict(verdict: kinematics.RetreatVerdict | None) -> dict | None:
+    """Whether it left after the fire.
+
+    `retreated` is a tristate and stays one on disk: null means the node
+    could not tell, which must never be read back as a no.
+    """
+    if verdict is None:
+        return None
+    return {
+        "retreated": verdict.retreated,
+        "reason": verdict.reason,
+        "direction": verdict.direction,
+        "relative_range": verdict.relative_range,
+        "frames": verdict.frames,
+    }
+
+
+def with_derived(
+    record: SeismicRecord, optics: kinematics.Optics | None = None
+) -> SeismicRecord:
+    """Return `record` with its derived fields filled in; never raises.
+
+    Idempotent and pure: it reads only the track, the waveform and the
+    actuator spans, so calling it twice gives the same answer and calling
+    it years later against a calibration gives a better one. The export
+    script re-runs it for exactly that reason.
+
+    Which species gets a behaviour state is deliberately narrow. Ranges are
+    built for every registry species the camera drew a box for, because a
+    boar in the frame during an elephant encounter is real data. Behaviour
+    and the retreat verdict are only produced when the watch confirmed
+    exactly one species - with two confirmed there is no single animal for
+    "was it walking" to be about, and guessing which one the horn was aimed
+    at is how a corpus acquires wrong labels that look right.
+
+    Args:
+        record: The record as the reflex loop built it.
+        optics: Focal length to range with, defaulting to the nominal one.
+
+    Returns:
+        A new record. On any failure the original is returned unchanged -
+        an annotation pass must never cost the measurements it annotates.
+    """
+    lens = kinematics.NOMINAL_OPTICS if optics is None else optics
+    try:
+        labels = sorted(
+            {
+                box.label
+                for frame in record.track
+                for box in frame.boxes
+                if box.label in config.SPECIES_REGISTRY
+            }
+        )
+        ranges = kinematics.range_tracks(record.track, labels, lens)
+        gait = kinematics.gait_summary(record.seismic, record.actuators)
+
+        primary = record.species_seen[0] if len(record.species_seen) == 1 else None
+        behaviour = None
+        retreat = None
+        if primary is not None:
+            track = next((t for t in ranges if t.label == primary), None)
+            behaviour = kinematics.behaviour(track, gait, primary)
+            fired = [
+                a.start_monotonic_s
+                for a in record.actuators
+                if a.start_monotonic_s is not None
+            ]
+            if fired:
+                retreat = kinematics.retreat_verdict(
+                    record.track, primary, min(fired), lens
+                )
+    except Exception as exc:  # noqa: BLE001 - the raw halves are what matter
+        logger.warning("seismic dataset: cannot derive fields, storing raw only: %s", exc)
+        return record
+
+    return replace(
+        record,
+        ranges=ranges,
+        gait=gait,
+        behaviour=behaviour,
+        retreat=retreat,
+        calibrated=lens.calibrated,
+    )
 
 def _seismic_dict(slice_: SeismicSlice | None) -> dict | None:
     """The waveform half of a record, or None when no ground motion was held.
@@ -440,11 +647,17 @@ class SeismicDatasetWriter:
         root: Path = config.SEISMIC_DATASET_DIR,
         max_bytes: int = config.SEISMIC_DATASET_MAX_BYTES,
         eviction_order: Sequence[str] = config.SEISMIC_DATASET_EVICTION_ORDER,
+        optics: kinematics.Optics | None = None,
     ) -> None:
         """Defaults are the field configuration; the arguments exist for tests."""
         self.root = Path(root)
         self.max_bytes = max_bytes
         self.eviction_order = tuple(eviction_order)
+        # Read once at construction rather than per record. A calibration
+        # that lands mid-run is picked up at the next restart, which is the
+        # right trade: re-reading a file on the event path to catch a
+        # change that happens once in the node's life is not.
+        self.optics = kinematics.load_optics() if optics is None else optics
 
     # -- write -------------------------------------------------------------
 
@@ -459,6 +672,7 @@ class SeismicDatasetWriter:
         """
         if not config.SEISMIC_DATASET_ENABLED:
             return None
+        record = with_derived(record, self.optics)
         try:
             payload = json.dumps(record.to_dict(), separators=(",", ":")).encode("utf-8")
         except (TypeError, ValueError) as exc:
