@@ -122,6 +122,7 @@ class FootfallOutcomeLike(Protocol):
     vision_confirmed: bool
     suppressed_by_vision: bool
     species: str | None
+    no_retreat: bool
 
 
 def observed_class(species: str | None) -> EventClass:
@@ -179,6 +180,13 @@ def event_from_footfall(
         flags |= FLAG_DETERRENT_FIRED
     if safe_mode:
         flags |= FLAG_SAFE_MODE
+    # The device decides this, not the cloud (D8, ADR 0034). The backend maps
+    # the flag straight to priority 'critical', so it is the one bit here that
+    # sends a person into a forest rather than describing what a node did -
+    # see services/reflex_loop.py's _no_retreat_flagged() for why all three of
+    # its conditions are required and why an undetermined verdict is not one.
+    if outcome.no_retreat:
+        flags |= FLAG_NO_RETREAT
 
     return LoraEvent(
         event_class=observed_class(outcome.species),

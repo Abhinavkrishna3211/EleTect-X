@@ -41,7 +41,7 @@ from cognition import config as cognition_config
 from cognition.bandit import Tier
 from cognition.experience import IN_MEMORY_PATH, ExperienceStore
 from cognition.fusion import Modality, sigmoid
-from perception import seismic_dataset
+from perception import kinematics, seismic_dataset
 from perception.camera import CameraError, Frame
 from perception.detector import Detection, DetectionError
 from perception.seismic_stream import SeismicSlice
@@ -434,6 +434,10 @@ def _fire(probability=0.9, sta_lta_ratio=6.0, schema_version=1, call_log=None, *
         "vision_watch_base_s": fakes.pop("vision_watch_base_s", 0.0),
         "vision_watch_extended_s": fakes.pop("vision_watch_extended_s", 0.0),
         "vision_watch_poll_interval_s": fakes.pop("vision_watch_poll_interval_s", 0.0),
+        # Both post-fire tails default to nothing for the same reason, and
+        # are popped rather than pinned so the tail's own tests can set them.
+        "capture_post_fire_tail_s": fakes.pop("capture_post_fire_tail_s", 0.0),
+        "video_retreat_tail_s": fakes.pop("video_retreat_tail_s", 0.0),
     }
     kwargs.update(fakes)
     outcome = reflex_loop.handle_footfall_event(
@@ -442,8 +446,6 @@ def _fire(probability=0.9, sta_lta_ratio=6.0, schema_version=1, call_log=None, *
         sta_lta_ratio=sta_lta_ratio,
         feature_vector=[0.0] * 8,
         safe_mode=False,
-        capture_post_fire_tail_s=0.0,
-        video_retreat_tail_s=0.0,
         **kwargs,
     )
     return outcome, kwargs, log
@@ -537,28 +539,6 @@ def test_safe_mode_suppresses_all_actuation_and_camera():
     assert drive_led.calls == []
     assert pulse_ir.calls == []
     assert log == []  # nothing in this event touched the camera or storage either
-
-
-def test_a_trigger_with_no_geophone_drops_the_modality_rather_than_scoring_it():
-    """probability=0.0 with no geophone must be excluded, not read as a denial.
-
-    This is why the flag reaches fuse() and not only the watch.
-    `probability` is zero on a trigger the geophone never saw, and zero is
-    honest - but a zero *scored* as a real reading is a strong statement
-    that the ground is quiet, which drags the combined log-odds down and
-    could suppress an alert the other modalities had already earned.
-    Dropped and scored-as-zero are only distinguishable from outside by
-    exactly this comparison, which is why both events are run rather than
-    one asserted against a hand-computed number.
-    """
-    dropped, _, _ = _fire(probability=0.0, seismic_available=False)
-    scored, _, _ = _fire(probability=0.0)
-
-    assert Modality.SEISMIC in dropped.fusion.dropped
-    assert Modality.SEISMIC not in dropped.fusion.contributions
-    assert Modality.SEISMIC in scored.fusion.used
-    assert scored.fusion.contributions[Modality.SEISMIC] < 0.0
-    assert dropped.fusion.log_odds > scored.fusion.log_odds
 
 
 def test_low_probability_does_not_alert_and_never_calls_any_actuator():
@@ -1344,17 +1324,16 @@ def test_an_elephant_call_starts_a_vision_gated_event_and_alerts_nothing_itself(
     """ADR 0033: the microphone opens the camera, it does not raise the alarm.
 
     Two failures are pinned here at once, and they pull in opposite
-    directions. The first is the one this fixes: `elephant_call` used to
+    directions. The first is the one this replaces: `elephant_call` used to
     fuse and return, which meant the best class in the trained model - the
-    only one that is direct evidence of an elephant rather than a
-    correlate - could not cause anything to happen. The second is the one
-    that makes the fix dangerous if done carelessly: fuse() is stateless
-    per event, so a single high-confidence acoustic reading with nothing
-    to corroborate it crosses ALERT_PROBABILITY_THRESHOLD on its own, and
-    letting this branch alert directly would turn the acoustic model into
-    a standalone elephant detector - exactly the defect ADR 0033 removed
-    from chainsaw. Starting a vision-gated event satisfies both: the
-    confidence travels, and the camera decides.
+    only one that is direct evidence of an elephant rather than a correlate
+    - could not cause anything to happen. The second is the one that makes
+    the fix dangerous if done carelessly: fuse() is stateless per event, so
+    a single high-confidence acoustic reading with nothing to corroborate
+    it crosses ALERT_PROBABILITY_THRESHOLD on its own, and letting this
+    branch alert directly would turn the acoustic model into a standalone
+    elephant detector. Starting a vision-gated event is what satisfies both
+    - the confidence travels, and the camera decides.
     """
     vision = _FakeStartVisionEvent(outcome=_FAKE_FOOTFALL)
 
@@ -2064,47 +2043,34 @@ def test_the_extended_window_can_never_be_shorter_than_the_base():
 
 
 def test_a_trigger_with_no_geophone_at_all_earns_the_long_look():
-    """An absent sensor is not a sensor that said no.
+    """seismic_available=False (HOME_TEST_MODE) is not the same as a weak reading.
 
     seismic_alone_alerts is structurally always False with no geophone in
-    the picture at all - there is no seismic evidence to alert on - which
-    is a different thing from a real reading that came back weak. There is
-    no false-positive-rate argument for economizing the watch against a
-    sensor that was never asked, so a trigger with no geophone behind it
-    earns the same long look a strong geophone reading would.
-
-    Before this parameter existed such a trigger took the *short* window,
-    which is backwards: it is the case with the least corroboration and so
-    the most to gain from looking longer.
+    the picture at all - there is no seismic evidence to alert on - which is
+    a different thing from a real reading that came back weak. There is no
+    false-positive-rate argument for economizing the watch against a sensor
+    that was never asked, so a cold vision-only trigger earns the same long
+    look a strong geophone reading would.
     """
-    assert (
-        reflex_loop._watch_length_s(
-            repeat_count=0,
-            seismic_alone_alerts=False,
-            seismic_available=False,
-            base_s=8.0,
-            extended_s=45.0,
-        )
-        == 45.0
-    )
+    assert reflex_loop._watch_length_s(
+        repeat_count=0,
+        seismic_alone_alerts=False,
+        seismic_available=False,
+        base_s=8.0,
+        extended_s=45.0,
+    ) == 45.0
 
 
 def test_seismic_available_defaults_true_so_the_field_path_is_unaffected():
     """Every existing caller omits seismic_available; behaviour must not move.
 
-    A real geophone notify always has a reading behind it, so this default
-    keeps the field path exactly what it was before this parameter
-    existed. Asserted rather than assumed because the whole value of a
-    defaulted parameter is that no existing call site had to be touched -
-    which also means no existing call site would notice if the default
-    were wrong.
+    Only services/home_test.py ever passes seismic_available=False - a real
+    field trigger always has a geophone reading, so this default keeps the
+    field path byte-for-byte what it was before this parameter existed.
     """
-    assert (
-        reflex_loop._watch_length_s(
-            repeat_count=0, seismic_alone_alerts=False, base_s=8.0, extended_s=45.0
-        )
-        == 8.0
-    )
+    assert reflex_loop._watch_length_s(
+        repeat_count=0, seismic_alone_alerts=False, base_s=8.0, extended_s=45.0
+    ) == 8.0
 
 
 # --- _watch_for_vision ------------------------------------------------------
@@ -4169,12 +4135,16 @@ class _FakeSeismicStream:
     makes placed indices arithmetic a test can state by hand.
     """
 
-    def __init__(self, slice_=None, rate=services_config.SEISMIC_SAMPLE_RATE_HZ):
+    def __init__(
+        self, slice_=None, rate=services_config.SEISMIC_SAMPLE_RATE_HZ, call_log=None
+    ):
         self.slice = slice_ if slice_ is not None else _dataset_slice()
         self.rate = rate
         self.spans = []
+        self.call_log = call_log if call_log is not None else []
 
     def span(self, start_monotonic_s, end_monotonic_s):
+        self.call_log.append("seismic.span")
         self.spans.append((start_monotonic_s, end_monotonic_s))
         return self.slice
 
@@ -4327,7 +4297,18 @@ def test_a_writer_that_raises_never_reaches_the_event():
 
 
 def test_a_stream_that_raises_still_leaves_the_event_intact():
-    """Same contract on the read side, which runs on a different thread's data."""
+    """Same contract on the read side, which runs on a different thread's data.
+
+    And it degrades to exactly what a node with no stream at all produces -
+    the labelled vision half - rather than to nothing. A ring buffer that
+    cannot answer is a lost waveform; it is not a reason to throw away the
+    bucket and the species, which is the half
+    test_no_stream_still_writes_the_labelled_vision_half() below calls
+    unreconstructable after the fact. Both the span() read and every
+    sample_index_at() call raise here, so this is the worst case: no
+    waveform and no sample indices, and the record still says the camera
+    looked and saw nothing.
+    """
 
     class _Exploding:
         def span(self, start, end):
@@ -4341,7 +4322,10 @@ def test_a_stream_that_raises_still_leaves_the_event_intact():
     )
 
     assert outcome is not None
-    assert writer.records == []
+    assert len(writer.records) == 1
+    assert writer.records[0].seismic is None
+    assert writer.records[0].bucket == "no_animal"
+    assert writer.records[0].could_see is True
 
 
 def test_no_stream_still_writes_the_labelled_vision_half():
@@ -4493,3 +4477,911 @@ def test_confirming_species_never_names_a_species_the_node_does_not_target():
 
     assert reflex_loop._confirming_species(check, ("Boar",)) == ("Boar",)
     assert reflex_loop._confirmed_species(check, ("Boar",)) == "Boar"
+# ---------------------------------------------------------------------------
+# No-retreat detection (D8, ADR 0034)
+# ---------------------------------------------------------------------------
+
+
+def _rangeable(height_px, label="Elephant"):
+    """A box box_exclusion() accepts, of a stated height.
+
+    The module-level ELEPHANT/BOAR/FOX boxes above all sit at x=0, y=0 and
+    are therefore excluded as truncated - which is correct for what they
+    test and is why every pre-existing event records an undetermined
+    retreat verdict rather than a wrong one. Ranging needs a box clear of
+    the frame edges by RANGE_EDGE_MARGIN_PX, under
+    RANGE_MAX_BOX_AREA_FRACTION of the frame, and at least
+    RANGE_MIN_BOX_HEIGHT_PX tall.
+    """
+    return Detection(
+        label=label,
+        confidence=0.9,
+        x=800.0,
+        y=300.0,
+        width=float(height_px) * 0.9,
+        height=float(height_px),
+    )
+
+
+class _SteppingCamera:
+    """_FakeCamera with frame stamps on a synthetic clock, one frame per burst.
+
+    kinematics will not name a direction until it has
+    RANGE_MIN_TRAJECTORY_FRAMES boxes spanning RANGE_MIN_TRAJECTORY_SPAN_S
+    (3 boxes over 2.0s), and sleeping that out costs two real seconds of
+    suite time per test. The frame stamps are what the verdict reads - not
+    the loop's own clock - so they advance synthetically while the loop
+    still runs in microseconds.
+
+    The base sits well ahead of real monotonic() so every frame lands after
+    the actuator start the verdict cuts at. A real event meets that
+    trivially; a test whose whole event finishes inside a millisecond does
+    not.
+
+    One frame per burst, not _FakeCamera's three, so a poll count and a
+    sample count are the same number and a trajectory assertion can be
+    stated by hand.
+    """
+
+    def __init__(self, step_s=1.0, lead_s=60.0, call_log=None):
+        self._stamp = time.monotonic() + lead_s
+        self._step_s = step_s
+        self.call_log = call_log if call_log is not None else []
+        self.bursts = 0
+        self.stamps = []
+        self.opened = False
+        self.lock_night_exposure_calls = 0
+
+    def open(self):
+        self.call_log.append("camera.open")
+        self.opened = True
+
+    def capture_burst(self, count, interval_s):
+        self.call_log.append("camera.capture_burst")
+        self.bursts += 1
+        self.stamps.append(self._stamp)
+        frame = Frame(image=None, index=0, timestamp_s=self._stamp)
+        self._stamp += self._step_s
+        return [frame]
+
+    def lock_night_exposure(self):
+        self.lock_night_exposure_calls += 1
+        return True
+
+    def close(self):
+        self.call_log.append("camera.close")
+        self.opened = False
+
+
+class _TrajectoryDetect:
+    """detect_vision returning one rangeable box per call, heights in order.
+
+    The last height repeats once the sequence runs out, so a test states
+    only the trajectory it cares about and an extra poll cannot change the
+    verdict it asserts.
+    """
+
+    def __init__(self, heights, label="Elephant"):
+        self._heights = list(heights)
+        self._label = label
+        self.calls = 0
+
+    def __call__(self, images):
+        height = self._heights[min(self.calls, len(self._heights) - 1)]
+        self.calls += 1
+        return [[_rangeable(height, self._label)] for _ in images]
+
+
+def _verdict(retreated, reason, direction="stationary", relative_range=1.0, frames=5):
+    """A RetreatVerdict stated by hand, so the gate is tested without kinematics."""
+    return kinematics.RetreatVerdict(
+        retreated=retreated,
+        reason=reason,
+        direction=direction,
+        relative_range=relative_range,
+        frames=frames,
+    )
+
+
+def _escalated_to_top_tier(experience, species_detection=None):
+    """Walk one species up the escalation ladder to the top tier.
+
+    Through the loop rather than seeded into the store, because the floor
+    is now species-scoped (ADR 0034) and an attempt recorded against
+    UNATTRIBUTED would not raise this species' floor at all - which is the
+    whole point of the partition.
+    """
+    detection = ELEPHANT if species_detection is None else species_detection
+    for _ in range(int(max(Tier)) - 1):
+        _fire(
+            0.9,
+            experience=experience,
+            detect_vision=_FakeVisionDetect([detection]),
+            is_night=lambda frames: False,
+        )
+
+
+# --- _no_retreat_flagged(): the gate that sends a person into a forest ---
+
+
+def test_an_undetermined_verdict_is_not_a_no_retreat():
+    """None is not a weak False, and routing it as one is the whole hazard.
+
+    A dark tail, a camera that stopped delivering, or two boxes where three
+    are needed all produce retreated=None. The flag escalates the alert to
+    priority 'critical', which means "this node has run out of options,
+    send someone" - so an undetermined verdict has to behave exactly like
+    an ordinary deterred event. RetreatVerdict's own docstring says so.
+    """
+    for reason in ("no_track", "too_few_frames", "error"):
+        assert (
+            reflex_loop._no_retreat_flagged(
+                _verdict(None, reason, direction="unknown", relative_range=None, frames=0),
+                tier=max(Tier),
+                fired=True,
+            )
+            is False
+        ), reason
+
+
+def test_no_verdict_at_all_is_not_a_no_retreat():
+    """A seismic-only alert names no species, so there is nothing to range."""
+    assert reflex_loop._no_retreat_flagged(None, tier=max(Tier), fired=True) is False
+
+
+def test_an_animal_still_present_after_the_top_tier_is_a_no_retreat():
+    """The one case the flag exists for: top tier fired, and it stayed."""
+    for reason, direction in (("holding", "stationary"), ("closing", "approaching")):
+        assert (
+            reflex_loop._no_retreat_flagged(
+                _verdict(False, reason, direction=direction),
+                tier=max(Tier),
+                fired=True,
+            )
+            is True
+        ), reason
+
+
+def test_a_retreat_is_not_a_no_retreat():
+    """The animal left, which is the deterrent working as designed."""
+    assert (
+        reflex_loop._no_retreat_flagged(
+            _verdict(True, "receding", direction="receding", relative_range=2.3),
+            tier=max(Tier),
+            fired=True,
+        )
+        is False
+    )
+
+
+def test_below_the_top_tier_there_is_still_somewhere_to_escalate_to():
+    """Needs-people means the ladder is spent, not that one rung failed.
+
+    An animal that holds its ground through tier 1 is the ordinary case the
+    escalation ladder was built for - the next trigger gets tier 2. Paging
+    an officer for it would make 'critical' the usual priority rather than
+    the exceptional one.
+    """
+    for tier in list(Tier)[:-1]:
+        assert (
+            reflex_loop._no_retreat_flagged(
+                _verdict(False, "holding"), tier=tier, fired=True
+            )
+            is False
+        ), tier
+
+
+def test_a_deterrent_that_never_fired_cannot_have_failed_to_deter():
+    """A false horn ack means rule_gate_apply() refused inside its cooldown.
+
+    Nothing fired, so an animal that stayed put says nothing about
+    deterrence - the same reason the bandit records no attempt for it.
+    """
+    assert (
+        reflex_loop._no_retreat_flagged(
+            _verdict(False, "holding"), tier=max(Tier), fired=False
+        )
+        is False
+    )
+
+
+def test_the_top_tier_is_read_off_the_enum_not_written_down():
+    """Adding a tier must not leave the gate pointing at the old top rung."""
+    assert reflex_loop.TOP_TIER is max(Tier)
+    assert int(reflex_loop.TOP_TIER) == max(int(t) for t in Tier)
+
+
+# --- _retreat_after_fire(): when the question is unaskable ---
+
+
+def test_an_unnamed_species_has_no_retreat_to_measure():
+    """A seismic-only alert fires at something the camera never resolved.
+
+    There is no body plan to range against and no box to range, so "it did
+    not leave" is not a claim this node can make about it.
+    """
+    frames = (
+        reflex_loop.VisionTrackSample(
+            poll=1, frame_index=0, timestamp_s=100.0, detections=(_rangeable(300),)
+        ),
+    )
+    span = seismic_dataset.ActuatorSpan(
+        actuator="horn", start_monotonic_s=99.0, end_monotonic_s=102.8
+    )
+    assert reflex_loop._retreat_after_fire(frames, None, (span,)) is None
+
+
+def test_nothing_fired_means_there_is_no_retreat_to_be_from():
+    """Safe mode, or rule_gate_apply() refusing inside its cooldown."""
+    frames = (
+        reflex_loop.VisionTrackSample(
+            poll=1, frame_index=0, timestamp_s=100.0, detections=(_rangeable(300),)
+        ),
+    )
+    assert reflex_loop._retreat_after_fire(frames, "Elephant", ()) is None
+
+
+def test_the_verdict_is_cut_at_the_fire_not_at_the_watch():
+    """Pre-fire boxes must not be counted as evidence about the retreat.
+
+    The whole event's samples are handed over on purpose - one list, and
+    kinematics.retreat_verdict() owns the cut. An animal that walked in
+    during the watch and then held its ground after the fire would read as
+    receding if the approach were included.
+    """
+    closing_in = [
+        reflex_loop.VisionTrackSample(
+            poll=i + 1,
+            frame_index=0,
+            timestamp_s=100.0 + i,
+            detections=(_rangeable(100 + 60 * i),),
+        )
+        for i in range(4)
+    ]
+    then_holding = [
+        reflex_loop.VisionTrackSample(
+            poll=5 + i,
+            frame_index=0,
+            timestamp_s=105.0 + i,
+            detections=(_rangeable(300),),
+        )
+        for i in range(4)
+    ]
+    span = seismic_dataset.ActuatorSpan(
+        actuator="horn", start_monotonic_s=104.5, end_monotonic_s=108.3
+    )
+
+    verdict = reflex_loop._retreat_after_fire(
+        tuple(closing_in + then_holding), "Elephant", (span,)
+    )
+
+    assert verdict is not None
+    assert verdict.frames == 4, "only the post-fire boxes are evidence about the retreat"
+    assert verdict.retreated is False
+    assert verdict.reason == "holding"
+
+
+def test_the_cut_is_the_first_actuator_to_start_not_the_last():
+    """The fire starts when the first deterrent starts, not when the last does.
+
+    horn_fire_sequence() blocks the MCU's loop for ~3.8s and the LED pattern
+    runs after it, so one event's spans are seconds apart. Cutting at the
+    last start throws away the seconds the animal spent reacting to the
+    horn, which on a real event is most of the evidence there is - and on a
+    short tail it is all of it, leaving a verdict of "nothing was seen"
+    about an animal that was seen walking away.
+    """
+    samples = tuple(
+        reflex_loop.VisionTrackSample(
+            poll=i + 1,
+            frame_index=0,
+            timestamp_s=100.5 + i,
+            detections=(_rangeable(300 - 55 * i),),
+        )
+        for i in range(4)
+    )
+    horn = seismic_dataset.ActuatorSpan(
+        actuator="horn", start_monotonic_s=100.0, end_monotonic_s=103.8
+    )
+    led = seismic_dataset.ActuatorSpan(
+        actuator="led", start_monotonic_s=104.0, end_monotonic_s=116.5
+    )
+
+    verdict = reflex_loop._retreat_after_fire(samples, "Elephant", (horn, led))
+
+    assert verdict is not None
+    assert verdict.frames == 4, "every box after the horn started is evidence"
+    assert verdict.retreated is True
+    assert verdict.reason == "receding"
+    # The spans arrive in whatever order the actuators finished in.
+    assert reflex_loop._retreat_after_fire(samples, "Elephant", (led, horn)) == verdict
+
+
+def test_the_verdict_is_the_recorders_verdict():
+    """D8 and D9 share one implementation, and this is what proves it.
+
+    Two answers to "is it still there" would drift, and the one that
+    drifted would be the one nobody tested: the frame an officer acts on
+    and the corpus a future model trains on would disagree about what
+    retreating looked like.
+    """
+    samples = tuple(
+        reflex_loop.VisionTrackSample(
+            poll=i + 1,
+            frame_index=0,
+            timestamp_s=200.0 + i,
+            detections=(_rangeable(300 - 40 * i),),
+        )
+        for i in range(4)
+    )
+    span = seismic_dataset.ActuatorSpan(
+        actuator="horn", start_monotonic_s=199.5, end_monotonic_s=203.3
+    )
+
+    mine = reflex_loop._retreat_after_fire(samples, "Elephant", (span,))
+    theirs = kinematics.retreat_verdict(
+        seismic_dataset.track_frames(samples), "Elephant", span.start_monotonic_s
+    )
+
+    assert mine == theirs
+
+
+# --- _watch_retreat(): the window that makes the verdict answerable ---
+
+
+def _retreat_window(camera, detect, sleep_overshoot_s=0.0, **kwargs):
+    """_watch_retreat() on an injected clock, returning it and every sleep.
+
+    The clock advances only when the window sleeps, so a 5s tail costs
+    the suite nothing and the sleeps themselves become assertable - which
+    is the only way to state that an under-polled tail still runs its full
+    length.
+
+    sleep_overshoot_s models a sleep that returns late, which is the only
+    condition under which the window's pacing is observable at all: with an
+    exact sleep, pacing from the window's start and pacing from the previous
+    poll put every poll at the same instant.
+    """
+    slept = []
+    clock = [0.0]
+
+    def _monotonic():
+        return clock[0]
+
+    def _sleep(seconds):
+        slept.append(seconds)
+        clock[0] += seconds + sleep_overshoot_s
+
+    kwargs.setdefault("tail_s", 5.0)
+    kwargs.setdefault("max_polls", 5)
+    kwargs.setdefault("poll_interval_s", 1.0)
+    watch = reflex_loop._watch_retreat(
+        camera,
+        detect,
+        0.0,
+        monotonic=_monotonic,
+        sleep=_sleep,
+        **kwargs,
+    )
+    return watch, slept
+
+
+def test_the_retreat_window_actually_runs_the_detector():
+    """Before this, the tail observed nothing at all.
+
+    It was a sleep with event video recording, and an undetected 45-frame
+    still burst without - so every record ever written carried a null
+    retreat verdict for want of a box rather than for want of an animal.
+    """
+    camera = _SteppingCamera()
+    detect = _TrajectoryDetect([300])
+
+    watch, _ = _retreat_window(camera, detect)
+
+    assert watch.polls == 5
+    assert detect.calls == 5
+    assert len(watch.track) == 5
+    assert all(s.detections for s in watch.track)
+
+
+def test_the_retreat_window_does_not_exit_when_the_boxes_stop():
+    """The question is where the animal is at the *end* of the tail.
+
+    Leaving the moment the boxes stop would answer "did it go quiet", which
+    is a different fact - and the one most likely to be a detector blink on
+    an animal that is still standing there.
+    """
+    camera = _SteppingCamera()
+    detect = _FakeVisionDetect()  # frames arrive, no boxes in any of them
+
+    watch, _ = _retreat_window(camera, detect)
+
+    assert watch.polls == 5, "a window with no boxes still runs to its deadline"
+    assert len(watch.track) == 5
+    assert not any(s.detections for s in watch.track)
+
+
+def test_the_retreat_window_stops_polling_a_camera_that_stopped_delivering():
+    """Empty *captures* are a dead camera, unlike empty detections above."""
+    camera = _FakeCamera(frame_count=0)
+    detect = _TrajectoryDetect([300])
+
+    watch, _ = _retreat_window(camera, detect, max_polls=20, tail_s=30.0)
+
+    assert watch.polls == services_config.VISION_WATCH_MAX_EMPTY_POLLS
+    assert detect.calls == 0, "no frames is nothing to detect on"
+    assert watch.track == ()
+
+
+def test_the_tail_is_a_floor_as_well_as_a_ceiling():
+    """A tail short on polls is still the recording's and the animal's length.
+
+    max_polls caps detector passes; it is not a second, quieter definition
+    of how long the tail runs. ADR 0020's recording is sized to cover the
+    whole retreat, and a window that returned early would hand it a clip
+    that stops mid-retreat.
+    """
+    camera = _SteppingCamera()
+    detect = _TrajectoryDetect([300])
+
+    watch, slept = _retreat_window(camera, detect, max_polls=2, tail_s=5.0)
+
+    assert watch.polls == 2
+    assert sum(slept) == pytest.approx(5.0), "the unpolled remainder is slept out"
+
+
+def test_a_camera_that_stopped_delivering_still_gets_its_tail_slept_out():
+    """The still path can be dead while the recorder is perfectly fine."""
+    camera = _FakeCamera(frame_count=0)
+
+    watch, slept = _retreat_window(camera, _TrajectoryDetect([300]), max_polls=20, tail_s=6.0)
+
+    assert watch.polls == services_config.VISION_WATCH_MAX_EMPTY_POLLS
+    assert sum(slept) == pytest.approx(6.0)
+
+
+def test_a_late_sleep_does_not_cost_the_tail_its_last_poll():
+    """Polls are paced from the window's start, so drift cannot accumulate.
+
+    The no-video path passes tail_s = max_polls * poll_interval_s, which
+    leaves exactly one slot of slack for the whole run: the last poll is
+    scheduled at tail_s - poll_interval_s. Pacing each poll from the
+    previous one instead adds every late sleep to the next poll's start, so
+    over 45 polls a few milliseconds each is enough to push the last poll
+    past the deadline - and on that path a lost poll is a frame the blind
+    burst this window replaces always wrote to disk.
+
+    The overshoot here is exaggerated so the mechanism is visible in four
+    polls rather than forty-five.
+    """
+    camera = _SteppingCamera()
+
+    watch, slept = _retreat_window(
+        camera,
+        _TrajectoryDetect([300]),
+        sleep_overshoot_s=0.35,
+        max_polls=4,
+        tail_s=4.0,
+        poll_interval_s=1.0,
+    )
+
+    assert watch.polls == 4
+    assert camera.bursts == 4
+    # Each sleep is shortened by the overshoot already banked, so the polls
+    # stay on the schedule the caller asked for instead of drifting off it.
+    assert slept[1] < slept[0]
+
+
+def test_the_retreat_window_never_runs_past_its_tail():
+    """More polls than fit must not lengthen the tail either."""
+    camera = _SteppingCamera()
+
+    watch, slept = _retreat_window(
+        camera, _TrajectoryDetect([300]), max_polls=100, tail_s=4.0, poll_interval_s=1.0
+    )
+
+    assert watch.polls == 4
+    assert sum(slept) == pytest.approx(4.0)
+
+
+def test_the_retreat_windows_polls_continue_the_watchs_numbering():
+    """Two halves of one trajectory, not two overlapping ones.
+
+    The samples are concatenated before the verdict is taken, so a restart
+    at 1 would make poll numbers ambiguous in the record an analyst later
+    reads - and poll is how a box is tied back to a moment in the clip.
+    """
+    camera = _SteppingCamera()
+
+    watch, _ = _retreat_window(camera, _TrajectoryDetect([300]), poll_offset=7, max_polls=3)
+
+    assert [s.poll for s in watch.track] == [8, 9, 10]
+
+
+def test_the_retreat_window_keeps_its_frames_only_when_asked():
+    """With event video recording there is already a copy of this window.
+
+    ADR 0020's recording spans the whole tail, so holding ~45 stills as
+    well is several hundred megabytes per event for nothing.
+    """
+    kept, _ = _retreat_window(_SteppingCamera(), _TrajectoryDetect([300]), keep_frames=True)
+    dropped, _ = _retreat_window(_SteppingCamera(), _TrajectoryDetect([300]), keep_frames=False)
+
+    assert len(kept.frames) == kept.polls
+    assert dropped.frames == ()
+    assert dropped.polls == kept.polls, "dropping the frames must not drop the polls"
+
+
+def test_the_retreat_window_illuminates_at_night_and_not_in_daylight():
+    """An unlit night tail has no boxes in it, which is a verdict of None.
+
+    That is honest rather than harmless: it is the case FLAG_NO_RETREAT
+    exists for, and the one the illuminator is there to convert into an
+    answer.
+    """
+    at_night = _FakePulseIr()
+    _retreat_window(_SteppingCamera(), _TrajectoryDetect([300]), night=True, pulse_ir=at_night)
+
+    in_daylight = _FakePulseIr()
+    _retreat_window(_SteppingCamera(), _TrajectoryDetect([300]), night=False, pulse_ir=in_daylight)
+
+    undetermined = _FakePulseIr()
+    _retreat_window(_SteppingCamera(), _TrajectoryDetect([300]), night=None, pulse_ir=undetermined)
+
+    assert at_night.calls, "a night tail that is not lit cannot answer the question"
+    assert in_daylight.calls == []
+    assert undetermined.calls == [], "an unknown night read is not a reason to pulse"
+
+
+def test_the_retreat_window_locks_night_exposure_before_the_first_pulse():
+    """Finding 4 of the night characterisation, which the tail can reopen.
+
+    Pulsing against a hunting auto-exposure is what produced every spurious
+    Boar box in the overnight soak.
+
+    The vision watch locks it when *it* establishes night, but only when it
+    was given both pulse_ir and is_night. A tail that lights a watch which
+    did not would otherwise reintroduce exactly that combination.
+    """
+    camera = _SteppingCamera()
+
+    _retreat_window(camera, _TrajectoryDetect([300]), night=True, pulse_ir=_FakePulseIr())
+
+    assert camera.lock_night_exposure_calls == 1
+
+    daylight = _SteppingCamera()
+    _retreat_window(daylight, _TrajectoryDetect([300]), night=False, pulse_ir=_FakePulseIr())
+    assert daylight.lock_night_exposure_calls == 0
+
+
+def test_the_retreat_window_keeps_the_mcus_duty_interval_between_pulses():
+    """The MPU mirrors the MCU's own duty gate rather than discovering it.
+
+    IR_WATCH_MIN_INTERVAL_S exists so the budget is not spent on pulses the
+    MCU was always going to refuse - a refusal costs the same thermal
+    accounting as a pulse and returns no light.
+    """
+    camera = _SteppingCamera()
+    ir = _FakePulseIr()
+
+    watch, _ = _retreat_window(
+        camera,
+        _TrajectoryDetect([300]),
+        max_polls=6,
+        tail_s=6.0,
+        poll_interval_s=1.0,
+        night=True,
+        pulse_ir=ir,
+        ir_min_interval_s=3.0,
+    )
+
+    assert watch.polls == 6
+    assert len(ir.calls) == 2, "one pulse at t=0 and one at t=3, not one per poll"
+
+
+def test_a_pulse_that_raises_costs_the_poll_its_light_and_nothing_else():
+    """A dark poll is a worse answer; a raised exception is no answer at all."""
+    camera = _SteppingCamera()
+
+    def _exploding(schema_version, ms):
+        raise RuntimeError("ir rail brown-out")
+
+    watch, _ = _retreat_window(camera, _TrajectoryDetect([300]), night=True, pulse_ir=_exploding)
+
+    assert watch.polls == 5
+    assert len(watch.track) == 5
+
+
+def test_a_detector_that_raises_costs_the_poll_its_boxes_and_nothing_else():
+    """A model outage is an unanswered question, not a failed tail.
+
+    _vision_check() already degrades to an empty reading; what this asserts
+    is that the window does not turn that into a lost retreat window and a
+    lost clip.
+    """
+    camera = _SteppingCamera()
+
+    watch, _ = _retreat_window(camera, _FakeVisionDetect(raises=DetectionError("model down")))
+
+    assert watch.polls == 5
+    assert all(not s.detections for s in watch.track)
+
+
+def test_a_camera_that_raises_mid_tail_does_not_take_the_event_with_it():
+    """CameraError is the one the real Camera raises; it must still sleep out."""
+    camera = _FakeCamera(fail_capture=True)
+
+    watch, slept = _retreat_window(camera, _TrajectoryDetect([300]), max_polls=20, tail_s=8.0)
+
+    assert watch.polls == services_config.VISION_WATCH_MAX_EMPTY_POLLS
+    assert sum(slept) == pytest.approx(8.0)
+
+
+# --- end to end through handle_footfall_event() ---
+
+
+@TIER_FLOOR_OVERRIDE
+def test_an_animal_that_holds_its_ground_after_the_top_tier_sets_no_retreat():
+    """The event D8 exists for, measured on the device.
+
+    A cloud-side inference from a repeat trigger arrives minutes late and
+    never fires at all for an elephant that stays put without re-crossing
+    the STA/LTA threshold.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    _escalated_to_top_tier(experience)
+    camera = _SteppingCamera()
+
+    outcome, _, _ = _fire(
+        0.9,
+        experience=experience,
+        camera=camera,
+        detect_vision=_TrajectoryDetect([300]),
+        is_night=lambda frames: False,
+        retreat_burst_frames=4,
+        retreat_burst_interval_s=0.05,
+    )
+
+    assert outcome.action.tier is max(Tier)
+    assert outcome.horn_ack is True
+    assert outcome.species == "Elephant"
+    assert outcome.retreat_polls > 0
+    assert outcome.retreat is not None
+    assert outcome.retreat.retreated is False
+    assert outcome.retreat.reason == "holding"
+    assert outcome.no_retreat is True
+    experience.close()
+
+
+@TIER_FLOOR_OVERRIDE
+def test_an_animal_that_leaves_after_the_top_tier_does_not_set_no_retreat():
+    """The good outcome, and the one that must stay the common one.
+
+    Same event, same tier, same window - only the trajectory differs, which
+    is what makes this the control for the test above rather than a second
+    way of reaching the same branch.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    _escalated_to_top_tier(experience)
+
+    outcome, _, _ = _fire(
+        0.9,
+        experience=experience,
+        camera=_SteppingCamera(),
+        detect_vision=_TrajectoryDetect([300, 300, 220, 170, 130]),
+        is_night=lambda frames: False,
+        retreat_burst_frames=4,
+        retreat_burst_interval_s=0.05,
+    )
+
+    assert outcome.action.tier is max(Tier)
+    assert outcome.retreat is not None
+    assert outcome.retreat.retreated is True
+    assert outcome.retreat.reason == "receding"
+    assert outcome.no_retreat is False
+    experience.close()
+
+
+@TIER_FLOOR_OVERRIDE
+def test_a_top_tier_the_mcu_refused_is_not_a_no_retreat():
+    """Nothing fired, so there was nothing for the animal not to retreat from.
+
+    An actuator span is recorded in a finally block whether the drive was
+    acked or refused - deliberately, because the vibration marker the
+    dataset needs reflects the attempt. So the span alone cannot stand in
+    for "the deterrent fired", and an animal standing in a clearing where
+    the MCU refused both channels is not an animal that held its ground
+    against the top tier. Escalating it to critical would send a person
+    into a forest at night over a UART fault.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    _escalated_to_top_tier(experience)
+
+    outcome, _, _ = _fire(
+        0.9,
+        experience=experience,
+        camera=_SteppingCamera(),
+        drive_horn=_FakeDriveHorn(ack=False),
+        drive_led=_FakeDriveLed(ack=False),
+        detect_vision=_TrajectoryDetect([300]),
+        is_night=lambda frames: False,
+        retreat_burst_frames=4,
+        retreat_burst_interval_s=0.05,
+    )
+
+    assert outcome.action.tier is max(Tier)
+    assert outcome.horn_ack is False
+    assert outcome.led_ack is False
+    assert outcome.retreat is not None
+    assert outcome.retreat.retreated is False, "it did hold its ground"
+    assert outcome.no_retreat is False, "but not against anything"
+    experience.close()
+
+
+def test_a_first_sighting_that_holds_its_ground_is_not_critical():
+    """Tier 1 held and the animal stayed - the case the ladder exists for.
+
+    The next trigger gets tier 2. Nobody is paged, because the node has not
+    run out of options.
+    """
+    outcome, _, _ = _fire(
+        0.9,
+        camera=_SteppingCamera(),
+        detect_vision=_TrajectoryDetect([300]),
+        is_night=lambda frames: False,
+        retreat_burst_frames=4,
+        retreat_burst_interval_s=0.05,
+    )
+
+    assert outcome.action.tier is Tier.TIER_1
+    assert outcome.retreat is not None
+    assert outcome.retreat.retreated is False
+    assert outcome.no_retreat is False
+
+
+def test_a_seismic_only_alert_reports_no_verdict_rather_than_a_retreat():
+    """Nothing was seen, so nothing can be said about whether it left."""
+    outcome, _, _ = _fire(
+        0.9,
+        camera=_SteppingCamera(),
+        is_night=lambda frames: True,  # blind: the ADR 0022 gate stands down
+        retreat_burst_frames=4,
+        retreat_burst_interval_s=0.05,
+    )
+
+    assert outcome.species is None
+    assert outcome.retreat is None
+    assert outcome.no_retreat is False
+
+
+def test_an_event_that_fired_nothing_runs_no_retreat_window():
+    """No fire, no window.
+
+    It costs a detector pass per poll and only answers a question that
+    presupposes a fire.
+    """
+    outcome, _, _ = _fire(probability=0.05, is_night=lambda frames: False)
+
+    assert outcome.decision.alert is False
+    assert outcome.retreat_polls == 0
+    assert outcome.retreat is None
+    assert outcome.no_retreat is False
+
+
+def test_the_retreat_windows_frames_are_saved_with_the_events_own_stills():
+    """Same frames, same tag - what changed is that they are looked at.
+
+    The no-video path already captured CAMERA_RETREAT_BURST_FRAMES stills
+    after every fire and wrote them to disk without asking the detector
+    anything about them.
+    """
+    save_frames = _FakeSaveFrames()
+    camera = _SteppingCamera()
+
+    outcome, _, _ = _fire(
+        0.9,
+        camera=camera,
+        save_frames=save_frames,
+        detect_vision=_TrajectoryDetect([300]),
+        is_night=lambda frames: False,
+        retreat_burst_frames=4,
+        retreat_burst_interval_s=0.05,
+    )
+
+    assert len(save_frames.calls) == 1
+    saved, tag = save_frames.calls[0]
+    assert outcome.retreat_polls == 4, "the whole tail was polled"
+    # Every frame the camera produced reached that one call - the watch's,
+    # the evidence burst's, and the four the tail polled.
+    assert len(saved) == camera.bursts
+    assert outcome.capture_frame_count == camera.bursts
+    assert tag
+
+
+def test_event_video_gets_its_tail_polled_without_a_second_copy_of_the_frames():
+    """ADR 0020's recording already spans this window."""
+    save_frames = _FakeSaveFrames()
+    camera = _SteppingCamera()
+
+    outcome, _, _ = _fire(
+        0.9,
+        camera=camera,
+        save_frames=save_frames,
+        event_video=_FakeEventVideo(),
+        detect_vision=_TrajectoryDetect([300]),
+        is_night=lambda frames: False,
+        video_retreat_tail_s=0.05,
+        vision_watch_poll_interval_s=0.01,
+    )
+
+    assert outcome.retreat_polls > 0
+    assert outcome.retreat is not None
+    # The watch's poll and the evidence burst, and nothing from the tail -
+    # keep_frames is False where a recording already holds the same seconds,
+    # so the tail buys a verdict without buying a second copy of the frames.
+    assert outcome.capture_frame_count == 2
+    assert camera.bursts == 2 + outcome.retreat_polls
+    assert len(save_frames.calls) == 1
+    assert len(save_frames.calls[0][0]) == 2
+
+
+def test_the_seismic_record_carries_the_post_fire_boxes():
+    """What makes with_derived()'s retreat field answerable at all.
+
+    Before item 10 the record's track stopped at the fire, so every record
+    ever written carried a null verdict - not because the animal had left,
+    but because nothing had looked.
+    """
+    _, writer, _, _ = _fire_recording(
+        probability=0.9,
+        camera=_SteppingCamera(),
+        detect_vision=_TrajectoryDetect([300]),
+        is_night=lambda frames: False,
+        retreat_burst_frames=4,
+        retreat_burst_interval_s=0.05,
+    )
+
+    assert len(writer.records) == 1
+    record = writer.records[0]
+    assert len(record.track) == 5, "one watch poll plus four tail polls"
+    fire_at = min(a.start_monotonic_s for a in record.actuators)
+    assert sum(1 for f in record.track if f.timestamp_s >= fire_at) == 5
+
+    derived = seismic_dataset.with_derived(record)
+    assert derived.retreat is not None
+    assert derived.retreat.retreated is False
+
+
+def test_the_waveform_is_snapshotted_before_the_tail_not_after_it():
+    """Snapshot early, write late - the two halves have different deadlines.
+
+    The ring holds SEISMIC_STREAM_RETAIN_S (60s) and the tail can run for
+    the better part of another minute.
+
+    A waveform pulled when the record is written would be missing the
+    pre-roll and most of the watch - on exactly the events that matter
+    most. So: snapshot early, write late. The span() read is the thing with
+    a deadline, and this asserts it happened before the tail rather than
+    inside the write.
+    """
+    call_log = []
+    stream = _FakeSeismicStream(call_log=call_log)
+    camera = _SteppingCamera(call_log=call_log)
+
+    _fire_recording(
+        probability=0.9,
+        camera=camera,
+        seismic_stream=stream,
+        detect_vision=_TrajectoryDetect([300]),
+        is_night=lambda frames: False,
+        retreat_burst_frames=4,
+        retreat_burst_interval_s=0.05,
+    )
+
+    assert len(stream.spans) == 1
+    # The watch's poll and the evidence burst, then the span read, then the
+    # four polls of the tail - so the waveform predates the tail entirely.
+    bursts = [i for i, c in enumerate(call_log) if c == "camera.capture_burst"]
+    read_at = call_log.index("seismic.span")
+    assert len(bursts) == 6
+    assert bursts[1] < read_at < bursts[2]

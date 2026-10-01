@@ -7,6 +7,7 @@ import pytest
 
 from comms.lora_uplink import (
     FLAG_DETERRENT_FIRED,
+    FLAG_NO_RETREAT,
     FLAG_SAFE_MODE,
     FLAG_VISION_CONFIRMED,
     SEND_LORA_EVENT,
@@ -44,6 +45,7 @@ class _Outcome:
     led_ack: bool | None = None
     vision_confirmed: bool = False
     suppressed_by_vision: bool = False
+    no_retreat: bool = False
     species: str | None = None
 
 
@@ -84,6 +86,46 @@ def test_confirmed_elephant_that_was_deterred():
         FLAG_VISION_CONFIRMED | FLAG_DETERRENT_FIRED,
         0x01020304,
     )
+
+
+def test_an_animal_that_held_its_ground_carries_the_no_retreat_flag():
+    """The one flag that escalates an alert to critical (D8, ADR 0034).
+
+    The backend reads it as "this node has run out of options, send
+    someone", as distinct from every other alert, which means "this node is
+    handling it". If it never reaches the frame, the escalation the device
+    measured is invisible to the people it was measured for.
+    """
+    out = _outcome(
+        probability=0.91,
+        action=_Action(3),
+        horn_ack=True,
+        led_ack=True,
+        vision_confirmed=True,
+        species="Elephant",
+        no_retreat=True,
+    )
+    ev = event_from_footfall(out, safe_mode=False, capture_ref=9)
+    assert ev is not None
+    assert ev.flags & FLAG_NO_RETREAT
+    assert ev.flags == (
+        FLAG_VISION_CONFIRMED | FLAG_DETERRENT_FIRED | FLAG_NO_RETREAT
+    )
+
+
+def test_an_animal_that_left_carries_no_such_flag():
+    """The control, and the case that must stay the common one."""
+    out = _outcome(
+        probability=0.91,
+        action=_Action(3),
+        horn_ack=True,
+        led_ack=True,
+        vision_confirmed=True,
+        species="Elephant",
+    )
+    ev = event_from_footfall(out, safe_mode=False, capture_ref=9)
+    assert ev is not None
+    assert not ev.flags & FLAG_NO_RETREAT
 
 
 def test_seismic_only_alert_goes_out_unconfirmed():

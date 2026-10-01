@@ -256,6 +256,7 @@ from cognition.bandit import (
 from cognition.decision import Decision, decide
 from cognition.experience import UNATTRIBUTED, SettledAttempt
 from cognition.fusion import FusionResult, Modality, ModalityReading, fuse, logit
+from perception import kinematics
 from perception.camera import CameraError, Frame
 from perception.detector import Detection, DetectionError, VisionDetectFn
 from perception.seismic_dataset import (
@@ -639,6 +640,22 @@ class FootfallOutcome:
             (ADR 0031 A as amended). Resolved once by _confirmed_species()
             so the deterrence content, the bandit partition and the
             uplink's event class cannot disagree about what this was.
+        no_retreat: Whether this event sets FLAG_NO_RETREAT - the node
+            fired its top tier and the animal was still there at the end of
+            the post-fire window (D8, ADR 0034). The backend maps the flag
+            to priority 'critical', which pages an officer with "this node
+            has run out of options", so it is deliberately the narrowest of
+            the three retreat fields: see _no_retreat_flagged().
+        retreat: The full post-fire trajectory verdict, or None when there
+            was nothing to ask of it - no species to range against, or no
+            actuator fired. `retreat.retreated` is a **tristate** and None
+            there means the node could not tell, which is why `no_retreat`
+            above exists as a separate bool rather than being read off it.
+        retreat_polls: How many detection passes the post-fire window ran.
+            Reported rather than inferred for the same reason vision_polls
+            is: a tail that saw nothing and a tail that was never polled
+            look identical in the verdict, and only one of them is
+            evidence about the animal.
     """
 
     fusion: FusionResult
@@ -660,6 +677,9 @@ class FootfallOutcome:
     suppressed_by_vision: bool = False
     species: str | None = None
     species_repeat_count: int | None = None
+    no_retreat: bool = False
+    retreat: kinematics.RetreatVerdict | None = None
+    retreat_polls: int = 0
 
 
 @dataclass(frozen=True)
@@ -1539,6 +1559,336 @@ def _watch_for_vision(
     )
 
 
+@dataclass(frozen=True)
+class RetreatWatch:
+    """What the window after the deterrent fired observed (D8, ADR 0034).
+
+    Separate from VisionWatch because it answers a different question with
+    the same machinery. VisionWatch asks "is something there", exits the
+    moment it can say yes, and feeds fuse(). This asks "is it still there",
+    cannot exit early by construction - leaving when the boxes stop would
+    answer "did it go quiet", which is not the same fact - and feeds
+    kinematics.retreat_verdict() and nothing else. No decision is taken
+    from it: the deterrent has already fired by the time this runs.
+
+    Attributes:
+        track: Every VisionTrackSample the window produced, in poll order.
+            Poll numbers continue the vision watch's own numbering so the
+            two halves concatenate into one trajectory rather than two
+            overlapping ones.
+        frames: The captured frames, when the caller asked for them to be
+            kept. Empty when event video is recording - ADR 0020's own
+            recording already spans this window, and holding a second copy
+            of 45 stills is several hundred megabytes for nothing.
+        polls: How many detection passes ran. Zero is normal and means the
+            caller gave this window no polls to run (the default
+            configuration's 2s tail), not that a poll failed.
+        elapsed_s: Monotonic seconds from the first poll to the last.
+    """
+
+    track: tuple[VisionTrackSample, ...] = ()
+    frames: tuple[Frame, ...] = ()
+    polls: int = 0
+    elapsed_s: float = 0.0
+
+
+def _watch_retreat(
+    camera: CameraProtocol,
+    detect_vision: VisionDetectFn,
+    trigger_monotonic: float,
+    *,
+    tail_s: float,
+    max_polls: int,
+    poll_interval_s: float,
+    poll_offset: int = 0,
+    frame_count: int = 1,
+    keep_frames: bool = True,
+    max_empty_polls: int = services_config.VISION_WATCH_MAX_EMPTY_POLLS,
+    target_labels: tuple[str, ...] = VISION_TARGET_LABELS,
+    pulse_ir: PulseIrFn | None = None,
+    night: bool | None = None,
+    schema_version: int = services_config.SCHEMA_VERSION,
+    ir_pulse_ms: int = services_config.IR_WATCH_PULSE_MS,
+    ir_min_interval_s: float = services_config.IR_WATCH_MIN_INTERVAL_S,
+    monotonic: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> RetreatWatch:
+    """Watch the post-fire tail with the detector running; never raises.
+
+    The tail already existed - as a 2s sleep plus an undetected 45-frame
+    still burst, or, with event video recording, as a 45s sleep with no
+    frames at all. What it never did was ask the detector anything, so
+    `kinematics.retreat_verdict()` had no post-fire box to work from and
+    answered "no_track" on every event ever recorded. This runs the same
+    detector pass the vision watch runs, over frames the no-video
+    configuration was already capturing and throwing at the disk
+    undetected.
+
+    It spends no deterrence latency. Every actuator call has returned
+    before the caller reaches this, which is the same ordering ADR 0020
+    relies on for the tail it replaces (see the module docstring), and
+    nothing here can shorten or lengthen the tail the caller asked for:
+    `tail_s` is honoured whether the polls run out early or a poll overruns
+    its slot.
+
+    Three ways the loop ends, and only one of them is early:
+
+    1. `max_polls` polls have run. The remaining tail is slept out, so a
+       recording still gets its full length.
+    2. `tail_s` has elapsed.
+    3. `max_empty_polls` consecutive polls returned no frames - the camera
+       has stopped delivering. The remaining tail is still slept out,
+       because the recorder may be fine even where the still path is not.
+
+    A window that sees nothing is a real and common answer, not a failure:
+    the overwhelmingly likely cause is that the animal left, which is the
+    good outcome. It is reported as no boxes rather than as a retreat,
+    because the node cannot tell an empty clearing from a closed camera or
+    a dark night - that distinction is retreat_verdict()'s to make, and it
+    refuses to make it (see its "no_track" branch).
+
+    Args:
+        camera: The still-open CameraProtocol the event has been using.
+        detect_vision: Callable matching perception.detector.VisionDetectFn.
+        trigger_monotonic: This event's reference instant, for frame stamps.
+        tail_s: How long the tail runs, total. A floor as well as a ceiling:
+            time left after the last poll is slept out.
+        max_polls: Most polls to run. The no-video path passes the frame
+            count it was already capturing, so the number of frames written
+            to disk per event does not change.
+        poll_interval_s: Spacing between polls, paced from the window's own
+            start rather than from the previous poll. The difference matters
+            where the whole tail is only a few slots long: start-to-start
+            pacing lets each poll's overshoot push the next one, so the
+            accumulated drift eats the last poll's slot before the deadline
+            does. The no-video path passes max_polls * poll_interval_s as
+            tail_s, which leaves exactly one slot of slack for the lot.
+        poll_offset: Added to each poll's index, so the samples continue the
+            vision watch's numbering instead of restarting at 1.
+        frame_count: Frames per poll. One, not VISION_CHECK_FRAME_COUNT: a
+            trajectory wants samples spread across the tail rather than
+            bursts clustered inside it, and a burst costs a detector pass
+            per frame for boxes that differ by milliseconds.
+        keep_frames: Whether to retain the frames for the caller to save.
+        max_empty_polls: Consecutive empty polls that stop polling.
+        target_labels: Forwarded to _vision_check(). Only the boxes are
+            used here; the confirmation it computes is ignored, because
+            nothing downstream of this window makes a decision.
+        pulse_ir: Callable matching bridge.rpc.pulse_ir, or None for no
+            illumination.
+        night: The event's night read, already made by the caller. True
+            illuminates; False and None do not. Not re-read here - the
+            frames to read it off are the vision watch's, and a 45s tail
+            does not straddle dusk in any way that matters.
+        schema_version: Passed through to pulse_ir.
+        ir_pulse_ms: Requested pulse length; the MCU clamps it.
+        ir_min_interval_s: Start-to-start spacing the MPU keeps between
+            pulses, mirroring the MCU's own duty gate.
+        monotonic: Clock source. Injected for tests.
+        sleep: Sleep function. Injected for tests.
+
+    Returns:
+        A RetreatWatch. Always one - every failure inside degrades to a poll
+        that saw nothing, matching _watch_for_vision()'s own contract.
+    """
+    started = monotonic()
+    deadline = started + max(tail_s, 0.0)
+    track: list[VisionTrackSample] = []
+    kept: list[Frame] = []
+    polls = 0
+    empty_polls = 0
+    last_pulse_at: float | None = None
+    lit = night is True and pulse_ir is not None
+
+    if lit:
+        # The vision watch locks night exposure when *it* establishes night,
+        # but it only reads night at all when it was given both pulse_ir and
+        # is_night. A caller that lit nothing during the watch and lights
+        # this window would otherwise pulse against a hunting auto-exposure,
+        # which is Finding 4 in docs/qa/night-ir-led-characterisation.md -
+        # the combination that produced every spurious Boar box. Locking is
+        # idempotent, so doing it again where the watch already did costs a
+        # call that changes nothing.
+        try:
+            camera.lock_night_exposure()
+        except Exception:  # noqa: BLE001 - an unlocked capture, never a failed tail
+            logger.exception("lock_night_exposure() raised in the retreat window")
+
+    while polls < max(max_polls, 0) and monotonic() < deadline:
+        poll_started = monotonic()
+        polls += 1
+
+        # Same fire-and-join shape as the vision watch: the MCU's pulse_ir()
+        # blocks for the whole pulse and returns once the illuminator is
+        # already dark, so a synchronous call would expose outside its own
+        # light.
+        ir_thread: threading.Thread | None = None
+        if lit and (last_pulse_at is None or poll_started - last_pulse_at >= ir_min_interval_s):
+            last_pulse_at = poll_started
+
+            def _pulse(fn: PulseIrFn = pulse_ir, ms: int = ir_pulse_ms) -> None:
+                try:
+                    fn(schema_version, ms)
+                except Exception:  # noqa: BLE001 - an unlit poll, never a failed tail
+                    logger.exception("pulse_ir raised during the retreat window")
+
+            ir_thread = threading.Thread(target=_pulse, daemon=True)
+            ir_thread.start()
+
+        frames = _capture_burst(camera, trigger_monotonic, count=frame_count)
+        if ir_thread is not None:
+            ir_thread.join()
+
+        if not frames:
+            empty_polls += 1
+            if empty_polls >= max_empty_polls:
+                logger.warning(
+                    "retreat window stopped polling after %d consecutive empty polls "
+                    "(%.1fs into a %.1fs tail) - the tail still runs out",
+                    empty_polls,
+                    poll_started - started,
+                    tail_s,
+                )
+                break
+        else:
+            empty_polls = 0
+            if keep_frames:
+                kept.extend(frames)
+            check = _vision_check(
+                detect_vision, frames, target_labels=target_labels, poll=poll_offset + polls
+            )
+            track.extend(check.track)
+
+        now = monotonic()
+        if now >= deadline:
+            break
+        remaining_to_next = started + polls * max(poll_interval_s, 0.0) - now
+        if remaining_to_next > 0:
+            sleep(min(remaining_to_next, deadline - now))
+
+    elapsed_s = monotonic() - started
+    # The tail is a duration the recording and the animal both depend on,
+    # not a by-product of how many polls happened to fit in it. Sleeping the
+    # remainder is what keeps max_polls a cap on detector passes rather than
+    # a second, quieter definition of the tail length.
+    remaining = deadline - monotonic()
+    if remaining > 0:
+        sleep(remaining)
+
+    if polls:
+        logger.info(
+            "retreat window: %d poll(s) over %.1fs, %d frame(s) with boxes",
+            polls,
+            elapsed_s,
+            sum(1 for s in track if s.detections),
+        )
+    return RetreatWatch(
+        track=tuple(track),
+        frames=tuple(kept),
+        polls=polls,
+        elapsed_s=elapsed_s,
+    )
+
+
+def _retreat_after_fire(
+    track: tuple[VisionTrackSample, ...],
+    species: str | None,
+    actuators: tuple[ActuatorSpan, ...],
+) -> kinematics.RetreatVerdict | None:
+    """The post-fire trajectory verdict, or None when the question is unaskable.
+
+    Two ways it is unaskable, and neither is a near-miss:
+
+    - **No confirmed species.** A seismic-only alert fires at something the
+      camera never resolved, so there is no body plan to range against and
+      no box to range. "It did not leave" is not a claim this node can make
+      about an animal it never saw.
+    - **Nothing fired.** Under safe_mode, or where rule_gate_apply() refused
+      inside its cooldown, there is no fire for a retreat to be from.
+
+    Delegates the whole measurement to kinematics.retreat_verdict() rather
+    than reading the trajectory here. That is D8 and D9 sharing one
+    implementation on purpose (ADR 0034): perception/seismic_dataset.py's
+    with_derived() stores the answer from the same call, so the frame an
+    officer acts on and the corpus a future model trains on cannot drift
+    apart on what retreating looked like.
+
+    Args:
+        track: The whole event's samples - the vision watch's and the
+            retreat window's. retreat_verdict() cuts at the fire itself, so
+            handing it the pre-fire half costs nothing and keeps one list.
+        species: FootfallOutcome.species - what the camera confirmed.
+        actuators: The event's actuator spans.
+
+    Returns:
+        A RetreatVerdict, or None.
+    """
+    if species is None:
+        return None
+    fired = [a.start_monotonic_s for a in actuators if a.start_monotonic_s is not None]
+    if not fired:
+        return None
+    # track_frames() with no locator: the verdict is built from box heights
+    # and frame timestamps, and the sample indices are the record's business
+    # rather than this answer's. Converting here rather than asking
+    # retreat_verdict() to accept both shapes is what keeps it the single
+    # implementation - the recorder hands it TrackFrames too.
+    return kinematics.retreat_verdict(track_frames(track), species, min(fired))
+
+
+# Derived from the enum rather than written as TIER_3 so that adding a tier
+# cannot silently leave _no_retreat_flagged()'s gate pointing at what is by
+# then the second-highest one. A module-level singleton because a call in a
+# default argument is evaluated once at import anyway, and ruff is right to
+# want that said out loud.
+TOP_TIER: Tier = max(Tier)
+
+
+def _no_retreat_flagged(
+    verdict: kinematics.RetreatVerdict | None,
+    *,
+    tier: Tier | int | None,
+    fired: bool,
+    top_tier: Tier = TOP_TIER,
+) -> bool:
+    """Whether this event sets FLAG_NO_RETREAT (D8, ADR 0034).
+
+    The flag escalates the alert to priority 'critical', which is the one
+    message that means "this node has run out of options, send someone", as
+    distinct from every other alert, which means "this node is handling
+    it". Sending a human into a forest at night is the cost of a false
+    positive here, so all three conditions are required and the tristate is
+    read strictly:
+
+    - **`retreated is False`, never merely falsy.** None means the node
+      could not tell - a dark tail, a closed camera, too few boxes - and
+      routing that as a no is exactly the mistake RetreatVerdict's own
+      docstring forbids. An undetermined verdict behaves like an ordinary
+      deterred event.
+    - **The top tier.** Below it the node still has somewhere to escalate
+      to on the next trigger, so it has not run out of options.
+    - **Something actually fired.** A false horn ack means
+      rule_gate_apply() refused inside HORN_COOLDOWN_MS, and an animal that
+      stayed put through a burst that never happened says nothing about
+      deterrence - the same reason the bandit records no attempt for it.
+
+    Args:
+        verdict: _retreat_after_fire()'s answer.
+        tier: The tier that was selected.
+        fired: Whether the horn or the LED acked.
+        top_tier: The highest tier that exists. Defaults to TOP_TIER,
+            which is derived from the enum - see its comment.
+
+    Returns:
+        True to set the flag.
+    """
+    if verdict is None or verdict.retreated is not False:
+        return False
+    if not fired or tier is None:
+        return False
+    return int(tier) >= int(top_tier)
+
+
 def _worth_filming(watch: VisionWatch) -> bool:
     """Whether this event saw something services.config says to keep footage of.
 
@@ -1974,6 +2324,8 @@ def handle_footfall_event(
     threshold: float = ALERT_PROBABILITY_THRESHOLD,
     capture_post_fire_tail_s: float = CAPTURE_POST_FIRE_TAIL_S,
     video_retreat_tail_s: float = services_config.EVENT_VIDEO_RETREAT_TAIL_S,
+    retreat_burst_frames: int = 0,
+    retreat_burst_interval_s: float = services_config.VISION_WATCH_POLL_INTERVAL_S,
     vision_watch_base_s: float = services_config.VISION_WATCH_BASE_S,
     vision_watch_extended_s: float = services_config.VISION_WATCH_EXTENDED_S,
     vision_watch_poll_interval_s: float = services_config.VISION_WATCH_POLL_INTERVAL_S,
@@ -2107,6 +2459,25 @@ def handle_footfall_event(
             here because it is a real cost, not a footnote - a footfall
             notify arriving inside the tail waits. Overridable so tests
             don't have to sleep for real.
+        retreat_burst_frames: Extra JPEG frames to capture after the tail
+            above has already elapsed and drive_horn()/drive_led() have
+            already returned - so widening this can never delay the horn,
+            the same guarantee video_retreat_tail_s relies on. 0 (the
+            default) is a byte-for-byte no-op: no extra capture_burst()
+            call, `frames` unchanged, matching this function's behaviour
+            before this parameter existed. Ignored whenever `event_video`
+            is not None - ADR 0020's recording is already covering the
+            retreat via video_retreat_tail_s, and a second still-frame
+            burst during that window would fight the same open camera.
+            A node opts in through main.py's _footfall_kwargs; tests
+            default to 0 unless one exercises this path deliberately.
+        retreat_burst_interval_s: Start-to-start spacing between the
+            retreat burst's polls, and with retreat_burst_frames the thing
+            that sets that tail's length. Defaults to
+            VISION_WATCH_POLL_INTERVAL_S - the same answer the event-video
+            branch gives to the same question, so there is one poll cadence
+            for the post-fire window rather than two. Only consulted when
+            retreat_burst_frames > 0.
         vision_watch_base_s: How long the pre-decision vision watch runs for
             an ordinary trigger (ADR 0022,
             services.config.VISION_WATCH_BASE_S). 0.0 collapses the watch
@@ -2424,7 +2795,50 @@ def handle_footfall_event(
             species_repeat_count=species_repeat_count,
         )
 
-    def _write_seismic_record(actuators: tuple[ActuatorSpan, ...] = ()) -> None:
+    def _snapshot_ground_motion() -> SeismicSlice | None:
+        """This event's ground motion, pulled while the ring still holds it.
+
+        Split out of _write_seismic_record() because the two have different
+        deadlines. The ring keeps SEISMIC_STREAM_RETAIN_S (60s) and the
+        post-fire tail can run for the better part of another minute, so a
+        waveform pulled when the record is written would be missing the
+        pre-roll and most of the watch - while the post-fire boxes the
+        record's retreat verdict needs do not exist until that tail has
+        run. Snapshot early, write late.
+
+        Never raises, for the same reason _write_seismic_record() does not:
+        this runs on a path where the deterrents have already fired, and a
+        ring buffer that cannot answer has to cost the dataset a waveform
+        rather than cost the event its retreat tail and its video.
+        """
+        if seismic_stream is None:
+            return None
+        try:
+            # Reaches back before the trigger on purpose: STA/LTA fires
+            # *after* the onset it detected, so a record starting at
+            # trigger_monotonic is missing the cleanest impulse in the
+            # encounter. span() clamps to what the ring still holds, so
+            # asking for more than survives costs nothing.
+            ground_motion = seismic_stream.span(
+                trigger_monotonic - seismic_pre_roll_s, time.monotonic()
+            )
+        except Exception as exc:  # noqa: BLE001 - a dataset write must not cost an event
+            logger.warning(
+                "seismic dataset: ground motion for this event was not readable: %s", exc
+            )
+            return None
+        if ground_motion is None:
+            logger.info(
+                "seismic dataset: no ground motion held for this watch - "
+                "recording the vision half alone"
+            )
+        return ground_motion
+
+    def _write_seismic_record(
+        ground_motion: SeismicSlice | None,
+        actuators: tuple[ActuatorSpan, ...] = (),
+        extra_track: tuple[VisionTrackSample, ...] = (),
+    ) -> None:
         """File this watch's ground motion under what the camera made of it.
 
         ADR 0035, and the reason item 11b kept the boxes. Runs on every
@@ -2446,6 +2860,12 @@ def handle_footfall_event(
         label is the entire product here and an unlabelled record from a
         node that cannot see is a file nobody will ever train on.
 
+        `extra_track` is the post-fire window's samples (D8). Passing them
+        is what makes with_derived()'s `retreat` field answerable at all:
+        it builds the verdict from `record.track`, and before item 10 that
+        track stopped at the fire, so every record ever written carried a
+        null verdict for want of a box rather than for want of an animal.
+
         Never raises. Everything inside is best-effort by construction, and
         this is called from a path where the deterrents have already fired.
         """
@@ -2453,21 +2873,6 @@ def handle_footfall_event(
             return
         try:
             locate = None if seismic_stream is None else seismic_stream.sample_index_at
-            ground_motion = None
-            if seismic_stream is not None:
-                # Reaches back before the trigger on purpose: STA/LTA fires
-                # *after* the onset it detected, so a record starting at
-                # trigger_monotonic is missing the cleanest impulse in the
-                # encounter. span() clamps to what the ring still holds, so
-                # asking for more than survives costs nothing.
-                ground_motion = seismic_stream.span(
-                    trigger_monotonic - seismic_pre_roll_s, time.monotonic()
-                )
-                if ground_motion is None:
-                    logger.info(
-                        "seismic dataset: no ground motion held for this watch - "
-                        "recording the vision half alone"
-                    )
             # The camera's chance to see, asked with the illumination this
             # watch actually had. The ADR 0022 gate further up deliberately
             # asks the same question with illuminated=False, because its
@@ -2492,7 +2897,14 @@ def handle_footfall_event(
                 feature_vector=tuple(feature_vector),
                 seismic_available=seismic_available,
                 seismic=ground_motion,
-                track=track_frames(watch.track, locate),
+                # The watch's samples and the post-fire window's, as one
+                # trajectory. The post-fire frames resolve to sample indices
+                # past the end of the waveform above, which is correct and
+                # not a defect: the waveform is snapshotted at the fire,
+                # because gait analysis is cut there anyway (the horn rings
+                # after it stops) and the retreat verdict is built from box
+                # heights alone.
+                track=track_frames(tuple(watch.track) + extra_track, locate),
                 actuators=tuple(place_actuator(a, locate) for a in actuators),
                 vision_polls=watch.polls,
                 vision_watch_s=watch_s,
@@ -2600,7 +3012,7 @@ def handle_footfall_event(
         # also where the overwhelming majority of records come from - wind,
         # rain and cattle are most of what a geophone reports, and they are
         # the negative class.
-        _write_seismic_record()
+        _write_seismic_record(_snapshot_ground_motion())
         return _no_actuation_outcome(frames=tuple(vision_frames), video_path=video_path)
 
     # Read here rather than at trigger time because this is the first
@@ -2743,23 +3155,123 @@ def handle_footfall_event(
         alert=decision.alert,
     )
 
-    # Written here rather than at the end for one reason: the ring holds
+    # Pulled here rather than at the end for one reason: the ring holds
     # SEISMIC_STREAM_RETAIN_S of ground motion, and the retreat tail below
-    # sleeps for seconds before the frames are even saved. Pulling the
-    # waveform now is what keeps the pre-roll from ageing out of the buffer
-    # on exactly the events that matter most. Both actuator calls have
-    # returned above, so the spans are complete.
-    _write_seismic_record(tuple(actuator_spans))
+    # runs for seconds to the better part of a minute. Snapshotting now is
+    # what keeps the pre-roll from ageing out of the buffer on exactly the
+    # events that matter most. The record itself is written after the tail,
+    # because the post-fire boxes its retreat verdict needs do not exist
+    # yet. Both actuator calls have returned above, so the spans are
+    # complete.
+    fired_actuators = tuple(actuator_spans)
+    ground_motion = _snapshot_ground_motion()
 
+    retreat_window = RetreatWatch()
     if camera_opened:
         # The tail runs *after* every actuator call above has returned, so
         # nothing about event video - not the recording, not the longer
-        # retreat tail - can delay the horn. That ordering is the whole
-        # reason ADR 0020 records rather than pre-buffers.
-        time.sleep(video_retreat_tail_s if event_video is not None else capture_post_fire_tail_s)
+        # retreat tail - and nothing about the detector passes below can
+        # delay the horn. That ordering is the whole reason ADR 0020
+        # records rather than pre-buffers.
+        #
+        # Which tail, and how it is polled, is the one configuration
+        # difference left here:
+        #
+        # - **Event video recording.** ADR 0020's recording already spans
+        #   this window, so the tail is its length and the polls ride the
+        #   same running pipeline the vision-check bursts do. Their frames
+        #   are not kept - the video holds them, and a second copy of
+        #   ~45 stills is several hundred megabytes for nothing.
+        # - **No event video.** The short post-fire tail, then a burst
+        #   whose frames are kept, because nothing else on this path is
+        #   recording them. retreat_burst_frames is 0 until a node opts
+        #   in, which makes this branch the tail sleep it has always been
+        #   - the stills and the detector passes are both new here, and
+        #   they are what gives a node with no event video any post-fire
+        #   box to answer "did it leave" from at all.
+        if event_video is not None:
+            tail_s = video_retreat_tail_s
+            tail_interval_s = vision_watch_poll_interval_s
+            # +1 so the cap never ends the window a poll before its own
+            # deadline; the sleep-out at the end of _watch_retreat() makes
+            # overshooting the count harmless and undershooting the tail
+            # not.
+            tail_polls = int(tail_s / tail_interval_s) + 1 if tail_interval_s > 0 else 0
+            tail_keep_frames = False
+        else:
+            time.sleep(capture_post_fire_tail_s)
+            tail_interval_s = retreat_burst_interval_s
+            tail_polls = retreat_burst_frames
+            tail_s = tail_polls * tail_interval_s
+            tail_keep_frames = True
+
+        if tail_polls <= 0:
+            # Nothing to poll - a build that captures no retreat burst, or a
+            # zero poll interval - but the tail still belongs to the
+            # recording and to the animal, so it is slept rather than
+            # skipped. The two tails stay alternatives, never cumulative.
+            if tail_s > 0:
+                time.sleep(tail_s)
+        else:
+            retreat_window = _watch_retreat(
+                camera,
+                detect_vision,
+                trigger_monotonic,
+                tail_s=tail_s,
+                max_polls=tail_polls,
+                poll_interval_s=tail_interval_s,
+                # Continues the watch's numbering so the two halves
+                # concatenate into one trajectory. See RetreatWatch.track.
+                poll_offset=watch.polls,
+                keep_frames=tail_keep_frames,
+                target_labels=target_labels,
+                pulse_ir=pulse_ir,
+                # The night read the event already made, not a new one. An
+                # unlit tail on a night event is a tail with no boxes in it,
+                # which is precisely the case FLAG_NO_RETREAT exists for.
+                night=_night_of_event(),
+                schema_version=schema_version,
+            )
+            frames = frames + list(retreat_window.frames)
         _close_camera(camera)
         if frames:
             _save_captured_frames(save_frames, frames, tag)
+
+    # D8 / ADR 0034, measured rather than inferred cloud-side. A repeat
+    # trigger would arrive minutes late and would never arrive at all for
+    # an elephant that stays put without re-crossing the STA/LTA threshold.
+    event_track = tuple(watch.track) + retreat_window.track
+    retreat = _retreat_after_fire(event_track, confirmed_species, fired_actuators)
+    no_retreat = _no_retreat_flagged(
+        retreat, tier=tier, fired=bool(horn_ack or led_ack)
+    )
+    if retreat is not None:
+        logger.info(
+            "retreat verdict: retreated=%s reason=%s direction=%s relative_range=%s "
+            "frames=%d tier=%d -> no_retreat=%s",
+            retreat.retreated,
+            retreat.reason,
+            retreat.direction,
+            "n/a" if retreat.relative_range is None else f"{retreat.relative_range:.2f}",
+            retreat.frames,
+            int(tier),
+            no_retreat,
+        )
+    if no_retreat:
+        logger.warning(
+            "FLAG_NO_RETREAT: tier %d fired at %s and it had not left after %.1fs "
+            "(%d post-fire frame(s), relative range %s) - this event alerts as "
+            "critical and needs people, not another burst",
+            int(tier),
+            confirmed_species,
+            retreat_window.elapsed_s,
+            retreat.frames if retreat is not None else 0,
+            "n/a"
+            if retreat is None or retreat.relative_range is None
+            else f"{retreat.relative_range:.2f}",
+        )
+
+    _write_seismic_record(ground_motion, fired_actuators, retreat_window.track)
 
     # Unconditional keep: reaching here means decision.alert is true, which
     # satisfies the keep-gate on its own whatever the vision check said.
@@ -2791,6 +3303,9 @@ def handle_footfall_event(
         vision_watch_s=watch_s,
         species=confirmed_species,
         species_repeat_count=species_repeat_count,
+        no_retreat=no_retreat,
+        retreat=retreat,
+        retreat_polls=retreat_window.polls,
     )
 
 
