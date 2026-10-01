@@ -3,6 +3,70 @@
 - **Status:** accepted
 - **Date:** 2026-09-30
 - **Amends:** ADR 0002 (what goes over LoRa), ADR 0029 B.3 (when a joined radio takes USART1)
+- **Amended:** 2026-10-02 — see the amendment immediately below, which replaces §A's "no species
+  is guessed" rule and widens §D's priority and audience tables
+
+## Amendment, 2 Oct 2026 — the frame carries the species the camera saw (not a rewrite of this ADR)
+
+Everything below stands as written except the four points here. The byte layout is unchanged; two
+class values and one flag bit are **appended**, which §A's append-only rule already permits.
+
+**1. §A's "No species is guessed" paragraph is replaced.** It read: a node that deters exactly one
+species reports it; a node that deters several reports class 0 with the vision flag set. That was
+honest about the mechanism it described — `confirmed_class()` inferred the species from the node's
+*configuration*, on the reasoning that one configured target meant it must have been that one — but
+the mechanism itself was wrong, and multi-species nodes are now the normal case rather than the
+exception, so most events would have arrived species-less.
+
+The rule was always meant to say something narrower, and now does: **report what the camera
+observed; never infer a species from configuration.** The vision watch knew which label confirmed
+and discarded it before building the outcome; it is now threaded through and reported on the frame.
+A node deterring three species names the one it saw. Class 0 keeps its meaning — a seismic alert
+with no camera confirmation — rather than doubling as "could not tell which".
+
+This is required rather than cosmetic: the routing rules in point 3 are undecidable in the backend
+without a species on the frame.
+
+**2. Two classes and one flag, appended in lockstep.** `5 = elephant_call` (ADR 0033) and
+`6 = fox` join §A's class table; `0x08 = no retreat` joins its flag byte. Appended across
+`device/mcu/src/uplink.h` (`UPLINK_EVENT_CLASS_MAX` → 6), `comms/lora_uplink.py`,
+`web/ingest/src/payload.ts` and `send-alert/message.ts`, with the known-answer byte vectors in
+`device/mcu/tests/test_uplink/` and `payload.test.ts` updated together — those shared vectors are
+the only thing keeping the two decoders honest. **No DDL:** `events.species` and `events.priority`
+are plain `text` with no CHECK and no Postgres enum.
+
+`5` stays distinct from `1` because an officer must be able to tell a microphone detection from a
+camera one — they have different false-positive profiles — and it therefore never carries
+`FLAG_VISION_CONFIRMED`.
+
+**3. §D's priority and audience tables are replaced by this one.**
+
+| Trigger | Dashboard | Officers | Residents within 3 km |
+|---|---|---|---|
+| Any detection | yes | — | — |
+| Gunshot, chainsaw | yes | yes (`high`) | **never** |
+| Elephant sighted and deterred | yes | yes (`high`) | yes |
+| Elephant, top tier, **did not retreat** | yes | yes (`critical`) | yes |
+| Boar, fox | yes | no push | no push |
+
+`audienceFor()` **stops failing open.** It consulted nothing and returned "officers and residents"
+for every species that was not gunshot or chainsaw, so a fox would have paged a village. It now
+reads the species registry's audience class, and anything unmapped — including a class byte from
+firmware newer than the running backend — resolves to `staff_only` rather than defaulting to the
+loudest possible fan-out. Boar and fox stay `priority = 'normal'`: on the dashboard, no push.
+
+A third priority value `'critical'` is added, and the gates in `send-alert/index.ts` and the
+`public_area_risk` view widen from `= 'high'` to `in ('high','critical')`. `'critical'` means one
+specific thing — the node reached the top of its ladder and the animal did not leave — and the
+officer-facing text says a forest team is being requested rather than instructing the reader to
+send one, because residents within 3 km receive the same text.
+
+**4. `alertText()`'s fallback asserts nothing.** An unknown or absent species renders as
+"unidentified detection", and the anti-poaching advice line is keyed off the species rather than
+off the audience. Those were the same test while `staff_only` meant "poaching sound"; now
+`staff_only` is also the default for anything unnamed, and telling an officer to follow the
+anti-poaching protocol because the class byte was one this build does not know would be a
+fabricated instruction.
 
 ## Context
 

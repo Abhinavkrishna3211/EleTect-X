@@ -1,7 +1,14 @@
 # ADR 0023: Boar deterrence content, and a per-node species scope to act on it
 
-- **Status:** proposed
+- **Status:** accepted (2026-10-02)
 - **Date:** 2026-09-03
+- **Superseded in part by:** ADR 0034, which replaces Decision D's conclusion that a dedicated
+  `boar_only` node is preferable to `both` — the bandit is now partitioned per species, so the
+  same-run contamination Decision D described as unfixable is fixed, and a one-node-per-site
+  deployment no longer has to choose between species
+- **Note:** set to accepted on 2 Oct 2026. Decisions A through D all shipped weeks earlier;
+  the status line had not moved with them. Fox joined the scope vocabulary under ADR 0034
+  Decision D, which follows Decision C's ecological-inference argument for shared content.
 
 ## Context
 
