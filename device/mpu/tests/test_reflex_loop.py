@@ -3003,6 +3003,40 @@ def test_elephant_still_fires_on_the_first_poll_under_the_both_scope():
     assert "drive_horn" in log
 
 
+def test_the_outcome_reports_the_species_the_camera_confirmed():
+    """The species travels from the watch to the uplink, not from the node config.
+
+    comms/lora_uplink.py builds the frame's event class from this field
+    alone, so a confirmation that does not reach it is a detection that
+    reaches a ranger unnamed.
+    """
+    outcome, _, _ = _fire(
+        probability=0.05,
+        sta_lta_ratio=1.2,
+        detect_vision=_FakeVisionDetect([BOAR]),
+        target_labels=("Elephant", "Boar"),
+        vision_watch_base_s=0.05,
+        vision_watch_poll_interval_s=0.0,
+    )
+
+    assert outcome.vision_confirmed is True
+    # A two-species node: the old config inference had no answer here.
+    assert outcome.species == "Boar"
+
+
+def test_a_seismic_only_alert_reports_no_species():
+    """The fail-safe end of the same path: alert yes, species no."""
+    outcome, _, _ = _fire(
+        probability=0.95,
+        sta_lta_ratio=9.0,
+        detect_vision=_FakeVisionDetect([]),
+    )
+
+    assert outcome.decision.alert is True
+    assert outcome.vision_confirmed is False
+    assert outcome.species is None
+
+
 def test_boar_fires_nothing_under_the_shipped_elephant_only_default_at_any_streak_length():
     """The default scope, checked at the actuator rather than only at the video.
 
@@ -3031,6 +3065,63 @@ def test_boar_fires_nothing_under_the_shipped_elephant_only_default_at_any_strea
     assert video.committed == []
 
 
+# --- _confirmed_species (ADR 0031 A as amended) -------------------------------
+#
+# Which species the camera actually confirmed, resolved once and read by
+# the deterrence content, the bandit partition and the uplink alike. The
+# distinction this block is here to pin is between *observed* and
+# *configured*: nothing below passes a node scope that stands in for an
+# answer the watch already has.
+
+
+def _check(*, confirmed: bool, species: tuple[str, ...]) -> reflex_loop.VisionCheck:
+    reading = reflex_loop.ModalityReading(Modality.VISION, 0.0, available=True)
+    return reflex_loop.VisionCheck(reading, confirmed, species)
+
+
+def test_an_unconfirmed_check_names_no_species():
+    """None, not a guess - the whole point of the amendment to ADR 0031 A.
+
+    A seismic-only alert is a real alert and still uplinks; it uplinks
+    unnamed, because the geophone cannot tell one animal from another and
+    a species on a ranger's screen has to be one the camera saw.
+    """
+    check = _check(confirmed=False, species=("Boar",))
+
+    assert reflex_loop._confirmed_species(check, target_labels=("Boar",)) is None
+
+
+def test_a_confirmed_label_outside_the_node_scope_names_no_species():
+    """Unreachable from _vision_check(), which only confirms on a target match.
+
+    Kept because this function's answer now reaches the wire: a label read
+    back as confirming evidence for a scope that never targeted it would
+    put a species in front of an officer that this node never agreed to
+    look for.
+    """
+    check = _check(confirmed=True, species=("Boar",))
+
+    assert reflex_loop._confirmed_species(check, target_labels=("Elephant",)) is None
+
+
+def test_a_confirmed_fox_is_named_fox_not_its_content_species():
+    """Fox and Boar share horn content; they must not share an identity on the wire."""
+    check = _check(confirmed=True, species=("Fox",))
+
+    assert reflex_loop._confirmed_species(check, target_labels=("Fox",)) == "Fox"
+    # ... while the content it plays is still Boar's, per the registry.
+    assert reflex_loop._deterrence_species(check, target_labels=("Fox",)) == "Boar"
+
+
+def test_two_species_at_once_resolve_to_one_answer_in_registry_order():
+    """Elephant wins the tie-break, and content and identity agree on it."""
+    check = _check(confirmed=True, species=("Boar", "Elephant"))
+    scope = ("Elephant", "Boar")
+
+    assert reflex_loop._confirmed_species(check, target_labels=scope) == "Elephant"
+    assert reflex_loop._deterrence_species(check, target_labels=scope) == "Elephant"
+
+
 # --- _deterrence_species (ADR 0023) ------------------------------------------
 #
 # Which species cognition_config.resolve_tier_action() plays content for.
@@ -3040,11 +3131,6 @@ def test_boar_fires_nothing_under_the_shipped_elephant_only_default_at_any_strea
 # state), so the Boar-reachable cases pass an explicit target_labels
 # argument, the same as any other _watch_for_vision()/handle_footfall_event()
 # caller exercising a non-default scope would.
-
-
-def _check(*, confirmed: bool, species: tuple[str, ...]) -> reflex_loop.VisionCheck:
-    reading = reflex_loop.ModalityReading(Modality.VISION, 0.0, available=True)
-    return reflex_loop.VisionCheck(reading, confirmed, species)
 
 
 def test_an_unconfirmed_check_defaults_to_elephant():

@@ -562,6 +562,14 @@ class FootfallOutcome:
             failed". Never a path to a file that was subsequently deleted:
             nothing in this loop or in perception/storage.py removes a
             committed capture (ADR 0020 Decision C).
+        species: Which species the camera confirmed - a SPECIES_REGISTRY
+            key - or None when nothing confirmed, which covers every
+            seismic-only alert. What was *observed*, never what the node
+            was configured to look for: a node scoped to several species
+            reports the one it actually saw rather than reporting nothing
+            (ADR 0031 A as amended). Resolved once by _confirmed_species()
+            so the deterrence content, the bandit partition and the
+            uplink's event class cannot disagree about what this was.
     """
 
     fusion: FusionResult
@@ -581,6 +589,7 @@ class FootfallOutcome:
     vision_polls: int = 1
     vision_watch_s: float = 0.0
     suppressed_by_vision: bool = False
+    species: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1387,30 +1396,23 @@ def _finish_event_video(
     return None
 
 
-def _deterrence_species(
+def _confirmed_species(
     vision_check: VisionCheck, target_labels: tuple[str, ...] = VISION_TARGET_LABELS
-) -> str:
-    """Which species cognition_config.resolve_tier_action() should play content for.
+) -> str | None:
+    """Which species this event's camera watch actually confirmed, or None.
 
-    "Elephant" is the safe, byte-for-byte-unchanged default: under the
-    committed NODE_DETERRENCE_SCOPE default (elephant_only), Boar can never
-    confirm (it is never in target_labels there), so vision_check.species
-    can never contain a confirming label other than "Elephant" and this
-    always returns "Elephant" - the same value every call site passed
-    implicitly before this function existed.
+    The single place the loop answers "what was this". Three things
+    downstream need that answer - which content the horn and LEDs play
+    (_deterrence_species below), which escalation ladder the bandit spends,
+    and which class crosses the wire - and they have to agree, so they are
+    all derived from this one call rather than each re-resolving the same
+    question against the same VisionCheck.
 
-    Only meaningful once NODE_DETERRENCE_SCOPE admits more than Elephant.
     Reads vision_check.confirmed rather than raw species membership, for
     the same reason _watch_for_vision()'s own confirm gate does: a
     majority-gated label present in .species without having cleared its
-    poll-level streak is not a real confirmation and must not steer content
-    selection either.
-
-    Which content a confirmed label maps to is the registry's answer, not
-    this function's - services/config.py's SPECIES_REGISTRY carries a
-    deterrence_content key per species, which is how Fox fires Boar's horn
-    tracks while keeping its own bandit ladder. This function only decides
-    *which* confirming label to ask about.
+    poll-level streak is not a real confirmation, and must not steer
+    content selection, learning, or what an officer reads off a frame.
 
     If two species confirmed on the same event - both animals genuinely in
     frame at once - this prefers Elephant: its evidence base is the deeper
@@ -1418,12 +1420,13 @@ def _deterrence_species(
     ADR 0023 makes for reusing tiger/lion on Boar), and it is the species
     this device exists for first. Below Elephant the tie-break is registry
     order, so it is settled in the table rather than by whichever label the
-    detector happened to list first. An alert with no vision confirmation
-    at all (seismic/acoustic alone) also falls through to "Elephant" - the
-    seismic signature this device fuses on was built and tuned for elephant
-    footfall, so there is no non-vision evidence this function could use to
-    say otherwise.
+    detector happened to list first.
 
+    Returns None, never a guess, when nothing confirmed. A seismic-only
+    alert is still a real alert and still uplinks, but it uplinks
+    species-less: the geophone cannot name an animal, and ADR 0031 A's rule
+    as amended is that a frame reports what the camera observed and never
+    what the node was configured to look for.
 
     Args:
         vision_check: The watch's final VisionCheck (handle_footfall_event's
@@ -1437,7 +1440,7 @@ def _deterrence_species(
             own _watch_for_vision() call used.
     """
     if not vision_check.confirmed:
-        return "Elephant"
+        return None
     # Registry order, not detector order, so the multi-species tie-break is
     # a property of the table rather than of whichever label came back
     # first from a given frame.
@@ -1446,9 +1449,47 @@ def _deterrence_species(
         for label in services_config.DETERRABLE_LABELS
         if label in vision_check.species and label in target_labels
     ]
-    if not confirming or "Elephant" in confirming:
+    if not confirming:
+        return None
+    if "Elephant" in confirming:
         return "Elephant"
-    return services_config.deterrence_content_for(confirming[0])
+    return confirming[0]
+
+
+def _deterrence_species(
+    vision_check: VisionCheck, target_labels: tuple[str, ...] = VISION_TARGET_LABELS
+) -> str:
+    """Which species cognition_config.resolve_tier_action() should play content for.
+
+    The confirmed label (_confirmed_species above) mapped through the
+    registry, which owns that mapping: services/config.py's
+    SPECIES_REGISTRY carries a deterrence_content key per species, and it
+    is how Fox fires Boar's horn tracks while keeping its own bandit
+    ladder.
+
+    "Elephant" is the safe, byte-for-byte-unchanged default: under the
+    committed NODE_DETERRENCE_SCOPE default (elephant_only), Boar can never
+    confirm (it is never in target_labels there), so nothing but "Elephant"
+    can come back here - the same value every call site passed implicitly
+    before this function existed. Only meaningful once
+    NODE_DETERRENCE_SCOPE admits more than Elephant.
+
+    An event with no confirmation at all (seismic/acoustic alone) falls
+    through to "Elephant" as well: the seismic signature this device fuses
+    on was built and tuned for elephant footfall, so there is no non-vision
+    evidence that could say otherwise. That fallback is a *content* choice
+    and stops here - the uplink reports the same event as UNCONFIRMED, and
+    must, or every geophone trigger would reach a ranger named as an
+    elephant the camera never saw.
+
+    Args:
+        vision_check: As _confirmed_species.
+        target_labels: As _confirmed_species.
+    """
+    confirmed = _confirmed_species(vision_check, target_labels)
+    if confirmed is None:
+        return "Elephant"
+    return services_config.deterrence_content_for(confirmed)
 
 
 def handle_footfall_event(
@@ -1631,9 +1672,10 @@ def handle_footfall_event(
         target_labels: This node's commissioning-time deterrence scope
             (services.config.NODE_DETERRENCE_SCOPE, resolved through
             deterrence_scope_labels() into DETERRENT_TARGET_LABELS).
-            Forwarded to _watch_for_vision() and _deterrence_species() so
-            confirmation, the fused reading and horn/LED content selection
-            all agree on which species this node acts on. Defaults to
+            Forwarded to _watch_for_vision() and _confirmed_species(),
+            so that confirmation, the fused reading, horn/LED content
+            selection and the species named on the uplink all agree on
+            which species this node acts on. Defaults to
             VISION_TARGET_LABELS - a plain module-level default, not
             re-read per call, since a live node's scope is fixed for the
             process's lifetime (see main.py's startup banner). Injected as
@@ -1745,6 +1787,11 @@ def handle_footfall_event(
 
     vision_check = watch.check
     vision_frames: list[Frame] = list(watch.frames)
+    # Resolved once here rather than at each consumer: the deterrence
+    # content, the frame that goes on air and the bandit partition all have
+    # to name the same animal, and the only way to guarantee that is for
+    # there to be one resolution of it.
+    confirmed_species = _confirmed_species(vision_check, target_labels)
 
     readings = [seismic_reading, acoustic_reading, vision_check.reading]
     fusion_result = fuse(readings, cognition_config.DEFAULT_FUSION_PARAMS)
@@ -1808,6 +1855,7 @@ def handle_footfall_event(
             vision_polls=watch.polls,
             vision_watch_s=watch_s,
             suppressed_by_vision=suppressed_by_vision,
+            species=confirmed_species,
         )
 
     # is_night() is a real image computation - an HSV conversion over the
@@ -2107,6 +2155,7 @@ def handle_footfall_event(
         video_path=video_path,
         vision_polls=watch.polls,
         vision_watch_s=watch_s,
+        species=confirmed_species,
     )
 
 

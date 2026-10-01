@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import queue
 import threading
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any, Protocol
@@ -121,33 +121,35 @@ class FootfallOutcomeLike(Protocol):
     led_ack: bool | None
     vision_confirmed: bool
     suppressed_by_vision: bool
+    species: str | None
 
 
-def confirmed_class(target_labels: Sequence[str]) -> EventClass:
-    """Class to report for a vision-confirmed event on this node.
+def observed_class(species: str | None) -> EventClass:
+    """The wire class for the species the camera actually observed.
 
-    FootfallOutcome says *that* the camera confirmed a deterrent target,
-    not which one. On a node that deters exactly one species that is
-    enough. On a node that deters several it is not, and the frame goes out
-    as UNCONFIRMED with FLAG_VISION_CONFIRMED set rather than guessing a
-    species a ranger would then act on.
+    Replaces the node-scope inference this module used to do - one target
+    configured, so it must have been that one - which reported UNCONFIRMED
+    on every node deterring more than one species. That is now the normal
+    deployment, so most frames would have gone out species-less while the
+    vision watch knew the answer and discarded it (ADR 0031 A as amended).
+
+    None, or a label this build has no wire code for, is UNCONFIRMED. The
+    detection still goes out and still reaches the dashboard; it goes out
+    unnamed, because a species printed in front of a ranger has to be one
+    something on this node actually stands behind.
 
     Args:
-        target_labels: The node's DETERRENT_TARGET_LABELS.
-
-    Returns:
-        The single target's class, or UNCONFIRMED.
+        species: FootfallOutcome.species - a SPECIES_REGISTRY key, or None.
     """
-    if len(target_labels) == 1:
-        return _LABEL_CLASS.get(target_labels[0], EventClass.UNCONFIRMED)
-    return EventClass.UNCONFIRMED
+    if species is None:
+        return EventClass.UNCONFIRMED
+    return _LABEL_CLASS.get(species, EventClass.UNCONFIRMED)
 
 
 def event_from_footfall(
     outcome: FootfallOutcomeLike,
     *,
     safe_mode: bool,
-    target_labels: Sequence[str],
     capture_ref: int = 0,
 ) -> LoraEvent | None:
     """Map a finished footfall event to an uplink, or None if it is not one.
@@ -161,7 +163,6 @@ def event_from_footfall(
         outcome: handle_footfall_event's return value.
         safe_mode: Whether the node ran as a dry run, so the dashboard can
             tell "deterrent held back on purpose" from "deterrent failed".
-        target_labels: The node's DETERRENT_TARGET_LABELS.
         capture_ref: Local record reference, if the caller has one.
 
     Returns:
@@ -180,9 +181,7 @@ def event_from_footfall(
         flags |= FLAG_SAFE_MODE
 
     return LoraEvent(
-        event_class=(
-            confirmed_class(target_labels) if outcome.vision_confirmed else EventClass.UNCONFIRMED
-        ),
+        event_class=observed_class(outcome.species),
         confidence=float(outcome.fusion.probability),
         tier=int(outcome.action.tier) if outcome.action is not None else 0,
         flags=flags,

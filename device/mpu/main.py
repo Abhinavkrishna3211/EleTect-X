@@ -230,7 +230,6 @@ def _on_footfall_event(
         event_from_footfall(
             outcome,
             safe_mode=reflex_loop.SAFE_MODE,
-            target_labels=reflex_loop.VISION_TARGET_LABELS,
         )
     )
 

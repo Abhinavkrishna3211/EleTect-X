@@ -13,9 +13,9 @@ from comms.lora_uplink import (
     EventClass,
     LoraEvent,
     LoraUplink,
-    confirmed_class,
     event_from_footfall,
     gunshot_event,
+    observed_class,
 )
 
 
@@ -43,9 +43,7 @@ class _Outcome:
     led_ack: bool | None = None
     vision_confirmed: bool = False
     suppressed_by_vision: bool = False
-
-
-ELEPHANT_ONLY = ("Elephant",)
+    species: str | None = None
 
 
 def _outcome(**kw):
@@ -58,26 +56,26 @@ def _outcome(**kw):
 
 def test_dismissed_trigger_is_not_sent():
     """A trigger fusion did not alert on, with no camera confirmation, stays local."""
-    assert (
-        event_from_footfall(_outcome(alert=False), safe_mode=False, target_labels=ELEPHANT_ONLY)
-        is None
-    )
+    assert event_from_footfall(_outcome(alert=False), safe_mode=False) is None
 
 
 def test_vision_overruled_alert_is_not_sent():
     """An alert the camera overruled must not reach anyone's phone."""
     out = _outcome(alert=True, suppressed_by_vision=True)
-    assert event_from_footfall(out, safe_mode=False, target_labels=ELEPHANT_ONLY) is None
+    assert event_from_footfall(out, safe_mode=False) is None
 
 
 def test_confirmed_elephant_that_was_deterred():
     """The main case: camera-confirmed elephant, tier 2 fired."""
     out = _outcome(
-        probability=0.87, action=_Action(2), horn_ack=True, led_ack=False, vision_confirmed=True
+        probability=0.87,
+        action=_Action(2),
+        horn_ack=True,
+        led_ack=False,
+        vision_confirmed=True,
+        species="Elephant",
     )
-    ev = event_from_footfall(
-        out, safe_mode=False, target_labels=ELEPHANT_ONLY, capture_ref=0x01020304
-    )
+    ev = event_from_footfall(out, safe_mode=False, capture_ref=0x01020304)
     assert ev == LoraEvent(
         EventClass.ELEPHANT,
         pytest.approx(0.87),
@@ -89,7 +87,7 @@ def test_confirmed_elephant_that_was_deterred():
 
 def test_seismic_only_alert_goes_out_unconfirmed():
     """A fusion alert without the camera is sent, but never labelled a species."""
-    ev = event_from_footfall(_outcome(alert=True), safe_mode=True, target_labels=ELEPHANT_ONLY)
+    ev = event_from_footfall(_outcome(alert=True), safe_mode=True)
     assert ev is not None
     assert ev.event_class is EventClass.UNCONFIRMED
     assert ev.tier == 0
@@ -99,17 +97,40 @@ def test_seismic_only_alert_goes_out_unconfirmed():
 def test_confirmation_counts_even_below_threshold():
     """A camera confirmation is sent even if fusion alone stayed under threshold."""
     ev = event_from_footfall(
-        _outcome(alert=False, vision_confirmed=True), safe_mode=False, target_labels=ELEPHANT_ONLY
+        _outcome(alert=False, vision_confirmed=True, species="Elephant"), safe_mode=False
     )
     assert ev is not None and ev.event_class is EventClass.ELEPHANT
 
 
-def test_confirmed_class_by_node_scope():
-    """The species is only named when the node deters exactly one."""
-    assert confirmed_class(("Elephant",)) is EventClass.ELEPHANT
-    assert confirmed_class(("Boar",)) is EventClass.BOAR
-    assert confirmed_class(("Elephant", "Boar")) is EventClass.UNCONFIRMED
-    assert confirmed_class(()) is EventClass.UNCONFIRMED
+def test_observed_class_names_what_the_camera_saw():
+    """Every registry species gets its own class, whatever else the node deters."""
+    assert observed_class("Elephant") is EventClass.ELEPHANT
+    assert observed_class("Boar") is EventClass.BOAR
+    assert observed_class("Fox") is EventClass.FOX
+
+
+def test_observed_class_never_guesses():
+    """No confirmed label, no species on the frame - this is the fail-safe."""
+    assert observed_class(None) is EventClass.UNCONFIRMED
+    assert observed_class("Leopard") is EventClass.UNCONFIRMED
+
+
+def test_multi_species_node_still_names_the_species():
+    """The regression D4 exists for: a two-species node used to report UNCONFIRMED.
+
+    confirmed_class() inferred the species from DETERRENT_TARGET_LABELS, so
+    a node scoped to both gave up and sent UNCONFIRMED even though the
+    watch knew which animal it had seen. The scope is no longer consulted.
+    """
+    ev = event_from_footfall(
+        _outcome(
+            alert=True, action=_Action(1), horn_ack=True, vision_confirmed=True, species="Boar"
+        ),
+        safe_mode=False,
+    )
+    assert ev is not None
+    assert ev.event_class is EventClass.BOAR
+    assert ev.flags & FLAG_VISION_CONFIRMED
 
 
 def test_gunshot_event():
