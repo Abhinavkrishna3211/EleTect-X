@@ -6,7 +6,11 @@ or equals a hardcoded literal, which would only re-encode the value and
 never catch drift.
 """
 
+import importlib
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 from services import config, reflex_loop
@@ -318,6 +322,146 @@ def test_an_unrecognized_scope_falls_back_to_elephant_only_instead_of_raising():
     assert config.deterrence_scope_labels("") == (("Elephant",), ("Elephant",))
 
 
+def test_a_scope_names_any_combination_of_the_registry():
+    """The point of the change: a combination the old three states could not express.
+
+    Elephant-and-fox-but-not-boar is not an exotic case - it is a node at
+    a site with no boar pressure - and under the three-state switch there
+    was no string that said it.
+    """
+    assert config.parse_scope_labels("Elephant,Fox") == ("Elephant", "Fox")
+    assert config.parse_scope_labels("Boar,Fox") == ("Boar", "Fox")
+    assert config.parse_scope_labels("Elephant,Boar,Fox") == ("Elephant", "Boar", "Fox")
+
+
+def test_order_and_case_and_spacing_cannot_split_one_scope_into_two():
+    """Equivalent spellings must be one scope, because this value keys the DB.
+
+    If " fox , ELEPHANT " and "Elephant,Fox" resolved differently they
+    would open two experience databases, and a node would silently lose
+    its learned policy to a whitespace edit in a compose file.
+    """
+    canonical = config.parse_scope_labels("Elephant,Fox")
+    assert config.parse_scope_labels("Fox,Elephant") == canonical
+    assert config.parse_scope_labels(" fox , ELEPHANT ") == canonical
+    assert config.parse_scope_labels("Elephant,Fox,Elephant") == canonical
+
+
+def test_the_resolved_order_follows_the_registry_not_the_operator():
+    """Registry order, so the tuple is canonical rather than as-typed."""
+    assert config.parse_scope_labels("Fox,Boar,Elephant") == config.DETERRABLE_LABELS
+
+
+def test_all_tracks_the_registry_rather_than_a_hand_written_list():
+    """The alias that must not need editing when a species is added.
+
+    Asserted against DETERRABLE_LABELS rather than a literal: a hardcoded
+    ("Elephant", "Boar", "Fox") here would pass forever while silently
+    becoming wrong the next time the registry grows.
+    """
+    assert config.parse_scope_labels("all") == config.DETERRABLE_LABELS
+    assert "Fox" in config.parse_scope_labels("all")
+
+
+def test_an_unknown_species_is_dropped_without_taking_the_rest_with_it():
+    """Dropping one bad label beats discarding the operator's whole intent.
+
+    Deliberately asserted on a scope with no Elephant in it. "Elephant,
+    Tiger" would be the obvious case to write and it proves nothing: its
+    expected value is ("Elephant",), which is also what the
+    everything-was-dropped fallback returns, so the test would pass just
+    as happily against an implementation that threw the whole list away.
+    """
+    assert config.parse_scope_labels("Boar,Tiger,Fox") == ("Boar", "Fox")
+    # Nothing usable left, so this one really is the fallback.
+    assert config.parse_scope_labels("Tiger,Leopard") == ("Elephant",)
+
+
+def test_every_legacy_alias_still_resolves_byte_for_byte():
+    """No deployed node may be repointed by scopes having become free-form."""
+    assert config.parse_scope_labels("elephant_only") == ("Elephant",)
+    assert config.parse_scope_labels("boar_only") == ("Boar",)
+    assert config.parse_scope_labels("both") == ("Elephant", "Boar")
+    assert config.parse_scope_labels("none") == ()
+
+
+def test_fox_is_an_ordinary_scope_choice_and_not_a_mode(monkeypatch):
+    """Fox is deterred because a node was commissioned for it, nothing else.
+
+    It was previously appended to both target lists by an operating-mode
+    flag, after the scope had already resolved - so the node deterred a
+    species its own configuration did not name, and no scope string could
+    turn it off. Scope is the only thing that decides this now.
+    """
+    assert "Fox" not in config.parse_scope_labels("both")
+    assert "Fox" in config.parse_scope_labels("Elephant,Boar,Fox")
+
+    monkeypatch.setenv("ELETECT_DETERRENCE_SCOPE", "Elephant,Fox")
+    reloaded = importlib.reload(config)
+    try:
+        assert reloaded.DETERRENT_TARGET_LABELS == ("Elephant", "Fox")
+        assert reloaded.EVENT_VIDEO_TARGET_LABELS == ("Elephant", "Fox")
+    finally:
+        monkeypatch.undo()
+        importlib.reload(config)
+
+
+def test_a_label_list_scope_survives_a_cold_import():
+    """The import-order trap: this fails as NameError at startup, not as a wrong value.
+
+    EXPERIENCE_DB_PATH is evaluated at import time, and a label-list
+    scope reaches parse_scope_labels() through experience_db_filename().
+    Define the parser below that line - beside deterrence_scope_labels(),
+    which is the natural place for it - and a field node configured with
+    exactly the scope the parser exists to support dies on import.
+
+    Run in a subprocess, which is the only thing that reproduces it.
+    Calling parse_scope_labels() directly cannot: by then the module has
+    finished importing. Nor can importlib.reload(), which re-executes the
+    body into the *existing* module namespace, so the previous import's
+    binding is still there to satisfy the premature call - a reload-based
+    version of this test passes against the broken order. Only a cold
+    interpreter has the empty namespace a field node boots with.
+    """
+    env = dict(os.environ, ELETECT_DETERRENCE_SCOPE="Elephant,Boar,Fox")
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from services import config\n"
+            "print(config.DETERRENT_TARGET_LABELS)\n"
+            "print(config.EXPERIENCE_DB_PATH.name)\n",
+        ],
+        cwd=Path(__file__).resolve().parent.parent,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"importing config with a label-list scope failed:\n{result.stderr}"
+    )
+    labels, db_name = result.stdout.splitlines()[:2]
+    assert labels == "('Elephant', 'Boar', 'Fox')"
+    assert db_name == "experience-elephant-boar-fox.sqlite3"
+
+
+def test_filming_can_be_widened_without_widening_deterrence(monkeypatch):
+    """The asymmetric case, and the reason it is a second scope not a fourth state.
+
+    Collect the footage that shows whether deterring a species is worth
+    doing, before any horn fires at one.
+    """
+    monkeypatch.setenv("ELETECT_DETERRENCE_SCOPE", "Elephant")
+    monkeypatch.setenv("ELETECT_EVENT_VIDEO_SCOPE", "Elephant,Boar,Fox")
+    reloaded = importlib.reload(config)
+    try:
+        assert reloaded.DETERRENT_TARGET_LABELS == ("Elephant",)
+        assert reloaded.EVENT_VIDEO_TARGET_LABELS == ("Elephant", "Boar", "Fox")
+    finally:
+        monkeypatch.undo()
+        importlib.reload(config)
+
+
 # --- EXPERIENCE_DB_PATH derivation -------------------------------------------
 
 
@@ -334,6 +478,34 @@ def test_experience_db_path_derivation_for_all_three_scopes():
         ("both", "experience-both.sqlite3"),
     ):
         assert config.experience_db_filename(scope) == expected_name
+
+
+def test_a_label_list_keys_its_database_off_the_resolved_labels():
+    """Equivalent spellings must open one database, not several.
+
+    The raw string cannot be the key here the way it is for an alias:
+    "Fox,Elephant" and " elephant , fox " are the same scope, and keying
+    on the text would hand each of them its own empty policy.
+    """
+    expected = "experience-elephant-fox.sqlite3"
+    assert config.experience_db_filename("Elephant,Fox") == expected
+    assert config.experience_db_filename("Fox,Elephant") == expected
+    assert config.experience_db_filename(" fox , ELEPHANT ") == expected
+
+
+def test_widening_a_scope_opens_a_different_database():
+    """Not a bug - but it is a cost, and it should be visible in a test.
+
+    A node moved from "both" to "Elephant,Boar,Fox" starts the bandit
+    cold. Its old policy stays on disk and comes back if the scope is
+    restored, which is the property worth having; what it does not do is
+    carry over.
+    """
+    assert config.experience_db_filename("both") == "experience-both.sqlite3"
+    assert (
+        config.experience_db_filename("Elephant,Boar,Fox")
+        == "experience-elephant-boar-fox.sqlite3"
+    )
 
 
 def test_elephant_only_experience_db_path_is_todays_unqualified_filename():

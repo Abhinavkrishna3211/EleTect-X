@@ -22,6 +22,7 @@ tuning knobs for cognition math.
 import dataclasses
 import logging
 import os
+import re
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -89,9 +90,11 @@ NODE_HOUSEHOLD_PROXIMITY = os.environ.get("ELETECT_HOUSEHOLD_PROXIMITY", "0") !=
 # constants it derives.
 #
 # Same env-first, constant-second delivery path as NODE_HOUSEHOLD_PROXIMITY,
-# for the same reason. Unrecognized values fall back to "elephant_only" -
-# see deterrence_scope_labels() - never raise, since a typo in a per-node
-# environment variable must not crash the reflex loop on a field node.
+# for the same reason. The value is either an explicit label list -
+# "Elephant,Boar,Fox" - or one of the legacy aliases; parse_scope_labels()
+# below owns the vocabulary. Unrecognized values fall back to
+# "elephant_only" and never raise, since a typo in a per-node environment
+# variable must not crash the reflex loop on a field node.
 NODE_DETERRENCE_SCOPE = os.environ.get("ELETECT_DETERRENCE_SCOPE", "elephant_only")
 
 
@@ -236,6 +239,100 @@ def event_class_for(label: str) -> int:
     species = SPECIES_REGISTRY.get(label)
     return species.event_class if species is not None else 0
 
+
+# Aliases for the three scope strings that predate free-form scopes. Kept so
+# existing per-node configuration, the experience-DB filenames derived from
+# it, and the tests that name these strings all keep resolving to exactly
+# what they resolved to before. "all" is the whole registry, so a node
+# commissioned for every species this build knows does not need its scope
+# re-edited when the registry grows. New deployments should prefer the
+# explicit label-list form, which says what it does without a lookup.
+_SCOPE_ALIASES: dict[str, tuple[str, ...]] = {
+    "none": (),
+    "elephant_only": ("Elephant",),
+    "boar_only": ("Boar",),
+    "both": ("Elephant", "Boar"),
+    "all": DETERRABLE_LABELS,
+}
+
+
+def parse_scope_labels(scope: str, *, what: str = "deterrence") -> tuple[str, ...]:
+    """Resolve one scope string to a tuple of vision labels.
+
+    Accepts either an alias from _SCOPE_ALIASES ("elephant_only", "both",
+    "all", "none", ...) or an explicit comma-separated label list, so a new
+    species can be commissioned onto a node - ELETECT_DETERRENCE_SCOPE=
+    "Elephant,Boar,Fox" - without a source edit. Matching is
+    case-insensitive and whitespace-tolerant, because this value is typed
+    into a commissioning sheet or a compose file, not generated.
+
+    Defined here, immediately below the registry it validates against and
+    above experience_db_filename(), rather than beside
+    deterrence_scope_labels() further down. EXPERIENCE_DB_PATH is evaluated
+    at import time, and a label-list scope reaches this function through
+    experience_db_filename(); defined any later, importing this module
+    under exactly the configuration this function exists to support raises
+    NameError.
+
+    Never raises. Every rejection path degrades to something safe and says
+    so in the log, for the reason the old three-state version gave: a typo
+    in a per-node environment variable must not crash the reflex loop on a
+    field node.
+
+    - A label outside DETERRABLE_LABELS is dropped with a warning. The
+      rest of the list still applies, because dropping one unrecognized
+      species is a smaller surprise than silently ignoring an operator's
+      whole intent.
+    - A scope that resolves to nothing at all - empty, or every label
+      dropped - falls back to "elephant_only" rather than to (), matching
+      the previous behaviour. Note this is the one case where the safe
+      direction is arguable: falling back to () would deter nothing, which
+      is safer for the animals and useless for the residents this node
+      exists to protect. Keeping the old fallback means a garbled scope
+      behaves like a default node, not like a dead one.
+
+    Args:
+        scope: The raw scope string, straight off the environment.
+        what: Names the scope in log lines, so an operator reading a
+            warning can tell which of the two scopes they mistyped.
+
+    Returns:
+        The labels in DETERRABLE_LABELS order, deduplicated, so two scopes
+        naming the same species in different orders produce the same tuple
+        - which matters because this value keys the experience DB.
+    """
+    raw = scope.strip()
+    alias = _SCOPE_ALIASES.get(raw.lower())
+    if alias is not None:
+        return alias
+
+    by_lower = {label.lower(): label for label in DETERRABLE_LABELS}
+    selected: set[str] = set()
+    for token in raw.split(","):
+        name = token.strip()
+        if not name:
+            continue
+        canonical = by_lower.get(name.lower())
+        if canonical is None:
+            logger.warning(
+                "%s scope names %r, which is not one of DETERRABLE_LABELS %s - dropped",
+                what,
+                name,
+                list(DETERRABLE_LABELS),
+            )
+            continue
+        selected.add(canonical)
+
+    if not selected:
+        logger.warning(
+            "%s scope %r resolved to no usable label, falling back to 'elephant_only'",
+            what,
+            scope,
+        )
+        return _SCOPE_ALIASES["elephant_only"]
+
+    return tuple(label for label in DETERRABLE_LABELS if label in selected)
+
 # ---------------------------------------------------------------------------
 # Bridge.call() timeout and retry policy
 # ---------------------------------------------------------------------------
@@ -331,18 +428,39 @@ def experience_db_filename(scope: str) -> str:
     """Resolve a NODE_DETERRENCE_SCOPE value to its experience-store filename.
 
     A pure function (not just the inline expression below) so the
-    derivation is directly testable for all three states, the same reason
-    deterrence_scope_labels() above is its own function rather than three
-    inline tuples. Deliberately does not validate `scope` against the
-    three known values the way deterrence_scope_labels() does - an
-    unrecognized value still gets its own qualified filename here rather
-    than silently falling back to "experience.sqlite3", so a typo in
-    NODE_DETERRENCE_SCOPE can never point a misconfigured node at the real
-    trial's learned policy.
+    derivation is directly testable, the same reason
+    deterrence_scope_labels() is its own function rather than inline
+    tuples. Deliberately does not reject an unrecognized scope the way
+    parse_scope_labels() does - a scope this build cannot resolve still
+    gets its own qualified filename here rather than silently falling back
+    to "experience.sqlite3", so a typo in NODE_DETERRENCE_SCOPE can never
+    point a misconfigured node at the real trial's learned policy.
+
+    Two spellings, deliberately:
+
+    - An alias, or any single bare token, keeps its historical filename
+      byte for byte. "both" stays experience-both.sqlite3, so no deployed
+      node is repointed at a different - and therefore empty - database by
+      scopes having become free-form.
+    - A label list keys off the RESOLVED labels, not the raw string.
+      "Elephant,Fox" and " fox , ELEPHANT " name the same scope and must
+      not learn two separate policies: the whole point of keying the
+      filename on the scope is that restoring a scope restores its
+      matching DB, which fails if an equivalent spelling opens a different
+      file.
+
+    Note what a scope change still costs, because it is easy to read this
+    as cost-free: widening "both" to "Elephant,Boar,Fox" opens
+    experience-elephant-boar-fox.sqlite3, which is a new and empty
+    database. The node keeps its old policy on disk and can get it back by
+    restoring the old scope, but it starts the new one cold.
     """
     if scope == "elephant_only":
         return "experience.sqlite3"
-    return f"experience-{scope}.sqlite3"
+    if scope.strip().lower() in _SCOPE_ALIASES or re.fullmatch(r"[A-Za-z0-9_.-]+", scope):
+        return f"experience-{scope.strip()}.sqlite3"
+    slug = "-".join(label.lower() for label in parse_scope_labels(scope))
+    return f"experience-{slug or 'none'}.sqlite3"
 
 
 EXPERIENCE_DB_PATH = DATA_DIR / experience_db_filename(NODE_DETERRENCE_SCOPE)
@@ -659,10 +777,10 @@ NIGHT_EXPOSURE_LOCK_ENABLED = os.environ.get("ELETECT_NIGHT_EXPOSURE_LOCK", "1")
 # ---------------------------------------------------------------------------
 # Which species this node acts on (services/reflex_loop.py)
 # ---------------------------------------------------------------------------
-# ETX-V is a two-class detector - perception/detector.py's module docstring
-# records the deployed model's labels as ["Boar", "Elephant"] - and the two
-# classes are wanted for different things at different times, so they get
-# two separate lists rather than one switch.
+# ETX-V is a three-class detector - perception/detector.py's module
+# docstring records the deployed model's labels - and the classes are
+# wanted for different things at different times, so they get two separate
+# lists rather than one switch.
 #
 # DETERRENT_TARGET_LABELS is the heavier of the two. A label in here counts
 # as a vision confirmation, which means it feeds fuse() as positive
@@ -675,53 +793,52 @@ NIGHT_EXPOSURE_LOCK_ENABLED = os.environ.get("ELETECT_NIGHT_EXPOSURE_LOCK", "1")
 # no horn, no battery, no habituation - so it is the cheap list, and it is
 # the right place to start with a new species.
 #
-# Both lists are now *derived* from NODE_DETERRENCE_SCOPE rather than
-# hand-set, via deterrence_scope_labels() below - a per-node commissioning
-# attribute, same shape as NODE_HOUSEHOLD_PROXIMITY, rather than a two-line
-# source edit for a species change. This rewrites the two lines but does
-# not change what they resolve to today: NODE_DETERRENCE_SCOPE's default
-# "elephant_only" maps to ("Elephant",) for both, byte-for-byte the same
-# value these two constants have always had.
+# Both lists are *derived* from NODE_DETERRENCE_SCOPE rather than hand-set,
+# via deterrence_scope_labels() below - a per-node commissioning attribute,
+# same shape as NODE_HOUSEHOLD_PROXIMITY, rather than a source edit for a
+# species change. The default "elephant_only" maps to ("Elephant",) for
+# both, byte-for-byte the value these two constants have always had.
 #
-# The three states this resolves, so the tradeoff each one makes is named
-# once rather than re-derived at every call site:
+# A scope is any combination of the species registry's labels, named
+# explicitly and in any order:
 #
-#   1. "elephant_only" (default, and what the first field trial runs):
-#          DETERRENT_TARGET_LABELS = ("Elephant",)
-#          EVENT_VIDEO_TARGET_LABELS = ("Elephant",)
-#   2. "boar_only" - deters and films Boar; Elephant is detected, logged and
-#      filmed but never fires an actuator. Named for a node whose site
-#      makes elephant deterrence not the priority.
-#          DETERRENT_TARGET_LABELS = ("Boar",)
-#          EVENT_VIDEO_TARGET_LABELS = ("Boar",)
-#   3. "both":
-#          DETERRENT_TARGET_LABELS = ("Elephant", "Boar")
-#          EVENT_VIDEO_TARGET_LABELS = ("Elephant", "Boar")
+#     ELETECT_DETERRENCE_SCOPE=Elephant
+#     ELETECT_DETERRENCE_SCOPE=Elephant,Fox
+#     ELETECT_DETERRENCE_SCOPE=Elephant,Boar,Fox
 #
-# The asymmetric case the three symmetric states do NOT cover - deter
-# elephants, but only collect boar footage, the honest next step because it
-# produces the evidence for whether boar deterrence is even worth doing
-# before any horn fires at one - is not a fourth named state. It is
-# "elephant_only" plus one explicit reassignment below the derivation:
+# parse_scope_labels() resolves the string and DETERRABLE_LABELS - the
+# registry's own keys - is both its vocabulary and its safety bound, so a
+# scope can only ever name a species this build actually knows how to
+# deter. Adding a species is one registry row; commissioning a node for it
+# is one environment variable, with no source edit in between.
 #
-#          EVENT_VIDEO_TARGET_LABELS = ("Elephant", "Boar")
+# That replaces a three-state switch - "elephant_only" / "boar_only" /
+# "both" - which could not express a node that deters Elephant and Fox but
+# not Boar, and which needed a new state hand-written into this file every
+# time the registry grew. The three strings still resolve, byte for byte,
+# as aliases; see _SCOPE_ALIASES for why they are kept rather than
+# translated away.
 #
-# Keep making that a visible one-line override at the point of use, not a
-# fourth entry in deterrence_scope_labels() - the whole point of deriving
-# these two constants is that a hand-edit of just one of them now reads as
-# a deliberate departure from the derivation, not as dead code overwritten
-# by it.
+# The asymmetric case - deter elephants, but collect boar and fox footage,
+# the honest way to find out whether deterring a species is worth doing
+# before any horn fires at one - is ELETECT_EVENT_VIDEO_SCOPE, set
+# independently below. A second scope rather than a fourth state, because
+# the two lists answer different questions and the cheap one should not
+# need the expensive one's permission.
 #
-# "both" carries a real caveat that "boar_only" alone does not, and it is
-# not a style objection. The bandit in cognition/bandit.py learns one
-# deterrence policy per node, not one per species, and the habituation
-# window (ADR 0017) counts triggers without asking what caused them.
-# Deterring both species on one node therefore spends the same escalation
-# ladder and the same encounter memory: a night of boar visits can walk the
-# node up to tier 3 and leave an elephant arriving at dawn facing an
-# already-habituated response. Nothing here prevents that, and nothing in
-# the ADRs has decided it - so "both" is a deliberate choice to make with
-# that trade in view, not a free upgrade. See docs/KNOWN_GAPS.md.
+# A multi-species scope used to carry a caveat a single-species one did
+# not, and it was not a style objection: the bandit learned one policy per
+# node, so a night of boar visits could walk the node up to tier 3 and
+# leave an elephant arriving at dawn facing an already-habituated
+# response. ADR 0034 closed that - the escalation floor and the action
+# values are partitioned per species, so one species can no longer spend
+# another's ladder. What stays shared, deliberately, is the reward:
+# proxy_reward() measures time to the next seismic trigger, which is
+# species-blind by construction, and crediting only same-species triggers
+# would nearly stop the node learning at night, when most triggers are
+# never attributed to anything. That is a documented limitation in ADR
+# 0034 rather than an open defect, and it is the one thing worth keeping
+# in view when widening a scope.
 
 
 def deterrence_scope_labels(scope: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -729,26 +846,42 @@ def deterrence_scope_labels(scope: str) -> tuple[tuple[str, ...], tuple[str, ...
 
     Pure function, same shape as cognition.config.resolve_tier_action -
     the imperative shell reads the site attribute, this turns it into the
-    two lists everything else in the reflex loop actually consumes. An
-    unrecognized scope logs a warning and falls back to "elephant_only"
-    rather than raising: a typo in a per-node environment variable must
-    not crash the reflex loop on a field node.
+    two lists everything else in the reflex loop actually consumes.
+
+    Both lists default to the same scope: filming what you deter is the
+    common case, and needing two environment variables to say so is a
+    footgun. The asymmetric case the old three-state version could not
+    express is ELETECT_EVENT_VIDEO_SCOPE, applied below.
+
+    Kept as its own function, and kept returning a pair, so the call sites
+    and tests that name the legacy scope strings keep working unchanged
+    while parse_scope_labels() carries the behaviour.
     """
-    if scope == "elephant_only":
-        return ("Elephant",), ("Elephant",)
-    if scope == "boar_only":
-        return ("Boar",), ("Boar",)
-    if scope == "both":
-        return ("Elephant", "Boar"), ("Elephant", "Boar")
-    logger.warning(
-        "unrecognized NODE_DETERRENCE_SCOPE %r, falling back to 'elephant_only'", scope
-    )
-    return ("Elephant",), ("Elephant",)
+    labels = parse_scope_labels(scope)
+    return labels, labels
 
 
 DETERRENT_TARGET_LABELS, EVENT_VIDEO_TARGET_LABELS = deterrence_scope_labels(
     NODE_DETERRENCE_SCOPE
 )
+
+# Filming is the cheap list - it costs disk and nothing else, no horn, no
+# battery, no habituation - so it is the right place to start with a new
+# species. Unset, it follows the deterrence scope. Set, it replaces it
+# outright, which is how a node collects the evidence for whether deterring
+# a species is worth doing before any actuator fires at one:
+#
+#     ELETECT_DETERRENCE_SCOPE=Elephant
+#     ELETECT_EVENT_VIDEO_SCOPE=Elephant,Boar,Fox
+#
+# Bounded by the same DETERRABLE_LABELS vocabulary. That is stricter than
+# it needs to be - filming a species is harmless and the bound exists for
+# actuators - but one vocabulary across both scopes means an operator
+# learns it once, and widening it later is a smaller change than splitting
+# it now.
+_EVENT_VIDEO_SCOPE = os.environ.get("ELETECT_EVENT_VIDEO_SCOPE")
+if _EVENT_VIDEO_SCOPE is not None:
+    EVENT_VIDEO_TARGET_LABELS = parse_scope_labels(_EVENT_VIDEO_SCOPE, what="event-video")
 
 # ---------------------------------------------------------------------------
 # Deterrent-event capture storage (perception/storage.py)
