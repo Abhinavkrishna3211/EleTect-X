@@ -391,9 +391,10 @@ def _fire(probability=0.9, sta_lta_ratio=6.0, schema_version=1, call_log=None, *
     fake(s) it cares about. detect_vision defaults to a fake that always
     finds nothing - see _FakeVisionDetect's own docstring for why that keeps
     the existing fusion-value assertions valid. is_night defaults to "always
-    night", so the IR-firing tests below exercise the escalated tiers'
-    pulse_ir the same as before this gate existed; the daylight-suppression
-    path has its own tests that override it.
+    night", which with the zero-length watch below means every default event
+    runs blind-at-night: one unlit poll, and no pulse, because the night
+    read needs a frame before the next poll can be lit. Illumination is
+    exercised against _watch_for_vision() directly instead.
 
     The default experience store is fresh and in-memory, so an unspecified
     one means a cold store: no repeats, no learned values, and therefore
@@ -874,20 +875,28 @@ def test_escalation_saturates_at_the_top_tier():
     experience.close()
 
 
-@TIER_FLOOR_OVERRIDE
-def test_escalated_tier_fires_ir_concurrently_with_the_capture():
-    """Tier 2 fires all three actuators, with pulse_ir concurrent with the evidence capture.
+# ---------------------------------------------------------------------------
+# handle_footfall_event() - the deterrence sequence does not touch IR
+# ---------------------------------------------------------------------------
+#
+# These used to be twelve tests covering a tier-gated pulse_ir, its day/night
+# gate and its exposure lock, all inside the deterrence sequence. IR is a
+# camera light, not a deterrent, so all of that moved into the vision watch
+# and is tested against _watch_for_vision() directly, further down this file
+# under "vision-watch illumination". What is left here is the handler-level
+# half: that the deterrence sequence really has stopped firing it, and that
+# what the watch did still reaches the outcome.
 
-    The counterpart to the tier-1 ordering test above. The pre-decision
-    vision-check capture_burst() is synchronous and always lands right after
-    camera.open(), before decide() or tier selection ever run - only the
-    *second* capture_burst() (the post-alert evidence burst) races
-    pulse_ir(), which now starts on its own thread once the tier is known
-    and is joined before drive_horn() (module docstring). So its call_log
-    entry can legally land either just before or just after that second
-    camera.capture_burst()'s - both happen on the main thread's un-joined
-    window - but it is guaranteed to land before drive_horn(), and the first
-    camera.capture_burst() is guaranteed to land before either.
+
+@TIER_FLOOR_OVERRIDE
+def test_an_escalated_tier_fires_two_actuators_and_not_a_third():
+    """Tier 2 is a horn and an LED. There is no third actuator to escalate to.
+
+    The ordering assertion is the point, not just the absence: the whole
+    sequence is now deterministic, where it used to need a set() over
+    positions 2-3 because pulse_ir raced the evidence burst on its own
+    thread. Nothing in the deterrence path is concurrent with the capture
+    any more.
     """
     experience = ExperienceStore(IN_MEMORY_PATH)
     _fire(0.9, experience=experience)
@@ -896,311 +905,88 @@ def test_escalated_tier_fires_ir_concurrently_with_the_capture():
     outcome, kwargs, log = _fire(0.9, experience=experience, call_log=log)
 
     assert outcome.action.tier is Tier.TIER_2
-    assert outcome.ir_ack is True
-    assert kwargs["pulse_ir"].calls == [(1, TIER_2.ir_duration_ms)]
-    assert log[0] == "camera.open"
-    assert log[1] == "camera.capture_burst"  # the pre-decision vision check, deterministic
-    assert set(log[2:4]) == {"camera.capture_burst", "pulse_ir"}
-    assert log[4:] == ["drive_horn", "drive_led", "camera.close", "save_frames"]
-    experience.close()
-
-
-@TIER_FLOOR_OVERRIDE
-def test_pulse_ir_overlaps_the_capture_window_not_after_it():
-    """pulse_ir() and the camera capture must overlap in wall-clock time.
-
-    The MCU's pulse_ir() blocks for the full requested duration
-    (device/mcu/src/ir.cpp: analogWrite(HIGH) -> delay(duration_ms) ->
-    analogWrite(0)), so firing it strictly after camera.capture_burst() the
-    way every other actuator fires would mean it always returns once the
-    illuminator is already dark - every night frame this system captures
-    would be unilluminated. Proven here with a pulse_ir fake that blocks for
-    a measurable hold_s and records its own on/off timestamps: the
-    capture's frames must land inside that window, not after it.
-    """
-    experience = ExperienceStore(IN_MEMORY_PATH)
-    _fire(0.9, experience=experience)  # tier 1, escalates the next call to tier 2
-
-    pulse_ir = _FakePulseIr(hold_s=0.2)
-    camera = _FakeCamera()
-    outcome, _, _ = _fire(0.9, experience=experience, pulse_ir=pulse_ir, camera=camera)
-
-    assert outcome.action.tier is Tier.TIER_2
-    assert outcome.ir_ack is True
-    assert pulse_ir.on_at is not None
-    assert pulse_ir.off_at is not None
-    assert camera.captured_frames, "capture must have actually produced frames"
-
-    for frame in camera.captured_frames:
-        assert pulse_ir.on_at <= frame.timestamp_s <= pulse_ir.off_at, (
-            "frame captured outside the pulse_ir on/off window - the "
-            "illuminator was not lit when this frame was taken"
-        )
-    experience.close()
-
-
-# ---------------------------------------------------------------------------
-# handle_footfall_event() - the day/night gate on pulse_ir (perception/night.py)
-# ---------------------------------------------------------------------------
-
-
-def _escalate_to_tier_2(experience, saw=None):
-    """One tier-1 fire so the next _fire() on this store lands on tier 2 (fires IR).
-
-    `saw` is the detection the priming event confirms, and it has to name
-    whatever species the test then fires. Since ADR 0034 the escalation
-    floor reads one species' trigger count, so a priming event the camera
-    could not name escalates the unattributed partition and nothing else.
-    Left None that is exactly what happens, which is what the night tests
-    below want: their own event is unconfirmed too, so both land in the
-    same partition and the ladder still moves.
-    """
-    extra = {"detect_vision": _FakeVisionDetect([saw])} if saw is not None else {}
-    _fire(0.9, experience=experience, **extra)
-
-
-@TIER_FLOOR_OVERRIDE
-def test_daylight_vision_check_suppresses_pulse_ir_but_still_fires_horn_and_led(caplog):
-    """is_night() False: the illuminator is skipped, the rest of the tier is not.
-
-    In daylight the IMX462's IR-cut filter is in front of the sensor, so a
-    pulse_ir() would spend MOSFET duty budget on light no pixel can see. The
-    tier still escalated and still owes a horn+LED response - only the IR
-    drops out, and the drop is logged, not silent.
-
-    Vision confirms here because after ADR 0022 Decision B that is the only
-    way a *daylight* event reaches the actuators at all: in daylight the
-    camera can see, so an unconfirmed event is held rather than fired. The
-    two gates are independent and this test is about the second one - what
-    an alerting daylight event does with its illuminator - so it has to get
-    past the first.
-    """
-    experience = ExperienceStore(IN_MEMORY_PATH)
-    _escalate_to_tier_2(experience, ELEPHANT)
-
-    log: list = []
-    with caplog.at_level("INFO"):
-        outcome, kwargs, log = _fire(
-            0.9,
-            experience=experience,
-            call_log=log,
-            is_night=lambda frames: False,
-            detect_vision=_FakeVisionDetect([ELEPHANT]),
-        )
-
-    assert outcome.action.tier is Tier.TIER_2
-    assert outcome.ir_ack is None
     assert kwargs["pulse_ir"].calls == []
-    assert "pulse_ir" not in log
     assert log == [
         "camera.open",
-        "camera.capture_burst",
-        "camera.capture_burst",
+        "camera.capture_burst",  # the watch's single poll
+        "camera.capture_burst",  # the evidence burst
         "drive_horn",
         "drive_led",
         "camera.close",
         "save_frames",
     ]
-    assert any(
-        "pulse_ir suppressed" in r.message and "daylight" in r.message
-        for r in caplog.records
-    )
     experience.close()
 
 
 @TIER_FLOOR_OVERRIDE
-def test_undetermined_day_night_state_also_suppresses_pulse_ir(caplog):
-    """is_night() None (no measurable frame): skip IR, with its own log line.
+@pytest.mark.parametrize("tier_primer", [0, 1, 2])
+def test_no_tier_illuminates_anything(tier_primer):
+    """Walk the whole ladder and assert the illuminator never fires from it.
 
-    An unmeasurable vision-check burst means the evidence burst has nothing
-    to illuminate either, so firing the pulse would be pointless rather than
-    merely wasteful - suppressed, and distinguishable in the log from the
-    daylight case.
+    Parametrised over the ladder rather than asserted on tier 2 alone,
+    because the defect being guarded against is a partial revert - IR
+    reinstated on the top tier only, say, where a casual reading of the
+    deterrence tests would not notice it.
     """
     experience = ExperienceStore(IN_MEMORY_PATH)
-    _escalate_to_tier_2(experience)
+    for _ in range(tier_primer):
+        _fire(0.9, experience=experience)
 
-    with caplog.at_level("INFO"):
-        outcome, kwargs, _ = _fire(
-            0.9, experience=experience, is_night=lambda frames: None
-        )
+    outcome, kwargs, _ = _fire(0.9, experience=experience)
 
-    assert outcome.action.tier is Tier.TIER_2
-    assert outcome.ir_ack is None
+    assert outcome.action is not None
     assert kwargs["pulse_ir"].calls == []
-    assert any(
-        "pulse_ir suppressed" in r.message and "undetermined" in r.message
-        for r in caplog.records
-    )
+    assert outcome.ir_ack is None
     experience.close()
 
 
 @TIER_FLOOR_OVERRIDE
-def test_is_night_error_never_blocks_deterrence_and_the_pulse_still_fires(caplog):
-    """A bug in is_night() must not cost the event its illuminator.
+def test_a_single_poll_watch_never_illuminates_even_at_night():
+    """The documented cost of reading day/night off a frame: poll one is dark.
 
-    Intentional daylight suppression is one sanctioned skip; an exception is
-    not - it is logged and pulse_ir() fires anyway, the same "a perception
-    failure never blocks an actuator" rule the camera and detector paths
-    already follow.
+    Not a defect, and worth pinning so it is not "fixed" into one. The
+    night read needs a frame to read, so the first poll is always unlit;
+    illumination starts on the poll after night is established. A watch
+    that confirms on its first poll therefore never lights anything - and
+    it did not need to, because it confirmed.
+
+    Every other test in this file runs on exactly this configuration
+    (_fire() collapses the watch to its single-poll floor), which is why
+    none of them see a pulse.
     """
-    experience = ExperienceStore(IN_MEMORY_PATH)
-    _escalate_to_tier_2(experience)
-
-    def _boom(frames):
-        raise RuntimeError("saturation math blew up")
-
-    with caplog.at_level("WARNING"):
-        outcome, kwargs, _ = _fire(0.9, experience=experience, is_night=_boom)
-
-    assert outcome.action.tier is Tier.TIER_2
-    assert outcome.ir_ack is True
-    assert kwargs["pulse_ir"].calls == [(1, TIER_2.ir_duration_ms)]
-    assert any("is_night() raised" in r.message for r in caplog.records)
-    experience.close()
-
-
-@TIER_FLOOR_OVERRIDE
-def test_is_night_is_handed_the_pre_decision_vision_check_frames():
-    """The gate reads the burst captured before decide(), not the evidence burst.
-
-    That burst is the only one that exists at the moment the IR thread would
-    start, and it is the one whose exposure the pulse is meant to land in.
-    """
-    experience = ExperienceStore(IN_MEMORY_PATH)
-    _escalate_to_tier_2(experience)
-
-    seen: list = []
-
-    def _record(frames):
-        seen.append(list(frames))
-        return True
-
-    outcome, _, _ = _fire(0.9, experience=experience, is_night=_record)
-
-    assert outcome.action.tier is Tier.TIER_2
-    assert len(seen) == 1
-    assert len(seen[0]) == services_config.VISION_CHECK_FRAME_COUNT
-    assert all(isinstance(f, Frame) for f in seen[0])
-    experience.close()
-
-
-@TIER_FLOOR_OVERRIDE
-def test_night_and_firing_ir_locks_exposure_before_the_evidence_burst():
-    """A confirmed night event at an escalated tier locks exposure exactly once.
-
-    docs/qa/night-ir-led-characterisation.md, Finding 4: auto-exposure+IR is
-    the fix's actual target, so this is the one combination that must
-    trigger it - not is_night() alone, not fire_ir alone.
-    """
-    experience = ExperienceStore(IN_MEMORY_PATH)
-    _escalate_to_tier_2(experience)
-
-    camera = _FakeCamera()
-    outcome, _, _ = _fire(0.9, experience=experience, camera=camera)
-
-    assert outcome.action.tier is Tier.TIER_2
-    assert outcome.ir_ack is True
-    assert camera.lock_night_exposure_calls == 1
-    experience.close()
-
-
-@TIER_FLOOR_OVERRIDE
-def test_daylight_does_not_lock_exposure():
-    """is_night() False must skip the lock the same way it skips pulse_ir."""
-    experience = ExperienceStore(IN_MEMORY_PATH)
-    _escalate_to_tier_2(experience, ELEPHANT)
-
-    camera = _FakeCamera()
-    outcome, _, _ = _fire(
+    outcome, kwargs, _ = _fire(
         0.9,
-        experience=experience,
-        camera=camera,
-        is_night=lambda frames: False,
+        is_night=lambda frames: True,
         detect_vision=_FakeVisionDetect([ELEPHANT]),
     )
 
-    assert outcome.action.tier is Tier.TIER_2
-    assert outcome.ir_ack is None
-    assert camera.lock_night_exposure_calls == 0
-    experience.close()
-
-
-@TIER_FLOOR_OVERRIDE
-def test_undetermined_night_does_not_lock_exposure():
-    """is_night() None (unmeasurable burst) must skip the lock, same as pulse_ir."""
-    experience = ExperienceStore(IN_MEMORY_PATH)
-    _escalate_to_tier_2(experience)
-
-    camera = _FakeCamera()
-    outcome, _, _ = _fire(
-        0.9, experience=experience, camera=camera, is_night=lambda frames: None
-    )
-
-    assert outcome.action.tier is Tier.TIER_2
-    assert outcome.ir_ack is None
-    assert camera.lock_night_exposure_calls == 0
-    experience.close()
-
-
-@TIER_FLOOR_OVERRIDE
-def test_tier_1_never_locks_exposure():
-    """Tier 1 fires no IR, so the lock - gated the same way pulse_ir is - never runs."""
-    camera = _FakeCamera()
-    outcome, _, _ = _fire(0.9, camera=camera, detect_vision=_FakeVisionDetect([ELEPHANT]))
-
-    assert outcome.action is TIER_1
-    assert camera.lock_night_exposure_calls == 0
-
-
-@TIER_FLOOR_OVERRIDE
-def test_is_night_error_still_locks_exposure_before_the_forced_pulse():
-    """The except-branch forces night=True, and the lock follows the same forced value.
-
-    Counterpart to test_is_night_error_never_blocks_deterrence_and_the_pulse_still_fires:
-    a perception failure must not cost the event its exposure lock either.
-    """
-    experience = ExperienceStore(IN_MEMORY_PATH)
-    _escalate_to_tier_2(experience)
-
-    def _boom(frames):
-        raise RuntimeError("saturation math blew up")
-
-    camera = _FakeCamera()
-    outcome, kwargs, _ = _fire(0.9, experience=experience, camera=camera, is_night=_boom)
-
-    assert outcome.action.tier is Tier.TIER_2
-    assert kwargs["pulse_ir"].calls == [(1, TIER_2.ir_duration_ms)]
-    assert camera.lock_night_exposure_calls == 1
-    experience.close()
-
-
-@TIER_FLOOR_OVERRIDE
-def test_tier_1_never_consults_the_night_gate():
-    """Tier 1 fires no IR by config, so is_night() is irrelevant and uncalled.
-
-    Narrowed by ADR 0022: the night answer now has a second consumer, the
-    blindness check that decides whether an *unconfirmed* event may fire on
-    seismic alone. So the claim this test makes is no longer "is_night() is
-    never called below tier 2" in general - it is that a confirmed event,
-    which is the one the field fires on, short-circuits that check and
-    leaves the pulse_ir gate as the only caller, which tier 1 never reaches.
-    The unconfirmed case is covered by the suppression tests instead.
-    """
-    calls: list = []
-
-    def _tracking(frames):
-        calls.append(frames)
-        return True
-
-    outcome, kwargs, _ = _fire(
-        0.9, is_night=_tracking, detect_vision=_FakeVisionDetect([ELEPHANT])
-    )
-
-    assert outcome.action is TIER_1
-    assert outcome.ir_ack is None
-    assert calls == []
+    assert outcome.species == "Elephant"
     assert kwargs["pulse_ir"].calls == []
+    assert outcome.ir_ack is None
+
+
+@TIER_FLOOR_OVERRIDE
+def test_what_the_watch_illuminated_is_reported_on_the_outcome(caplog):
+    """ir_ack survives from the watch to the outcome, and says so in the log.
+
+    A night event's footage is only interpretable if you know whether the
+    illuminator was actually on for it. The ack is the only evidence of
+    that the node keeps - it does not go on the LoRa wire (ADR 0031 A),
+    so if it is dropped here it is gone.
+    """
+    pulse_ir = _FakePulseIr()
+    with caplog.at_level("INFO"):
+        outcome, _, _ = _fire(
+            0.9,
+            pulse_ir=pulse_ir,
+            is_night=lambda frames: True,
+            vision_watch_base_s=3.0,
+            vision_watch_poll_interval_s=1.0,
+        )
+
+    assert pulse_ir.calls, "a multi-poll night watch must have illuminated"
+    assert outcome.ir_ack is True
+    assert any("vision watch illuminated" in r.message for r in caplog.records)
 
 
 @TIER_FLOOR_OVERRIDE
@@ -1404,12 +1190,10 @@ def test_a_learned_preference_beats_the_default_tie_break():
     outcome, kwargs, _ = _fire(0.9, experience=experience)
 
     # Tier 3's action is a fresh object per fire (ADR 0014 E.2 LED-pattern
-    # rotation), so assert on the tier rather than identity. ir_duration_ms
-    # is not touched by the rotation.
+    # rotation), so assert on the tier rather than identity.
     assert outcome.action is not None
     assert outcome.action.tier is Tier.TIER_3
     assert outcome.exploring is False
-    assert kwargs["pulse_ir"].calls == [(1, TIER_3.ir_duration_ms)]
     experience.close()
 
 
@@ -2538,6 +2322,362 @@ def test_the_watch_never_sleeps_past_its_own_deadline():
 
     assert clock.t <= 2.5
     assert sum(clock.sleeps) == pytest.approx(2.5)
+
+
+# --- vision-watch illumination (D11) ----------------------------------------
+#
+# IR is a camera light, not a deterrent. It fires here, inside the poll
+# loop, on the night read and before any tier has been chosen - see
+# _watch_for_vision()'s own Illumination note for why each of the three
+# orderings below is the way it is. Driven against the function directly on
+# the fake clock, because the properties worth pinning are about pacing
+# across a 45s window and nothing handler-level can observe them.
+
+
+class _LoggingCamera(_FakeCamera):
+    """_FakeCamera that also records lock_night_exposure() in the shared log.
+
+    The base fake deliberately keeps the lock off the call_log so it does
+    not shift the log[n] indices the deterrence-ordering tests assert on.
+    Here the lock's position relative to the first pulse is the entire
+    claim, so this one subclass opts back in.
+    """
+
+    def lock_night_exposure(self):
+        self.call_log.append("camera.lock_night_exposure")
+        return super().lock_night_exposure()
+
+
+def _lit_watch(watch_s, *, is_night=None, pulse_ir=None, camera=None, detect=None, **kw):
+    """_watch() with illumination wired up; returns (watch, clock, pulse_ir, camera)."""
+    pulse_ir = pulse_ir if pulse_ir is not None else _FakePulseIr()
+    camera = camera if camera is not None else _FakeCamera()
+    is_night = is_night if is_night is not None else (lambda frames: True)
+    watch, clock = _watch(
+        camera,
+        detect if detect is not None else _FakeVisionDetect(),
+        watch_s,
+        pulse_ir=pulse_ir,
+        is_night=is_night,
+        **kw,
+    )
+    return watch, clock, pulse_ir, camera
+
+
+def test_a_daylight_watch_never_illuminates():
+    """The IR-cut filter is in, so every pulse would be spent on nothing.
+
+    The IMX462 puts its IR-cut filter in front of the sensor in daylight;
+    near-IR never reaches a pixel. Firing anyway would spend the MCU's duty
+    budget and the battery once every few seconds for up to 45s per event,
+    and buy no photons at all.
+    """
+    watch, _, pulse_ir, camera = _lit_watch(20.0, is_night=lambda frames: False)
+
+    assert watch.polls == 21
+    assert pulse_ir.calls == []
+    assert watch.ir_pulses == 0
+    assert watch.ir_ack is None
+    assert camera.lock_night_exposure_calls == 0
+
+
+def test_a_night_watch_illuminates_from_the_poll_after_the_night_read():
+    """The first poll is dark, and every lit poll after it asks for the same pulse.
+
+    Day and night are read off captured frames, so a frame has to exist
+    before the question can be answered - poll one pays for that and no
+    poll after it does. An unlit night frame is still enough to answer it:
+    frames_are_night() measures colour saturation, which has already
+    collapsed once the filter is out, however dark the scene.
+    """
+    watch, _, pulse_ir, _ = _lit_watch(20.0)
+
+    assert watch.polls == 21
+    assert watch.ir_pulses == len(pulse_ir.calls) > 0
+    # The same request every time: the MPU paces the illuminator, it never
+    # escalates it. The MCU clamps the length regardless (IR_PULSE_MAX_MS).
+    assert set(pulse_ir.calls) == {
+        (services_config.SCHEMA_VERSION, services_config.IR_WATCH_PULSE_MS)
+    }
+    assert watch.ir_ack is True
+
+
+def test_the_night_question_is_asked_once_for_the_whole_watch():
+    """Re-reading per poll would let one unmeasurable burst go dark mid-watch.
+
+    A 45s window does not straddle dusk in any way that matters, and from
+    the second poll on the scene is partly lit by the node itself - so a
+    per-poll read would be reading the node's own illumination back and
+    could talk itself out of continuing.
+    """
+    asked = []
+
+    def _once(frames):
+        asked.append(len(frames))
+        return True
+
+    watch, _, _, _ = _lit_watch(20.0, is_night=_once)
+
+    assert len(asked) == 1
+    assert asked[0] == services_config.VISION_CHECK_FRAME_COUNT
+    assert watch.ir_pulses > 0
+
+
+def test_exposure_is_locked_before_the_first_lit_burst_not_after_it():
+    """Finding 4: auto-exposure hunting against an IR pulse is the false-positive mode.
+
+    docs/qa/night-ir-led-characterisation.md Finding 4 traced every spurious
+    Boar box in the overnight soak to auto-exposure chasing the illuminator.
+    The lock is the fix, and it is only a fix if it lands first - a watch
+    that lit frames before locking would reintroduce that mode on every
+    night event, where it previously needed tier 2.
+    """
+    log = []
+    camera = _LoggingCamera(call_log=log)
+    watch, _, _, _ = _lit_watch(20.0, camera=camera, pulse_ir=_FakePulseIr(call_log=log))
+
+    assert camera.lock_night_exposure_calls == 1
+    assert "pulse_ir" in log
+    assert log.index("camera.lock_night_exposure") < log.index("pulse_ir")
+    # And after the burst it read night from, not before - there is nothing
+    # to read day/night off until one poll has run.
+    assert log.index("camera.capture_burst") < log.index("camera.lock_night_exposure")
+    assert watch.ir_pulses > 0
+
+
+def test_pulses_are_paced_to_the_duty_budget_not_to_the_poll_rate():
+    """One pulse per poll would ask for 45 in a long watch and be refused for most.
+
+    The watch polls every second; the MCU admits a pulse every
+    IR_MIN_INTERVAL_MS. Pacing on the MPU side means the common case does
+    not spend a Bridge round-trip to be told no, and a normal night does
+    not fill the log with refusals that are really the budget working.
+
+    Asserted as exact pulse times on the fake clock rather than as a count,
+    because a count alone passes against an implementation that fires the
+    right number of pulses back to back at the start of the window.
+    """
+    clock = _Clock()
+    fired_at = []
+
+    def _pulse(schema_version, duration_ms):
+        fired_at.append(clock.t)
+        return True
+
+    watch = reflex_loop._watch_for_vision(
+        _FakeCamera(),
+        _FakeVisionDetect(),
+        trigger_monotonic=0.0,
+        watch_s=20.0,
+        poll_interval_s=1.0,
+        pulse_ir=_pulse,
+        is_night=lambda frames: True,
+        ir_min_interval_s=5.0,
+        monotonic=clock.monotonic,
+        sleep=clock.sleep,
+    )
+
+    # Night is established on poll 1 (t=0), so the first pulse is poll 2
+    # (t=1.0) and one every 5s of watch time after that.
+    assert watch.polls == 21
+    assert fired_at == [1.0, 6.0, 11.0, 16.0]
+    assert watch.ir_pulses == 4
+
+
+def test_a_different_duty_budget_produces_proportionally_different_pacing():
+    """The interval is read, not hardcoded against the poll loop."""
+    tight, _, tight_ir, _ = _lit_watch(20.0, poll_interval_s=1.0, ir_min_interval_s=2.0)
+    loose, _, loose_ir, _ = _lit_watch(20.0, poll_interval_s=1.0, ir_min_interval_s=10.0)
+
+    assert tight.ir_pulses == len(tight_ir.calls) == 10
+    assert loose.ir_pulses == len(loose_ir.calls) == 2
+
+
+def test_illumination_does_not_lengthen_the_watch():
+    """A lit watch and a dark one must close on the same deadline.
+
+    The pulse runs on its own thread, concurrent with the capture it
+    illuminates, and is joined inside the same poll. If it ever cost the
+    loop wall-clock time, a 45s window would quietly become longer than the
+    one _watch_length_s() granted, and the deterrence sequence would fire
+    that much later into an encounter.
+    """
+    _, dark_clock, _, _ = _lit_watch(20.0, is_night=lambda frames: False)
+    lit, lit_clock, pulse_ir, _ = _lit_watch(20.0)
+
+    assert pulse_ir.calls, "the lit run must actually have illuminated"
+    assert lit_clock.sleeps == dark_clock.sleeps
+    assert lit.elapsed_s == pytest.approx(20.0)
+
+
+def test_a_refused_pulse_degrades_to_an_unlit_poll():
+    """The MCU saying no is the duty budget working, not a failed event.
+
+    pulse_ir returns False when the MCU's own IR_MIN_INTERVAL_MS or thermal
+    budget declines the request. The watch must keep polling, keep asking on
+    schedule, and report the refusal rather than treat it as an error.
+    """
+    pulse_ir = _FakePulseIr(ack=False)
+    watch, _, _, _ = _lit_watch(20.0, pulse_ir=pulse_ir)
+
+    assert watch.polls == 21
+    assert watch.ir_pulses == len(pulse_ir.calls) == 4
+    assert watch.ir_ack is False
+    assert watch.check is not None
+
+
+def test_a_raising_pulse_ir_is_caught_on_its_own_thread_and_logged(caplog):
+    """A Bridge fault on the illuminator costs light, never the encounter.
+
+    The surviving-the-watch half of this is free and worth being honest
+    about: the pulse runs on its own thread, so an escaping exception
+    could not fail the watch even if nothing caught it. A mutation that
+    deletes the try/except passes every assertion about polls and acks.
+
+    What the catch actually buys is the two things asserted here. The
+    failure is logged *as part of this event*, where someone reviewing why
+    a night clip is dark will find it - rather than arriving as a bare
+    threading.excepthook traceback on stderr with no event context. And it
+    does not surface as an unhandled thread exception, which pytest and
+    any supervisor treat as a fault in its own right.
+    """
+
+    def _boom(schema_version, duration_ms):
+        raise RuntimeError("bridge transport died")
+
+    with caplog.at_level("ERROR"):
+        watch, _, _, _ = _lit_watch(20.0, pulse_ir=_boom)
+
+    assert watch.polls == 21
+    assert watch.ir_pulses == 4
+    # Attempted, but nothing ever acked - which is exactly what someone
+    # reviewing the footage afterwards needs to know.
+    assert watch.ir_ack is None
+    raised = [r for r in caplog.records if "pulse_ir raised" in r.message]
+    assert len(raised) == 4, "every failed pulse must be logged against this event"
+    assert all(r.exc_info is not None for r in raised), (
+        "logged without the traceback - a bare message does not say which "
+        "Bridge call broke or why"
+    )
+
+
+def test_a_raising_night_read_leaves_the_watch_unlit():
+    """A deliberate change of behaviour from the deterrence path, and why.
+
+    The old tier-gated pulse forced night=True when is_night() raised, on
+    the "a perception failure never blocks an actuator" rule. That was
+    defensible there: one pulse, at the moment of a decision already made.
+
+    Here it would be a pulse every few seconds for up to 45s, on every
+    event, with no idea whether the IR-cut filter is even out. Unlit is the
+    cheap answer and it costs exactly what a daylight watch costs. The horn
+    and the LED are untouched by this - they are not on this path at all any
+    more, which is the point of the move.
+    """
+
+    def _boom(frames):
+        raise RuntimeError("saturation math blew up")
+
+    watch, _, pulse_ir, camera = _lit_watch(20.0, is_night=_boom)
+
+    assert watch.polls == 21
+    assert pulse_ir.calls == []
+    assert watch.ir_pulses == 0
+    assert camera.lock_night_exposure_calls == 0
+
+
+def test_an_unmeasurable_scene_is_asked_again_rather_than_written_off():
+    """None is "no answer yet", not "no". It must not latch.
+
+    frames_are_night() returns None for a burst it cannot measure. A watch
+    that read the first such poll as daylight would stay dark for the rest
+    of the window over one bad burst - and a burst is most likely to be
+    unmeasurable exactly when the scene is darkest.
+    """
+    answers = [None, None, True]
+
+    def _late(frames):
+        return answers.pop(0) if answers else True
+
+    watch, _, pulse_ir, _ = _lit_watch(20.0, is_night=_late)
+
+    # Asked on polls 1, 2 and 3; night is established on poll 3 (t=2.0), so
+    # the first pulse is poll 4 (t=3.0) and they run every 5s from there.
+    assert answers == []
+    assert watch.ir_pulses == len(pulse_ir.calls) == 4
+
+
+def test_a_raising_exposure_lock_still_illuminates():
+    """An unlocked capture is worse footage; an unlit one is no footage."""
+    camera = _FakeCamera()
+
+    def _boom():
+        camera.lock_night_exposure_calls += 1
+        raise RuntimeError("v4l2 control write failed")
+
+    camera.lock_night_exposure = _boom
+    watch, _, pulse_ir, _ = _lit_watch(20.0, camera=camera)
+
+    assert camera.lock_night_exposure_calls == 1
+    assert watch.ir_pulses == len(pulse_ir.calls) == 4
+
+
+def test_a_watch_with_no_illuminator_behaves_exactly_as_it_did_before():
+    """Both injection points default to None, and that path must be the old one.
+
+    bench/demo_replay.py and every caller without an MCU rely on this.
+    """
+    camera = _FakeCamera()
+    watch, _ = _watch(camera, _FakeVisionDetect(), 20.0, poll_interval_s=1.0)
+
+    assert watch.polls == 21
+    assert watch.ir_pulses == 0
+    assert watch.ir_ack is None
+    assert camera.lock_night_exposure_calls == 0
+
+
+def test_a_night_reader_without_an_illuminator_lights_and_locks_nothing():
+    """is_night alone is not illumination - pulse_ir is the half that lights anything.
+
+    Asserted because the lock is free to run on the night read alone, and
+    locking exposure for an unlit night scene is strictly worse than leaving
+    it: there is no pulse coming for it to stop auto-exposure chasing.
+    """
+    camera = _FakeCamera()
+    watch, _ = _watch(
+        camera,
+        _FakeVisionDetect(),
+        20.0,
+        poll_interval_s=1.0,
+        is_night=lambda frames: True,
+    )
+
+    assert watch.ir_pulses == 0
+    assert watch.ir_ack is None
+    assert camera.lock_night_exposure_calls == 0
+
+
+def test_what_was_illuminated_is_reported_on_the_confirming_exit_too():
+    """The early return is the exit the field actually takes, so it must report too.
+
+    A confirmation ends the watch immediately. If ir_pulses and ir_ack were
+    only filled in on the window-closed path, every event that actually saw
+    something - the ones whose footage matters - would lose the record of
+    whether its frames were lit.
+    """
+    pulse_ir = _FakePulseIr()
+    # Nothing for seven polls, then an elephant, so the watch exits early
+    # and well after illumination has started.
+    detect = _ScriptedVisionDetect([[], [], [], [], [], [], [], [ELEPHANT]])
+
+    watch, _, _, _ = _lit_watch(
+        20.0, poll_interval_s=1.0, pulse_ir=pulse_ir, detect=detect
+    )
+
+    assert watch.confirmed_on_poll == 8
+    assert watch.polls == 8
+    assert watch.ir_pulses == len(pulse_ir.calls) == 2
+    assert watch.ir_ack is True
 
 
 # --- VISION_SPECIES_CONSECUTIVE_POLLS debounce ------------------------------

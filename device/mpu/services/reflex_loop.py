@@ -48,9 +48,8 @@ the alert gate, not after it - this is the "seismic wakes vision" ordering
 the field trial requires, and the reason a footfall event now opens the
 camera at all when it does not end up alerting. If decide() says no alert,
 the camera closes immediately and nothing else fires. If it says alert:
-[pulse_ir() started on its own thread, concurrent with a second
-capture_burst() for the illuminated evidence footage, tier 2 and 3 only] ->
-drive_horn() -> drive_led() -> a short post-fire tail sleep -> camera.close()
+a second capture_burst() for the evidence footage -> drive_horn() ->
+drive_led() -> a short post-fire tail sleep -> camera.close()
 -> save_frames() with both bursts combined. The camera, opened once at the
 top of the event, is never reopened for the alert path - only closed, once,
 at whichever of the three exits (no alert / safe_mode / end of alert
@@ -73,27 +72,36 @@ policy should read it as "what fires, given seismic alone" rather than a
 literal preview of the fused decision a live run would reach. See
 docs/KNOWN_GAPS.md.
 
-pulse_ir() runs concurrently with the capture, not after it, because the
-MCU's own pulse_ir() blocks for the full requested duration
-(device/mcu/src/ir.cpp: analogWrite(HIGH) -> delay(duration_ms) ->
-analogWrite(0)) - the RPC only returns once the illuminator is already
-dark. Calling it after capture_burst() the way every other actuator fires
-here would mean every night frame this system captures is unilluminated.
-Starting it on a short-lived thread right after camera.open() and joining
-it before drive_horn() is what actually lands the exposure window inside
-the pulse (see docs/KNOWN_GAPS.md, 27 Aug entry, for the correct long-term
-fix - making pulse_ir() non-blocking on the MCU side - and why it is not
-done here, six days from the field trial).
+IR is not a deterrent and does not appear in the deterrence sequence above.
+The illuminator is a camera light: it extends how far the sensor can see at
+night and pushes no animal anywhere. Only the horn and the LED deter. So
+pulse_ir() fires inside _watch_for_vision(), during the poll loop, on the
+night read and before any tier has been chosen - see that function for the
+ordering and its reasons.
 
-pulse_ir() is gated twice: the selected tier must set fire_ir (tiers 2 and
-3 do, tier 1 does not - cognition/config.py), and the pre-decision
-vision-check burst must read as night. The IMX462's IR-cut filter is in
-during daylight, so the illuminator's near-IR never reaches a pixel then -
-firing it would spend MOSFET duty budget and battery for nothing.
-is_night() infers the filter state from the vision-check frames' own colour
-saturation (perception/night.py); in daylight, or when no frame could be
-measured, the pulse is skipped for that event and only that - the horn and
-LED still fire the tier as selected.
+It used to fire from the deterrence sequence, behind the selected tier's
+fire_ir flag (tiers 2 and 3 only). That had the illuminator coming on
+strictly after decide() had already committed, so a night event was always
+decided on frames nothing had lit - and ADR 0022's blindness gate, reading
+those same unlit frames, then refused to let vision confirm anything. The
+"every night event" case in services/config.py's night block is exactly
+that loop, and moving the pulse into the watch is what breaks it.
+
+pulse_ir() still runs concurrently with the capture it illuminates rather
+than before it, because the MCU's own pulse_ir() blocks for the full
+requested duration (device/mcu/src/ir.cpp: analogWrite(HIGH) ->
+delay(duration_ms) -> analogWrite(0)) - the RPC only returns once the
+illuminator is already dark, so a synchronous call would put the exposure
+window entirely outside the light (see docs/KNOWN_GAPS.md, 27 Aug entry,
+for the correct long-term fix - making pulse_ir() non-blocking MCU-side -
+and why it is not done here).
+
+The day/night gate is unchanged in substance: the IMX462's IR-cut filter is
+in during daylight, so the illuminator's near-IR never reaches a pixel
+then, and firing would spend MOSFET duty budget and battery for nothing.
+is_night() infers the filter state from the watch's own frames' colour
+saturation (perception/night.py). In daylight, or when no frame could be
+measured, the watch simply runs unlit; nothing else about the event changes.
 
 What fires is chosen per event rather than fixed. decide() remains the
 alert gate on the fused probability and is unchanged; once it says alert,
@@ -934,6 +942,16 @@ class VisionWatch:
             poll that ends the watch is still a boar this node saw, and
             under the "record boar, deter elephants" configuration that
             sighting is the entire reason the recording is worth keeping.
+        ir_pulses: How many pulse_ir() calls this watch issued. Zero in
+            daylight, zero when no frame could be measured, and zero when
+            no pulse_ir was injected. Worth reporting rather than
+            inferring: a night watch that found nothing and a night watch
+            that was never lit look identical in the detection record, and
+            only one of them is evidence about the animal.
+        ir_ack: The last pulse's ack, or None if none was issued. False
+            means the MCU refused - almost always its IR_MIN_INTERVAL_MS
+            duty gate, which is the illuminator working as designed, not a
+            fault.
     """
 
     check: VisionCheck
@@ -942,6 +960,8 @@ class VisionWatch:
     elapsed_s: float
     confirmed_on_poll: int | None
     species: tuple[str, ...] = ()
+    ir_pulses: int = 0
+    ir_ack: bool | None = None
 
     @property
     def reading_available(self) -> bool:
@@ -1035,6 +1055,11 @@ def _watch_for_vision(
     frame_count: int = services_config.VISION_CHECK_FRAME_COUNT,
     max_empty_polls: int = services_config.VISION_WATCH_MAX_EMPTY_POLLS,
     target_labels: tuple[str, ...] = VISION_TARGET_LABELS,
+    pulse_ir: PulseIrFn | None = None,
+    is_night: NightDecideFn | None = None,
+    schema_version: int = services_config.SCHEMA_VERSION,
+    ir_pulse_ms: int = services_config.IR_WATCH_PULSE_MS,
+    ir_min_interval_s: float = services_config.IR_WATCH_MIN_INTERVAL_S,
     monotonic: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
 ) -> VisionWatch:
@@ -1090,6 +1115,18 @@ def _watch_for_vision(
             can exercise all three NODE_DETERRENCE_SCOPE states without
             monkeypatching module state - the same reason household_proximity
             is injected into handle_footfall_event.
+        pulse_ir: Callable matching bridge.rpc.pulse_ir. None disables
+            illumination entirely, which is what a daylight-only test or a
+            caller with no MCU wants; the watch is otherwise unchanged.
+        is_night: Callable matching NightDecideFn. Required for any pulse
+            to fire - see the illumination note in the body. None is the
+            same as "never night".
+        schema_version: Passed straight through to pulse_ir.
+        ir_pulse_ms: Requested pulse length. The MCU clamps it to
+            IR_PULSE_MAX_MS regardless.
+        ir_min_interval_s: Start-to-start spacing the MPU keeps between
+            pulses, mirroring the MCU's IR_MIN_INTERVAL_MS so the common
+            case does not spend a Bridge round-trip to be refused.
         monotonic: Clock source. Injected for tests.
         sleep: Sleep function. Injected for tests.
 
@@ -1097,6 +1134,36 @@ def _watch_for_vision(
         A VisionWatch. `check` is never None - a window in which every poll
         failed still reports the unavailable reading _vision_check() builds
         for an empty burst, which fuse() drops rather than scores.
+
+    Illumination. IR is a camera light, not a deterrent, so it belongs here
+    rather than in the deterrence sequence, where it used to sit behind the
+    selected tier's `fire_ir` flag. Firing it there meant the illuminator
+    only ever came on *after* decide() had already committed - so a night
+    event was decided on frames nothing had lit, and ADR 0022's own blindness
+    gate then (correctly) refused to let vision confirm anything. That is the
+    "every night event" case services/config.py's night block was waiting on.
+
+    Three properties of the loop below are deliberate:
+
+    - **The first poll is never lit.** Day and night are read off captured
+      frames, so there has to be a frame first. An unlit night frame still
+      reads as night - frames_are_night() measures colour saturation, which
+      has already collapsed once the IR-cut filter is out, however dark the
+      scene is - so one unlit poll is all it costs.
+    - **The night read happens once, not per poll.** A 45s window does not
+      straddle dusk in any way that matters, and re-deciding per poll would
+      let one unmeasurable burst turn the illuminator off mid-watch.
+    - **Exposure is locked the instant night is established**, before the
+      first lit burst rather than after it. Auto-exposure hunting against an
+      IR pulse is the exact combination that produced every spurious Boar box
+      in docs/qa/night-ir-led-characterisation.md (Finding 4); locking first
+      is the fix, and a watch that lights frames without it would reintroduce
+      that false-positive mode on every night event rather than on tier 2+.
+
+    Nothing here can fail the watch. A pulse the MCU refuses, a pulse that
+    raises, an is_night() that raises, an exposure lock that does not take -
+    each degrades to an unlit poll, which is exactly the behaviour this
+    function had before illumination existed.
     """
     started = monotonic()
     deadline = started + max(watch_s, 0.0)
@@ -1118,10 +1185,93 @@ def _watch_for_vision(
     seen_species: dict[str, None] = {}
     species_streaks: dict[str, int] = {}
 
+    # None until a poll yields frames to read it off; see the illumination
+    # note in the docstring. Latched once decided.
+    night: bool | None = None
+    last_pulse_at: float | None = None
+    ir_pulses = 0
+    ir_ack: bool | None = None
+    ir_available = pulse_ir is not None and is_night is not None
+
     while True:
         poll_started = monotonic()
         polls += 1
+
+        # Started before the capture and joined after it, never called
+        # synchronously: the MCU's pulse_ir() blocks for the whole pulse
+        # (device/mcu/src/ir.cpp) and only returns once the illuminator is
+        # already dark, so a synchronous call would land the exposure
+        # window entirely outside the light it asked for. Same fire-and-join
+        # shape the deterrence path used to use.
+        ir_thread: threading.Thread | None = None
+        ir_result: dict[str, bool] = {}
+        if (
+            night is True
+            and pulse_ir is not None
+            and (last_pulse_at is None or poll_started - last_pulse_at >= ir_min_interval_s)
+        ):
+            last_pulse_at = poll_started
+            ir_pulses += 1
+
+            def _pulse(fn: PulseIrFn = pulse_ir, sink: dict[str, bool] = ir_result) -> None:
+                # Bound as defaults, not closed over: the loop rebinds
+                # ir_result every iteration, and a bare closure would let a
+                # late-finishing thread write into the next poll's dict.
+                try:
+                    sink["ack"] = fn(schema_version, ir_pulse_ms)
+                except Exception:  # noqa: BLE001 - an unlit poll, never a failed watch
+                    logger.exception("pulse_ir raised during the vision watch")
+
+            ir_thread = threading.Thread(target=_pulse, daemon=True)
+            ir_thread.start()
+
         frames = _capture_burst(camera, trigger_monotonic, count=frame_count)
+
+        if ir_thread is not None:
+            ir_thread.join()
+            ir_ack = ir_result.get("ack")
+            if ir_ack is False:
+                # Overwhelmingly the MCU's own IR_MIN_INTERVAL_MS gate,
+                # which is the duty budget working. Logged at info, not
+                # warning, so a normal night does not read as faulty.
+                logger.info(
+                    "pulse_ir refused on poll %d (MCU duty gate) - poll runs unlit", polls
+                )
+
+        # One night read for the whole watch, off the first burst that
+        # produced anything. Everything here is best-effort: a failure
+        # leaves the watch unlit rather than ending it.
+        #
+        # Gated on ir_available, not on is_night alone, because the only
+        # consumer of the answer is the illuminator - and the exposure
+        # lock below it is not a free side effect. A caller that passes
+        # is_night but no pulse_ir gets no pulse to stop auto-exposure
+        # chasing, so locking for it would only cost it the auto
+        # exposure's own night adaptation.
+        if night is None and frames and ir_available:
+            try:
+                night = is_night(frames)
+            except Exception:  # noqa: BLE001 - perception never fails the watch
+                logger.exception("is_night() raised during the vision watch - staying unlit")
+                night = False
+            if night is True:
+                logger.info(
+                    "vision watch reads as night on poll %d - illuminating from the "
+                    "next poll, every %.1fs",
+                    polls,
+                    ir_min_interval_s,
+                )
+                # Before the first lit burst, never after it. See Finding 4
+                # in the docstring - this ordering is the whole fix.
+                try:
+                    camera.lock_night_exposure()
+                except Exception:  # noqa: BLE001 - an unlocked capture, never a failed watch
+                    logger.exception("lock_night_exposure() raised - continuing unlocked")
+            elif night is False:
+                logger.info(
+                    "vision watch reads as daylight - IR-cut filter is in, the "
+                    "illuminator would not reach the sensor; watch runs unlit"
+                )
 
         if not frames:
             empty_polls += 1
@@ -1206,6 +1356,8 @@ def _watch_for_vision(
                     elapsed_s=monotonic() - started,
                     confirmed_on_poll=polls,
                     species=tuple(seen_species),
+                    ir_pulses=ir_pulses,
+                    ir_ack=ir_ack,
                 )
             # An available-but-unconfirmed reading beats the unavailable one
             # this started with: it means the camera and the detector both
@@ -1238,6 +1390,8 @@ def _watch_for_vision(
         elapsed_s=elapsed_s,
         confirmed_on_poll=None,
         species=tuple(seen_species),
+        ir_pulses=ir_pulses,
+        ir_ack=ir_ack,
     )
 
 
@@ -1950,6 +2104,9 @@ def handle_footfall_event(
                 watch_s=watch_s,
                 poll_interval_s=vision_watch_poll_interval_s,
                 target_labels=target_labels,
+                pulse_ir=pulse_ir,
+                is_night=is_night,
+                schema_version=schema_version,
             )
 
     vision_check = watch.check
@@ -2181,7 +2338,7 @@ def handle_footfall_event(
     logger.info(
         "deterrence tier %d selected: policy=%s species_repeats=%d "
         "context=%d floor=%d exploring=%s "
-        "gain_pct=%.1f horn_track_id=%d fire_ir=%s",
+        "gain_pct=%.1f horn_track_id=%d",
         int(tier),
         bandit_species or "unattributed",
         species_repeat_count,
@@ -2190,14 +2347,13 @@ def handle_footfall_event(
         exploring,
         action.horn_gain_pct,
         action.horn_track_id,
-        action.fire_ir,
     )
 
     if safe_mode:
         logger.info(
             "[SAFE_MODE] would open camera, call drive_horn(schema_version=%d, "
             "gain_pct=%.1f, duration_ms=%d, track_id=%d), drive_led(channel=%d, "
-            "pattern_id=%d, gain_pct=%.1f, duration_ms=%d)%s - not calling (dry "
+            "pattern_id=%d, gain_pct=%.1f, duration_ms=%d) - not calling (dry "
             "run), and recording no attempt",
             schema_version,
             action.horn_gain_pct,
@@ -2207,8 +2363,6 @@ def handle_footfall_event(
             action.led_pattern_id,
             action.led_gain_pct,
             action.led_duration_ms,
-            f", pulse_ir(duration_ms={action.ir_duration_ms}) [only if the "
-            f"vision-check burst reads as night]" if action.fire_ir else "",
         )
         # camera_opened/vision_frames are guaranteed empty here - the
         # pre-decision block above only runs when not safe_mode.
@@ -2219,86 +2373,18 @@ def handle_footfall_event(
     # not reopened here, the same camera session spans the vision check and
     # this evidence burst.
 
-    # Tier 1 skips pulse_ir entirely rather than requesting a zero duration:
-    # a zero-length request would still consume the IR MOSFET's
-    # IR_MIN_INTERVAL_MS duty budget MCU-side, which is one of the two
-    # reasons the low tier leaves IR alone (cognition/config.py).
-    #
-    # Started on its own thread here, immediately after camera.open(), and
-    # joined below before drive_horn() - never called synchronously after
-    # capture_burst() the way the other actuators fire. pulse_ir() blocks
-    # MCU-side for the full duration (module docstring), so a synchronous
-    # call after the capture would always return with the illuminator
-    # already dark; this is what actually lands the exposure window inside
-    # the pulse.
-    #
-    # Second gate, on top of the tier's fire_ir flag: the illuminator only
-    # helps once the camera's IR-cut filter is out (night). is_night() reads
-    # that off the vision-check burst already captured above - a mono /
-    # IR-lit frame's colour saturation has collapsed, a daylight frame's has
-    # not (perception/night.py). In daylight (False) or when not one frame
-    # could be measured (None - and then the evidence burst has nothing to
-    # illuminate either) the pulse is skipped for this event; the tier is
-    # otherwise unchanged. An unexpected error inside is_night() itself must
-    # not suppress deterrence - it is logged and the pulse fires, matching
-    # the module's "a perception failure never blocks an actuator" rule.
-    fire_ir_now = action.fire_ir
-    if fire_ir_now:
-        try:
-            night = _night_of_event()
-        except Exception:  # noqa: BLE001 - perception must never block actuation
-            logger.exception("is_night() raised - firing pulse_ir anyway")
-            night = True
-        if night is True:
-            # docs/qa/night-ir-led-characterisation.md, Finding 4: this is
-            # exactly the combination (auto-exposure + IR pulse) that threw
-            # every spurious Boar box the characterisation battery
-            # produced. Locking exposure here, right before the burst the
-            # pulse is about to illuminate, is the fix. camera.open() is
-            # guaranteed to have succeeded by this point - night is only
-            # ever True or (on the except branch above) forced True when
-            # is_night() actually ran on real vision-check frames, and an
-            # empty/never-opened camera makes frames_are_night() return
-            # None, not True, per its own contract. Never blocks: a lock
-            # that fails or is disabled just leaves the capture on whatever
-            # exposure mode the camera already had, logged inside
-            # lock_night_exposure() itself.
-            camera.lock_night_exposure()
-        elif night is False:
-            logger.info(
-                "pulse_ir suppressed: vision-check frames read as daylight "
-                "(IR-cut filter engaged, illuminator would not reach the sensor) "
-                "- tier %d otherwise unchanged",
-                int(tier),
-            )
-            fire_ir_now = False
-        else:  # None
-            logger.info(
-                "pulse_ir suppressed: day/night undetermined - no vision-check "
-                "frame could be measured, so the evidence burst has nothing to "
-                "illuminate either - tier %d otherwise unchanged",
-                int(tier),
-            )
-            fire_ir_now = False
-
-    ir_thread: threading.Thread | None = None
-    ir_result: dict[str, bool] = {}
-    if fire_ir_now:
-
-        def _fire_ir() -> None:
-            ir_result["ack"] = pulse_ir(schema_version, action.ir_duration_ms)
-
-        ir_thread = threading.Thread(target=_fire_ir, daemon=True)
-        ir_thread.start()
-
     evidence_frames = _capture_burst(camera, trigger_monotonic) if camera_opened else []
     frames = vision_frames + evidence_frames
 
-    ir_ack: bool | None = None
-    if ir_thread is not None:
-        ir_thread.join()
-        ir_ack = ir_result.get("ack")
-        logger.info("pulse_ir ack=%s", ir_ack)
+    # Illumination already happened, inside the vision watch, on the night
+    # read rather than on this tier - see _watch_for_vision(). Reported here
+    # so the event record still says whether the camera had light, which is
+    # the only thing that makes a night non-sighting interpretable.
+    ir_ack = watch.ir_ack
+    if watch.ir_pulses:
+        logger.info(
+            "vision watch illuminated: %d pulse(s), last ack=%s", watch.ir_pulses, ir_ack
+        )
 
     horn_ack = drive_horn(
         schema_version,

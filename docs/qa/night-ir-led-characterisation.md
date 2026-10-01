@@ -271,8 +271,9 @@ part is in the data above, and part is a measurement a supervised session still 
 
 `device/mcu/src/config.h`: `IR_PULSE_MAX_MS = 500`, `IR_MIN_INTERVAL_MS = 5000`. The MCU clamps
 every IR request to at most a 500 ms pulse no more than once per 5 s, and the MPU already requests
-the maximum on every firing event (`ir_duration_ms` resolves to the protocol max, clamped MCU-side),
-so **in the field the illuminator is always a full 500 ms pulse and never longer.** Running it
+the maximum on every pulse (`IR_WATCH_PULSE_MS = 500`, paced by `IR_WATCH_MIN_INTERVAL_S = 5.0` so
+the request matches the cap rather than being clamped down to it), so **in the field the
+illuminator is always a full 500 ms pulse and never longer.** Running it
 continuously would require a firmware change plus a thermal solution for the emitter and its
 MOSFET plus a power-budget revision against ADR 0012's 10-day autonomy — a continuous near-IR
 emitter is a large always-on load, and this part is specified as a capture flash, not area

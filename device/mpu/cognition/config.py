@@ -464,12 +464,22 @@ LED_TIER_1_GAIN_FRACTION = 1.0
 LED_TIER_2_GAIN_FRACTION = 1.0
 LED_TIER_3_GAIN_FRACTION = 1.0
 
-# Tier 1 fires no IR at all. Defensible on two independent grounds, which is
-# why it is the low tier's distinguishing feature rather than a quieter horn
-# alone: least force first on a single unconfirmed trigger (ADR 0003), and
-# the IR MOSFET's own thermal budget, whose IR_MIN_INTERVAL_MS exists to
-# hold it near a 10% duty cycle - not spending that budget on the
-# lowest-confidence event leaves it available for the escalated ones.
+# No tier fires IR, because IR is not a deterrent. The illuminator lets the
+# camera see at night; it does not push an animal anywhere, and the two
+# things that do - the horn and the LED - are the whole of this ladder.
+#
+# It used to be a tier field, off on tier 1 and on above it, argued for on
+# least-force grounds and on the IR MOSFET's thermal budget. The least-force
+# argument was misapplied: least force is about what the node does *to* an
+# animal, and lighting a scene for a camera is not force. The duty-budget
+# argument was real but was being spent in the wrong place - the budget
+# bought night illumination only on events the node had already decided to
+# escalate, which is backwards, since the event that most needs the camera
+# is the one not yet confident enough to act on.
+#
+# IR now fires from services/reflex_loop.py's vision watch, on the night
+# read, before any tier is chosen, still bounded by the MCU's own
+# IR_MIN_INTERVAL_MS duty gate. See services/config.py's IR_WATCH_* block.
 #
 # LED signature per tier (ADR 0014, revised by ADR 0014 E.2 for real
 # dual-wing, then E.3 for max-gain-always). Gain is full on every tier;
@@ -480,8 +490,8 @@ LED_TIER_3_GAIN_FRACTION = 1.0
 # -11 Hz choice (ADR 0014 E.3 "Honest bound"):
 #
 #   Tier 1 - fast strobe (pattern_id 2), single wing (channel 0), full gain,
-#     LED_FAST_STROBE_HZ. One wing, no IR, quietest horn - the mildest
-#     response is "one bright strobe," not "a dim one."
+#     LED_FAST_STROBE_HZ. One wing, quietest horn - the mildest response
+#     is "one bright strobe," not "a dim one."
 #   Tier 2 - sweep (pattern_id 4), BOTH wings (channel 2), full gain,
 #     LED_FAST_STROBE_HZ. First real dual-wing: the two wings antiphase at
 #     the base rate, adding an apparent-movement cue and doubling emitters.
@@ -520,8 +530,6 @@ DETERRENCE_TIERS = {
         led_pattern_id=2,
         led_gain_pct=PROTOCOL_GAIN_PCT_MAX * LED_TIER_1_GAIN_FRACTION,
         led_duration_ms=TIER_DURATION_MS,
-        fire_ir=False,
-        ir_duration_ms=TIER_DURATION_MS,
     ),
     Tier.TIER_2: DeterrenceAction(
         tier=Tier.TIER_2,
@@ -532,8 +540,6 @@ DETERRENCE_TIERS = {
         led_pattern_id=4,
         led_gain_pct=PROTOCOL_GAIN_PCT_MAX * LED_TIER_2_GAIN_FRACTION,
         led_duration_ms=TIER_DURATION_MS,
-        fire_ir=True,
-        ir_duration_ms=TIER_DURATION_MS,
     ),
     Tier.TIER_3: DeterrenceAction(
         tier=Tier.TIER_3,
@@ -547,8 +553,6 @@ DETERRENCE_TIERS = {
         led_pattern_id=5,
         led_gain_pct=PROTOCOL_GAIN_PCT_MAX * LED_TIER_3_GAIN_FRACTION,
         led_duration_ms=TIER_DURATION_MS,
-        fire_ir=True,
-        ir_duration_ms=TIER_DURATION_MS,
     ),
 }
 

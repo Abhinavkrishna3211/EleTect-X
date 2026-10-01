@@ -308,10 +308,11 @@ def _print_detected(
             f"   gain={action.led_gain_pct:.1f}%"
             f"   duration={action.led_duration_ms}ms"
         )
-        if action.fire_ir:
-            print(f"    ir     duration={action.ir_duration_ms}ms")
-        else:
-            print("    ir     not fired at this tier")
+        # No IR line here. The illuminator is not a deterrent and no tier
+        # chooses it any more - it fires during the vision watch, before
+        # any of this, so it has nothing to do with what a tier escalates
+        # to. Printing it under "deterrence" is what made it look like a
+        # third actuator alongside the horn and the LED.
     print()
 
 

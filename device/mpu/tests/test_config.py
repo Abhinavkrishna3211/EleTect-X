@@ -61,6 +61,49 @@ def test_actuator_call_timeouts_each_exceed_their_mcu_cap():
         )
 
 
+def test_the_watch_pulse_fits_inside_the_mcu_duty_budget():
+    """The two illumination constants must stay inside the caps the MCU enforces.
+
+    IR_WATCH_PULSE_MS and IR_WATCH_MIN_INTERVAL_S mirror IR_PULSE_MAX_MS and
+    IR_MIN_INTERVAL_MS in device/mcu/src/config.h. The MCU stays
+    authoritative - it clamps a long pulse and refuses an early one
+    regardless of what is asked here - so neither of these can make the
+    hardware unsafe. What they can do is make the MPU ask for things it will
+    not get, once per poll for up to 45s per event, which turns a normal
+    night into a log full of refusals and spends a Bridge round-trip each
+    time to learn nothing.
+
+    Read out of config.h rather than duplicated, because a mirrored constant
+    with nothing comparing it to its original is how these drift.
+    """
+    pulse_cap_ms = _read_mcu_define("IR_PULSE_MAX_MS")
+    min_interval_ms = _read_mcu_define("IR_MIN_INTERVAL_MS")
+
+    assert config.IR_WATCH_PULSE_MS <= pulse_cap_ms, (
+        f"IR_WATCH_PULSE_MS ({config.IR_WATCH_PULSE_MS}) exceeds the MCU's "
+        f"IR_PULSE_MAX_MS ({pulse_cap_ms}) - every pulse would be silently "
+        "clamped, so the frames would be lit for less time than the exposure "
+        "was locked for."
+    )
+    assert config.IR_WATCH_MIN_INTERVAL_S * 1000.0 >= min_interval_ms, (
+        f"IR_WATCH_MIN_INTERVAL_S ({config.IR_WATCH_MIN_INTERVAL_S}s) is "
+        f"shorter than the MCU's IR_MIN_INTERVAL_MS ({min_interval_ms}ms) - "
+        "the watch would ask faster than the duty gate admits and most polls "
+        "would be refused."
+    )
+
+
+def test_the_watch_can_actually_illuminate_more_than_once():
+    """A pacing interval longer than the window would make this whole path dead code.
+
+    Not a hardware constraint - a design one. The extended watch is the
+    window a night event actually runs in (ADR 0022 / the cold-trigger
+    path), and if only one pulse fits in it the illuminator cannot cover an
+    animal that walks into frame late, which is the case it exists for.
+    """
+    assert config.IR_WATCH_MIN_INTERVAL_S < config.VISION_WATCH_EXTENDED_S / 2.0
+
+
 def test_generic_bridge_call_timeout_still_covers_longest_burst():
     """BRIDGE_CALL_TIMEOUT_S (non-actuator calls) must still clear the LED cap.
 

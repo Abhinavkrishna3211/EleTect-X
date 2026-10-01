@@ -5,6 +5,7 @@ documented rationale to still be true - matching the style of
 tests/test_config.py (services/config.py's own invariant tests).
 """
 
+import dataclasses
 import math
 import random
 import re
@@ -13,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from cognition import config
-from cognition.bandit import Tier
+from cognition.bandit import DeterrenceAction, Tier
 from cognition.fusion import Modality, sigmoid
 
 # Deployment overrides live in cognition/config.py and services/config.py,
@@ -302,7 +303,6 @@ def test_every_requested_duration_fits_in_the_wire_uint16():
         for duration in (
             action.horn_duration_ms,
             action.led_duration_ms,
-            action.ir_duration_ms,
         ):
             assert 0 <= duration <= config.PROTOCOL_DURATION_MS_MAX
 
@@ -320,7 +320,6 @@ def test_the_top_tier_requests_the_protocol_maximum():
     assert top.led_gain_pct == config.PROTOCOL_GAIN_PCT_MAX
     assert top.horn_duration_ms == config.PROTOCOL_DURATION_MS_MAX
     assert top.led_duration_ms == config.PROTOCOL_DURATION_MS_MAX
-    assert top.ir_duration_ms == config.PROTOCOL_DURATION_MS_MAX
 
 
 def test_lower_tiers_stay_below_the_mcu_horn_clamp():
@@ -345,22 +344,61 @@ def test_lower_tiers_stay_below_the_mcu_horn_clamp():
         )
 
 
-def test_only_the_lowest_tier_withholds_ir():
-    """Tier 1 fires no IR; both escalated tiers are allowed to.
+def test_no_tier_can_reach_the_illuminator():
+    """A tier escalates deterrence, and IR is not deterrence.
 
-    This is the axis that actually distinguishes the tiers physically today
-    (gain_pct has no audible effect yet - see docs/KNOWN_GAPS.md), so losing
-    it would leave tier 1 and tier 2 indistinguishable in the field.
+    The ladder used to carry fire_ir and ir_duration_ms, which made a
+    camera light something the bandit escalated *to* - tier 1 withheld it,
+    tiers 2 and 3 spent it. That is incoherent twice over: the illuminator
+    pushes no animal anywhere, and withholding it at tier 1 meant the
+    quietest response was also the blindest, so the node saw an animal
+    worst exactly when it was least sure anything was there.
 
-    fire_ir is the tier's *permission* to pulse the illuminator, not a
-    guarantee it will: services/reflex_loop.py adds a runtime day/night gate
-    (perception/night.py) that suppresses the pulse in daylight even on
-    tiers 2/3. That gate is covered in tests/test_reflex_loop.py; here we
-    only assert the per-tier permission flag, which is unchanged.
+    Asserted on the dataclass fields rather than on the three stored
+    actions, because the failure to catch is someone adding the field
+    back - a per-tier assertion would be written against whatever the new
+    field is called and pass.
     """
-    assert config.DETERRENCE_TIERS[Tier.TIER_1].fire_ir is False
-    assert config.DETERRENCE_TIERS[Tier.TIER_2].fire_ir is True
-    assert config.DETERRENCE_TIERS[Tier.TIER_3].fire_ir is True
+    fields = {f.name for f in dataclasses.fields(DeterrenceAction)}
+    assert not {name for name in fields if "ir" == name or name.startswith("ir_")}
+    assert "fire_ir" not in fields
+
+
+def test_the_tiers_stay_physically_distinct_without_ir():
+    """The real claim the IR test was carrying, now that IR cannot carry it.
+
+    That test justified itself as "the axis that actually distinguishes
+    the tiers physically today", on the grounds that gain_pct has no
+    audible effect yet (docs/KNOWN_GAPS.md). The justification was always
+    overstated - the horn track and the LED channel are physically
+    unambiguous and neither depends on gain - but the concern under it is
+    real: three rungs that a standing animal cannot tell apart are not a
+    ladder, and removing IR must not quietly produce that.
+
+    So assert what is left, on the two axes that need no gain control to
+    be audible or visible: a different sound, and a different number of
+    lit wings.
+    """
+    tiers = [config.DETERRENCE_TIERS[t] for t in (Tier.TIER_1, Tier.TIER_2, Tier.TIER_3)]
+
+    # Tier 1 is the bee swarm; 2 and 3 are predator growls, and 3 is
+    # separated from 2 by its pattern rotation and gain rather than by
+    # content (ADR 0023 - there is no louder category that is also
+    # household-safe).
+    assert tiers[0].horn_track_id != tiers[1].horn_track_id
+
+    # One wing at tier 1, both from tier 2 up. Visible from any angle, at
+    # any gain, including the zero-effect gain docs/KNOWN_GAPS.md warns of.
+    assert tiers[0].led_channel_id == 0
+    assert tiers[1].led_channel_id == 2
+    assert tiers[2].led_channel_id == 2
+
+    # And no two rungs are the same object end to end.
+    signatures = {
+        (a.horn_track_id, a.led_channel_id, a.led_pattern_id, round(a.horn_gain_pct, 3))
+        for a in tiers
+    }
+    assert len(signatures) == 3
 
 
 def test_led_pattern_ids_are_ones_the_mcu_actually_maps():
@@ -503,8 +541,6 @@ def test_resolve_tier_action_rotates_tier_3_across_both_patterns():
         assert action.led_channel_id == base.led_channel_id
         assert action.led_gain_pct == base.led_gain_pct
         assert action.led_duration_ms == base.led_duration_ms
-        assert action.fire_ir == base.fire_ir
-        assert action.ir_duration_ms == base.ir_duration_ms
         assert action.horn_gain_pct == base.horn_gain_pct
         assert action.horn_duration_ms == base.horn_duration_ms
     assert seen == set(config.TIER_3_LED_PATTERN_IDS)

@@ -731,13 +731,41 @@ DETERRENT_REQUIRES_VISION_CONFIRMATION = True
 # mono / IR-cut-open frame reads near-zero mean HSV S, a daylight colour
 # frame reads tens of units. A burst whose median mean-S is below this is
 # treated as night and the IR pulse is allowed; at or above it, pulse_ir()
-# is suppressed for the event (logged, tier otherwise unchanged).
+# is suppressed for the watch (logged; nothing else about the event
+# changes).
 #
 # Measured on the real rig (Kothamangalam backyard, 1-2 Sep 2026): a
 # genuine night frame read mean S = 0.0; a daylight colour frame read
 # S > 30. 12 sits in that gap with margin on both sides. Not a tuned figure
 # beyond that separation - see docs/KNOWN_GAPS.md.
 NIGHT_SATURATION_THRESHOLD = 12.0
+
+# How the vision watch illuminates. IR is a camera light, not a deterrent -
+# it is what gives the detector something to see at night, so it fires
+# during services/reflex_loop.py's _watch_for_vision() poll loop, on the
+# night read, rather than from a chosen deterrence tier. The watch may run
+# 45s (VISION_WATCH_BASE_S); the illuminator must not be on for all of it.
+#
+# Both values mirror device/mcu/src/config.h and tests/test_config.py fails
+# if they drift apart, the same discipline the BRIDGE_*_CALL_TIMEOUT_S block
+# above follows. The MCU stays authoritative either way: ir_pulse_request()
+# clamps the duration to IR_PULSE_MAX_MS and refuses outright inside
+# IR_MIN_INTERVAL_MS of the last pulse. These exist so the MPU does not
+# spend a Bridge round-trip per poll earning four refusals out of five.
+#
+# Pulse length is the MCU's own maximum. There is no reason to ask for less
+# - the cost is the duty budget, which is governed by the interval, not by
+# shaving milliseconds off a pulse that has to outlast the exposure window
+# it exists to cover.
+IR_WATCH_PULSE_MS = 500
+
+# Start-to-start spacing between watch pulses, equal to the MCU's
+# IR_MIN_INTERVAL_MS. At VISION_WATCH_POLL_INTERVAL_S = 1.0s this means
+# roughly one poll in five is illuminated, and a full 45s watch spends at
+# most nine pulses. That ratio is the duty budget doing its job, not a
+# shortfall to tune around: the unlit polls still run detection, and a
+# night watch that confirms does so on one of the lit ones.
+IR_WATCH_MIN_INTERVAL_S = 5.0
 
 # ---------------------------------------------------------------------------
 # Night exposure lock (perception/camera.py, services/reflex_loop.py)

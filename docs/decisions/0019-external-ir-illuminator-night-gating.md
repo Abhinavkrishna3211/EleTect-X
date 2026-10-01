@@ -1,7 +1,17 @@
 # ADR 0019: External IR illuminator fires on a frame-derived night signal, not on the deterrence tier
 
-- **Status:** proposed
+- **Status:** proposed; the tier gate it retained was removed on 1 Oct 2026 (see the note below)
 - **Date:** 2026-09-02
+
+> **1 Oct 2026 — the second half of this ADR has been implemented, and it removed the first.**
+> This ADR's title says IR fires "not on the deterrence tier", but its decision kept `fire_ir` as a
+> gate *on top of* the new night signal, deferring the reclassification ADR 0014 §E.3 asked for.
+> That has now been done: `fire_ir` and `ir_duration_ms` are gone from `DeterrenceAction` and from
+> the three tiers, and `pulse_ir()` fires from inside `_watch_for_vision()` on the night read,
+> before any tier is selected. The night gate this ADR specified is unchanged and still the thing
+> that decides whether a pulse happens; only its tier conjunct is gone. Every "Alternatives
+> rejected" entry here that reasons from the tier flag is therefore historical. A superseding ADR
+> is owed and is tracked as item 14 of the species-routing plan.
 
 ## Context
 

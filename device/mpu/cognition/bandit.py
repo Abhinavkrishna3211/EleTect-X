@@ -52,10 +52,21 @@ class DeterrenceAction:
     """One fully-specified deterrence response, in Bridge wire terms.
 
     Every field is exactly what services/reflex_loop.py passes to
-    drive_horn/drive_led/pulse_ir - no unit conversion or clamping happens
-    between here and the wire. The MCU's rule_gate_apply() remains the sole
+    drive_horn/drive_led - no unit conversion or clamping happens between
+    here and the wire. The MCU's rule_gate_apply() remains the sole
     authority on what actually fires (device/mcu/src/rule_gate.cpp); nothing
     in this dataclass is a safety limit and it must not be read as one.
+
+    The horn and the LED are the deterrents, and they are the whole of this
+    dataclass. IR is deliberately absent: the illuminator does not deter
+    anything, it lets the camera see at night, so it is not a dimension the
+    bandit has any business choosing over. It used to be here - `fire_ir`
+    and `ir_duration_ms`, set per tier - which made night illumination a
+    consequence of how hard the node had decided to push an animal, and
+    meant a tier-1 event got no light at all. The camera's need for light
+    has nothing to do with the escalation ladder. IR now fires from
+    services/reflex_loop.py's vision watch, on the night read, before any
+    tier has been chosen.
 
     Attributes:
         tier: Which escalation level this action represents.
@@ -81,12 +92,6 @@ class DeterrenceAction:
             since schema_version 2 (ADR 0014); the tier ladder now varies it
             the way it always has for the horn.
         led_duration_ms: drive_led's duration_ms.
-        fire_ir: Whether to call pulse_ir at all for this tier. False on the
-            lowest tier - see cognition/config.py's ladder comment for the
-            two independent reasons.
-        ir_duration_ms: pulse_ir's duration_ms. Ignored when fire_ir is
-            False; still carried so the dataclass describes one complete
-            action rather than a partially-valid one.
     """
 
     tier: Tier
@@ -97,8 +102,6 @@ class DeterrenceAction:
     led_pattern_id: int
     led_gain_pct: float
     led_duration_ms: int
-    fire_ir: bool
-    ir_duration_ms: int
 
 
 @dataclass(frozen=True)
