@@ -501,7 +501,18 @@ class FootfallOutcome:
         fusion: The FusionResult fuse() produced for this event.
         decision: The Decision decide() produced for this event.
         repeat_count: Triggers this node saw within HABITUATION_WINDOW_S
-            before this one. Recorded for every event, alert or not.
+            before this one, counted across every species and every
+            unattributed crossing. Recorded for every event, alert or not.
+            This is the count _watch_length_s() consumes, and deliberately
+            not the one the escalation floor does - see
+            species_repeat_count (ADR 0034).
+        species_repeat_count: The same window counted for this event's own
+            species only, or None when no tier was selected and the count
+            was therefore never read. This is what habituation_context()
+            bucketed into `context`, so it is the number that explains the
+            floor a field log shows. It can be far below repeat_count: a
+            node that saw thirty foxes and one elephant reports 30 and 0
+            on the elephant's event, which is the entire point.
         context: The bandit context repeat_count bucketed into, or None if
             no alert fired (no selection happened, so no context applied).
         action: The DeterrenceAction selected for this event, or None if no
@@ -590,6 +601,7 @@ class FootfallOutcome:
     vision_watch_s: float = 0.0
     suppressed_by_vision: bool = False
     species: str | None = None
+    species_repeat_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1793,6 +1805,44 @@ def handle_footfall_event(
     # there to be one resolution of it.
     confirmed_species = _confirmed_species(vision_check, target_labels)
 
+    # Second phase of ADR 0034's attribution. record_trigger() wrote this
+    # event's row before the camera had said anything - the species was
+    # genuinely unknown then - so it went in UNATTRIBUTED. The watch has
+    # resolved now, and naming the row is what makes this trigger count
+    # toward one species' habituation window and no other's.
+    #
+    # Stored under the bandit *policy* key rather than the observed label,
+    # because that key is what repeat_count(), action_values() and
+    # record_attempt() all partition on. Today the two are identical for
+    # every registered species; the day one is deliberately aliased onto
+    # another's ladder, the shared habituation count follows from this line
+    # rather than needing a second one.
+    #
+    # Run before every early return below, because a trigger the node
+    # declined to answer is still a trigger that animal made.
+    bandit_species = UNATTRIBUTED
+    if confirmed_species is not None:
+        bandit_species = services_config.bandit_policy_for(confirmed_species)
+        named = experience.attribute_trigger(event_wall_s, bandit_species)
+        if named != 1:
+            # Not a field condition: attribute_trigger() is handed the same
+            # wall clock record_trigger() was given a few lines above, so a
+            # miss means those two have drifted apart. Logged rather than
+            # raised - a bookkeeping defect must not cost an elephant its
+            # deterrent.
+            logger.warning(
+                "attribute_trigger named %d rows (expected 1) for species=%s at "
+                "ts=%.3f - this trigger will not count toward that species' "
+                "habituation window",
+                named,
+                bandit_species,
+                event_wall_s,
+            )
+    # Assigned only at tier selection, which several paths below return
+    # before reaching. Declared here so the _no_actuation_outcome() closure
+    # can read it on any of them.
+    species_repeat_count: int | None = None
+
     readings = [seismic_reading, acoustic_reading, vision_check.reading]
     fusion_result = fuse(readings, cognition_config.DEFAULT_FUSION_PARAMS)
     decision = decide(fusion_result, threshold)
@@ -1856,6 +1906,7 @@ def handle_footfall_event(
             vision_watch_s=watch_s,
             suppressed_by_vision=suppressed_by_vision,
             species=confirmed_species,
+            species_repeat_count=species_repeat_count,
         )
 
     # is_night() is a real image computation - an HSV conversion over the
@@ -1950,10 +2001,21 @@ def handle_footfall_event(
         )
         return _no_actuation_outcome(frames=tuple(vision_frames), video_path=video_path)
 
-    context = habituation_context(repeat_count, cognition_config.HABITUATION_BUCKET_COUNT)
+    # Read here rather than at trigger time because this is the first
+    # moment the species is known, and read instead of record_trigger()'s
+    # node-level return because escalating is the expensive mistake:
+    # ADR 0022 Decision C and ADR 0023 Decision D both name the harm a
+    # shared count does - a night of foxes walks the floor up and leaves a
+    # dawn elephant facing a response it was never habituated to. The
+    # node-level count keeps its one remaining job, _watch_length_s()'s
+    # window, where looking longer costs only camera time.
+    species_repeat_count = experience.repeat_count(
+        event_wall_s, bandit_params.habituation_window_s, bandit_species
+    )
+    context = habituation_context(species_repeat_count, cognition_config.HABITUATION_BUCKET_COUNT)
     floor = escalation_floor(context, bandit_params)
     tier, exploring = select_tier(
-        context, experience.action_values(), bandit_params, rng, floor
+        context, experience.action_values(bandit_species), bandit_params, rng, floor
     )
     action = cognition_config.resolve_tier_action(
         tier,
@@ -1962,9 +2024,12 @@ def handle_footfall_event(
         species=_deterrence_species(vision_check, target_labels),
     )
     logger.info(
-        "deterrence tier %d selected: context=%d floor=%d exploring=%s "
+        "deterrence tier %d selected: policy=%s species_repeats=%d "
+        "context=%d floor=%d exploring=%s "
         "gain_pct=%.1f horn_track_id=%d fire_ir=%s",
         int(tier),
+        bandit_species or "unattributed",
+        species_repeat_count,
         context,
         int(floor),
         exploring,
@@ -2102,7 +2167,7 @@ def handle_footfall_event(
     # - nothing fired, so crediting this tier for whatever quiet follows
     # would attribute the animal's behaviour to a burst that never occurred.
     if horn_ack:
-        experience.record_attempt(trigger_wall_s, context, tier)
+        experience.record_attempt(trigger_wall_s, context, tier, bandit_species)
     else:
         logger.info(
             "drive_horn refused (MCU cooldown) - recording no attempt, tier %d "
@@ -2156,6 +2221,7 @@ def handle_footfall_event(
         vision_polls=watch.polls,
         vision_watch_s=watch_s,
         species=confirmed_species,
+        species_repeat_count=species_repeat_count,
     )
 
 

@@ -896,9 +896,19 @@ def test_pulse_ir_overlaps_the_capture_window_not_after_it():
 # ---------------------------------------------------------------------------
 
 
-def _escalate_to_tier_2(experience):
-    """One tier-1 fire so the next _fire() on this store lands on tier 2 (fires IR)."""
-    _fire(0.9, experience=experience)
+def _escalate_to_tier_2(experience, saw=None):
+    """One tier-1 fire so the next _fire() on this store lands on tier 2 (fires IR).
+
+    `saw` is the detection the priming event confirms, and it has to name
+    whatever species the test then fires. Since ADR 0034 the escalation
+    floor reads one species' trigger count, so a priming event the camera
+    could not name escalates the unattributed partition and nothing else.
+    Left None that is exactly what happens, which is what the night tests
+    below want: their own event is unconfirmed too, so both land in the
+    same partition and the ladder still moves.
+    """
+    extra = {"detect_vision": _FakeVisionDetect([saw])} if saw is not None else {}
+    _fire(0.9, experience=experience, **extra)
 
 
 @TIER_FLOOR_OVERRIDE
@@ -918,7 +928,7 @@ def test_daylight_vision_check_suppresses_pulse_ir_but_still_fires_horn_and_led(
     past the first.
     """
     experience = ExperienceStore(IN_MEMORY_PATH)
-    _escalate_to_tier_2(experience)
+    _escalate_to_tier_2(experience, ELEPHANT)
 
     log: list = []
     with caplog.at_level("INFO"):
@@ -1051,7 +1061,7 @@ def test_night_and_firing_ir_locks_exposure_before_the_evidence_burst():
 def test_daylight_does_not_lock_exposure():
     """is_night() False must skip the lock the same way it skips pulse_ir."""
     experience = ExperienceStore(IN_MEMORY_PATH)
-    _escalate_to_tier_2(experience)
+    _escalate_to_tier_2(experience, ELEPHANT)
 
     camera = _FakeCamera()
     outcome, _, _ = _fire(
@@ -1588,6 +1598,7 @@ def test_acoustic_schema_version_mismatch_is_logged_not_raised(caplog):
 
 ELEPHANT = Detection(label="Elephant", confidence=0.9, x=0.0, y=0.0, width=40.0, height=30.0)
 BOAR = Detection(label="Boar", confidence=0.99, x=0.0, y=0.0, width=20.0, height=20.0)
+FOX = Detection(label="Fox", confidence=0.95, x=0.0, y=0.0, width=8.0, height=6.0)
 # A low-confidence sighting: enough to confirm for the keep-gate, not enough
 # to carry a weak seismic trigger past the alert threshold. That combination
 # is the only way to reach the "confirmed but not alerted" branch, and it is
@@ -2833,9 +2844,18 @@ def test_a_held_event_still_records_its_trigger_for_habituation():
     """Holding the horn must not erase the encounter.
 
     The trigger is recorded before the watch, so a suppressed event still
-    counts toward the repeat that escalates the next one. Otherwise an
-    animal circling a node in daylight would reset the node's memory of it
-    on every pass.
+    counts. Otherwise an animal circling a node in daylight would reset the
+    node's memory of it on every pass.
+
+    What that count now buys is narrower than it was, and the two
+    assertions below are the whole of ADR 0034's split. A held daylight
+    event is by definition one the camera looked at and could not name, so
+    it stays UNATTRIBUTED: it keeps feeding the node-level count that
+    _watch_length_s() reads - look longer, which is cheap and always safe -
+    and it deliberately does not walk any named species' escalation floor,
+    because walking it would mean guessing that the thing the camera failed
+    to see was an elephant. The elephant below therefore meets tier 1, not
+    tier 2, and that is the designed answer rather than a lost repeat.
     """
     experience = ExperienceStore(IN_MEMORY_PATH)
     held, _, _ = _fire(0.9, experience=experience, is_night=lambda frames: False)
@@ -2848,9 +2868,142 @@ def test_a_held_event_still_records_its_trigger_for_habituation():
         is_night=lambda frames: False,
     )
 
+    # The encounter was not erased: the node-level window still has it.
     assert later.repeat_count == 1
-    assert later.action.tier is Tier.TIER_2
+    # ... and it is not charged to the elephant, which nothing identified.
+    assert later.species_repeat_count == 0
+    assert later.action.tier is Tier.TIER_1
     experience.close()
+
+
+# --- per-species attribution (ADR 0034) --------------------------------------
+#
+# The two counts a footfall event now carries are easy to confuse, so the
+# tests below pin each one at the place it is read: repeat_count is the
+# species-blind window _watch_length_s() consumes, species_repeat_count is
+# the partitioned window escalation_floor() consumes.
+
+
+@TIER_FLOOR_OVERRIDE
+def test_a_night_of_foxes_does_not_hand_a_dawn_elephant_a_habituated_floor():
+    """The regression ADR 0022 C and ADR 0023 D both named and declined to fix.
+
+    A node that spent the night chasing foxes used to greet the morning's
+    first elephant with a floor those foxes had walked up - full gain, on an
+    animal that had never heard the horn here. Welfare aside, it also
+    destroys the learning: the elephant's tier-1 and tier-2 cells never get
+    a visit, so their values stay at their priors forever.
+
+    Both counts are asserted, because only the pair proves the partition
+    rather than a lost trigger: the node remembers all three crossings, and
+    the elephant is charged for none of them.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    scope = ("Elephant", "Fox")
+    for _ in range(2):
+        _fire(
+            0.9,
+            experience=experience,
+            detect_vision=_FakeVisionDetect([FOX]),
+            target_labels=scope,
+        )
+
+    dawn, _, _ = _fire(
+        0.9,
+        experience=experience,
+        detect_vision=_FakeVisionDetect([ELEPHANT]),
+        target_labels=scope,
+    )
+
+    assert dawn.species == "Elephant"
+    # The node saw three animals cross; it has not forgotten two of them.
+    assert dawn.repeat_count == 2
+    # The elephant is new here, and is met as a new animal.
+    assert dawn.species_repeat_count == 0
+    assert dawn.action.tier is Tier.TIER_1
+    experience.close()
+
+
+@TIER_FLOOR_OVERRIDE
+def test_the_same_species_twice_does_escalate():
+    """The other half: partitioning must not quietly disable habituation.
+
+    Without this, the test above passes just as well against a build that
+    never escalates at all.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    first, _, _ = _fire(0.9, experience=experience, detect_vision=_FakeVisionDetect([ELEPHANT]))
+    second, _, _ = _fire(0.9, experience=experience, detect_vision=_FakeVisionDetect([ELEPHANT]))
+
+    assert first.species_repeat_count == 0
+    assert first.action.tier is Tier.TIER_1
+    assert second.species_repeat_count == 1
+    assert second.action.tier is Tier.TIER_2
+    experience.close()
+
+
+def test_a_fox_and_an_elephant_keep_separate_action_values():
+    """The reward goes to the cell the attempt named, not to the node's one cell.
+
+    `settle_pending()` is species-blind by design (ADR 0034: the proxy
+    measures quiet, which no camera labels), but it credits the species
+    stored on the attempt - so two species firing at the same node must
+    leave two distinct learned cells rather than one shared one.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    scope = ("Elephant", "Fox")
+    # Two of each, because an attempt only acquires a value when the *next*
+    # event settles it - one fire per species would leave both pending and
+    # the assertions below would pass against a store that learned nothing.
+    for seen in (FOX, FOX, ELEPHANT, ELEPHANT):
+        _fire(
+            0.9,
+            experience=experience,
+            detect_vision=_FakeVisionDetect([seen]),
+            target_labels=scope,
+        )
+
+    assert experience.action_values("Fox")
+    assert experience.action_values("Elephant")
+    # And nothing landed in the unattributed partition, because every one
+    # of these events was named before its attempt was opened.
+    assert experience.action_values() == {}
+    experience.close()
+
+
+def test_an_unconfirmed_trigger_stays_in_the_unattributed_partition():
+    """The default path, pinned so the partition cannot silently become a guess.
+
+    A night event that fires on blindness alone never saw anything. Its
+    attempt belongs to no species, and must be visible to a later
+    unattributed event rather than being filed under whatever the node
+    happens to be scoped to.
+    """
+    experience = ExperienceStore(IN_MEMORY_PATH)
+    first, _, _ = _fire(0.9, experience=experience)
+    # The second fire is what settles the first one's attempt, which is the
+    # only way a value reaches the table at all.
+    second, _, _ = _fire(0.9, experience=experience)
+
+    assert first.species is None and second.species is None
+    assert second.species_repeat_count == 1
+    assert experience.action_values()
+    assert experience.action_values("Elephant") == {}
+    experience.close()
+
+
+def test_an_event_that_never_selects_a_tier_reports_no_species_count():
+    """None, not 0: the count was never read, which is not the same as zero.
+
+    A held event's `context` is None for exactly this reason, and the
+    number that explains `context` has to be None in the same cases or a
+    field log reads as though a floor was computed from an empty window.
+    """
+    outcome, _, _ = _fire(0.9, is_night=lambda frames: False)
+
+    assert outcome.suppressed_by_vision is True
+    assert outcome.context is None
+    assert outcome.species_repeat_count is None
 
 
 def test_a_boar_only_event_keeps_its_video_when_boar_is_configured(monkeypatch):
