@@ -210,3 +210,14 @@ const FLAG_LABEL: Record<string, string> = {
 export function flagLabel(flag: string): string {
   return FLAG_LABEL[flag] ?? flag
 }
+
+// Both values must parse and sit in range - a half-filled position would put the
+// node at 0,0 or silently drop it from the radius match.
+export function parsePosition(lat: string, lng: string): { lat: number; lng: number } | null | 'invalid' {
+  if (lat.trim() === '' && lng.trim() === '') return null
+  const la = Number(lat)
+  const ln = Number(lng)
+  if (lat.trim() === '' || lng.trim() === '' || !Number.isFinite(la) || !Number.isFinite(ln)) return 'invalid'
+  if (la < -90 || la > 90 || ln < -180 || ln > 180) return 'invalid'
+  return { lat: la, lng: ln }
+}

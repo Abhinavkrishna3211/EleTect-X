@@ -3,6 +3,7 @@ import type { HealthRow, NodeRow } from './dashboard'
 import {
   compareVersions,
   dailyMeans,
+  parsePosition,
   evaluateRules,
   fleetFirmwareMax,
   flagLabel,
@@ -280,5 +281,20 @@ describe('flagLabel', () => {
 
   it('falls back to the raw flag rather than rendering undefined', () => {
     expect(flagLabel('something_new')).toBe('something_new')
+  })
+})
+
+describe('parsePosition', () => {
+  it('accepts decimal degrees', () => {
+    expect(parsePosition(' 10.0612', '76.6331 ')).toEqual({ lat: 10.0612, lng: 76.6331 })
+  })
+  it('treats two blanks as clearing the position', () => {
+    expect(parsePosition('', '  ')).toBeNull()
+  })
+  it('rejects half a position, text and out-of-range values', () => {
+    expect(parsePosition('10.06', '')).toBe('invalid')
+    expect(parsePosition('ten', '76.6')).toBe('invalid')
+    expect(parsePosition('76.6', '190')).toBe('invalid')
+    expect(parsePosition('-91', '76.6')).toBe('invalid')
   })
 })

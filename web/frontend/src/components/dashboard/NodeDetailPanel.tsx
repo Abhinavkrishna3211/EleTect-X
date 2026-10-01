@@ -7,6 +7,8 @@ import {
   type HealthRow,
   type NodeRow,
 } from '@/lib/dashboard'
+import { useAuth } from '@/lib/auth'
+import { NodePlacementForm } from './NodePlacementForm'
 
 function Field({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
@@ -32,6 +34,7 @@ interface NodeDetailPanelProps {
 // the map already carries the live status signal.
 export function NodeDetailPanel({ node, latestEvent, onClose }: NodeDetailPanelProps) {
   const [health, setHealth] = useState<HealthRow[]>([])
+  const { profile } = useAuth()
   const status = statusDisplay(node.status)
 
   useEffect(() => {
@@ -58,7 +61,9 @@ export function NodeDetailPanel({ node, latestEvent, onClose }: NodeDetailPanelP
   return (
     <div className="border-brand-gold/35 rounded-2xl border bg-[rgba(226,161,60,0.04)] p-5">
       <div className="mb-3.5 flex flex-wrap items-center justify-between gap-2.5">
-        <h3 className="m-0 font-sans text-base font-semibold">Node {node.id} · digital twin</h3>
+        <h3 className="m-0 font-sans text-base font-semibold">
+          {node.name && node.name !== node.id ? `${node.name} · ` : ''}Node {node.id}
+        </h3>
         <div className="flex items-center gap-2">
           <span
             className="rounded-full border px-2.5 py-0.75 font-mono text-[10.5px] font-bold tracking-[0.08em]"
@@ -111,6 +116,8 @@ export function NodeDetailPanel({ node, latestEvent, onClose }: NodeDetailPanelP
           </div>
         </div>
       )}
+
+      {profile?.role === 'admin' && <NodePlacementForm key={node.id} node={node} />}
     </div>
   )
 }

@@ -176,13 +176,18 @@ export function Fleet() {
                 }}
               >
                 <div className="mb-2.5 flex items-center justify-between gap-2">
-                  <span className="font-mono text-[13px] font-semibold">{n.id}</span>
+                  {/* The name is what officers know a node by; the id stays below it
+                      for matching a box in the field to its row. */}
+                  <span className="truncate font-sans text-[14px] font-semibold">{n.name ?? n.id}</span>
                   <span
                     className="h-2.5 w-2.5 rounded-full"
                     style={{ background: st.color, boxShadow: `0 0 8px ${st.color}` }}
                   />
                 </div>
-                <p className="text-brand-fg/50 m-0 mb-2.5 truncate font-sans text-[12px]">{n.name ?? '—'}</p>
+                <p className="text-brand-fg/50 m-0 mb-2.5 truncate font-mono text-[11.5px]">
+                  {n.id}
+                  {n.lat == null || n.lng == null ? <span className="text-brand-yellow"> · no location</span> : null}
+                </p>
 
                 <div className="mb-1 flex items-center justify-between font-mono text-[10.5px]">
                   <span className="text-brand-fg/45">BATTERY</span>
