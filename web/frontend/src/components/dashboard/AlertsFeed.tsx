@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { relativeTime, type EventRow } from '@/lib/dashboard'
+import { isUrgent, relativeTime, type EventRow } from '@/lib/dashboard'
 
 // The feed used to render every fetched event flat — 20 rows at ~76px, which on a
 // 390px phone was 1510px, 59% of the whole Overview page, and pushed the decision
@@ -32,9 +32,11 @@ function titleFor(event: EventRow): string {
   return event.action ? `${species} · ${event.action}` : species
 }
 
-function metaFor(event: EventRow): string {
+// A node that registered itself over LoRa is keyed by its DevEUI, which means
+// nothing to an officer - show the name staff gave it when there is one.
+function metaFor(event: EventRow, nodeNames?: Map<string, string>): string {
   const parts: string[] = []
-  if (event.node_id) parts.push(event.node_id)
+  if (event.node_id) parts.push(nodeNames?.get(event.node_id) ?? event.node_id)
   parts.push(relativeTime(event.ts))
   if (event.confidence != null) parts.push(`${Math.round(event.confidence * 100)}%`)
   if (event.outcome) parts.push(event.outcome)
@@ -45,12 +47,13 @@ interface AlertsFeedProps {
   events: EventRow[]
   selectedNodeId: string | null
   onSelect: (id: string) => void
+  nodeNames?: Map<string, string>
   className?: string
 }
 
-export function AlertsFeed({ events, selectedNodeId, onSelect, className = '' }: AlertsFeedProps) {
+export function AlertsFeed({ events, selectedNodeId, onSelect, nodeNames, className = '' }: AlertsFeedProps) {
   const [expanded, setExpanded] = useState(false)
-  const highCount = events.filter((e) => e.priority === 'high').length
+  const highCount = events.filter((e) => isUrgent(e.priority)).length
 
   const hasMore = events.length > COLLAPSED_COUNT
   const visible = expanded || !hasMore ? events : events.slice(0, COLLAPSED_COUNT)
@@ -72,7 +75,7 @@ export function AlertsFeed({ events, selectedNodeId, onSelect, className = '' }:
       ) : (
         <div className="flex flex-col">
           {visible.map((e) => {
-            const high = e.priority === 'high'
+            const high = isUrgent(e.priority)
             const active = e.node_id != null && e.node_id === selectedNodeId
             return (
               <button
@@ -97,7 +100,7 @@ export function AlertsFeed({ events, selectedNodeId, onSelect, className = '' }:
                     {titleFor(e)}
                   </span>
                   <span className="text-brand-fg/45 mt-0.5 block truncate font-mono text-[11.5px]">
-                    {metaFor(e)}
+                    {metaFor(e, nodeNames)}
                   </span>
                 </span>
               </button>

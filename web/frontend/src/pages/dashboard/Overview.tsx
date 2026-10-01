@@ -40,6 +40,10 @@ export function Overview() {
   const clockLabel = useClockLabel()
 
   const nodes = useMemo(() => [...nodeRows.values()], [nodeRows])
+  const nodeNames = useMemo(
+    () => new Map(nodes.filter((n) => n.name).map((n) => [n.id, n.name as string])),
+    [nodes],
+  )
   const events = useMemo(
     () => [...eventRows.values()].sort((a, b) => b.ts.localeCompare(a.ts)),
     [eventRows],
@@ -102,6 +106,7 @@ export function Overview() {
             events={events}
             selectedNodeId={selectedNodeId}
             onSelect={setSelectedNodeId}
+            nodeNames={nodeNames}
             className="order-2 md:order-1"
           />
         </div>

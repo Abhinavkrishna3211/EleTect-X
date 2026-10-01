@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRealtimeTable } from '@/hooks/useRealtimeTable'
 import { LiveMap } from '@/components/dashboard/LiveMap'
-import { geoPoints, toLatLng, type EventRow, type NodeRow } from '@/lib/dashboard'
+import { geoPoints, isUrgent, toLatLng, type EventRow, type NodeRow } from '@/lib/dashboard'
 import { herdAt, incidentPath, istHM, latestActivation, latestCluster, ms } from '@/lib/incident'
 
 // Wall-clock advance rate of the auto-play head: replay one incident over ~14 s.
@@ -14,7 +14,7 @@ const HERD_MS = 200
 function dotColor(e: EventRow): string {
   if (e.corridor?.role === 'deter') return '#e25b4a'
   if (e.corridor?.role === 'escort') return '#5fa97c'
-  if (e.priority === 'high') return '#e25b4a'
+  if (isUrgent(e.priority)) return '#e25b4a'
   return '#e2a13c'
 }
 

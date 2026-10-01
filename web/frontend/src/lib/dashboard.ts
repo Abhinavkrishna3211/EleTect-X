@@ -76,10 +76,16 @@ export interface EventRow {
   media_url: string | null
   action: string | null
   outcome: string | null
-  priority: string | null // normal | high
+  priority: string | null // normal | high | critical
   fusion: Fusion | null
   corridor: Corridor | null
   created_at: string
+}
+
+// 'critical' is a no-retreat event (ADR 0034) - it pages like 'high' and is
+// drawn like one, so the dashboard never shows the most urgent alert as routine.
+export function isUrgent(priority: string | null): boolean {
+  return priority === 'high' || priority === 'critical'
 }
 
 export interface HealthRow {
