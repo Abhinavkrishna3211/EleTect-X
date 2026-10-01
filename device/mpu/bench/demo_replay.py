@@ -13,12 +13,14 @@ first's provenance:
 - **Pass 2 (acoustic routing, illustrative).** Calls the real
   handle_acoustic_event() once per AcousticClass value to make the
   routing split watchable rather than merely provable: gunshot and
-  chainsaw bypass fuse() entirely (ADR 0033), elephant_call fuses as the
-  ACOUSTIC modality, ambient fuses as unavailable. The routing, the fusion
-  and every printed number are real -- but the *inputs* are not captured
-  data. No acoustic classifier runs on the MCU yet (docs/KNOWN_GAPS.md), so
-  there is no bench capture to replay; pass 2 uses one fixed synthetic
-  confidence for all five classes. See ILLUSTRATIVE_ACOUSTIC_CONFIDENCE.
+  chainsaw alert officers directly, elephant_call starts a vision-gated
+  event, ambient routes nowhere (ADR 0033). The routing is real -- but the
+  *inputs* are not captured data, and the vision-gated event is not run:
+  pass 2 has no camera and no actuators, so start_vision_event is a stub
+  that records the call. No acoustic classifier runs on the MCU yet
+  (docs/KNOWN_GAPS.md), so there is no bench capture to replay; pass 2 uses
+  one fixed synthetic confidence for all four classes. See
+  ILLUSTRATIVE_ACOUSTIC_CONFIDENCE.
 
 Both passes call the actual sense -> fuse -> decide pipeline, not a mock of
 it, and narrate each step to the terminal. See docs/KNOWN_GAPS.md
@@ -411,7 +413,7 @@ def _print_acoustic_header(style: _Style) -> None:
 def _print_acoustic(
     class_label: AcousticClass,
     outcome: reflex_loop.AcousticOutcome,
-    first_fused_p: float | None,
+    vision_started: bool,
     log_lines: list[str],
     style: _Style,
 ) -> None:
@@ -425,14 +427,15 @@ def _print_acoustic(
         f"confidence = {ILLUSTRATIVE_ACOUSTIC_CONFIDENCE:.3f}  (illustrative, not captured)"
     )
 
-    if outcome.fusion is None:
+    if outcome.direct_alert:
         print(
-            f"  {style.yellow}route: direct anti-poaching alert -- never reaches fuse()"
-            f"{style.reset}"
+            f"  {style.yellow}route: direct anti-poaching alert -- straight to the "
+            f"officers, no camera and no horn{style.reset}"
         )
         print(
-            f"  {style.yellow}outcome.fusion is None -- never fused, not the same as a "
-            f"FusionResult with acoustic unavailable{style.reset}"
+            f"  {style.yellow}this class is not evidence that an elephant is present, "
+            f"so it never reaches the elephant-presence pipeline at all (ADR 0033)"
+            f"{style.reset}"
         )
         print("  the alert line this event actually logged:")
         for line in log_lines:
@@ -444,38 +447,31 @@ def _print_acoustic(
         print()
         return
 
-    fusion = outcome.fusion
-    if Modality.ACOUSTIC in fusion.used:
-        contribution = fusion.contributions[Modality.ACOUSTIC]
+    if vision_started:
         print(
-            f"  sense -> fuse             acoustic contribution = {contribution:+.3f}  "
-            "(seismic/vision unavailable, dropped)"
+            f"  {style.green}route: starts a full vision-gated event -- the call opens "
+            f"the camera, the camera decides{style.reset}"
         )
-        print(f"                            fused log-odds L    = {fusion.log_odds:+.3f}")
-        fused_p = f"{style.green}{fusion.probability:.3f}{style.reset}"
-        print(f"  fuse                      fused P(elephant)   = {fused_p}")
-        if first_fused_p is not None:
-            print(
-                f"  {style.dim}identical to the first fusing class's fused P "
-                f"({first_fused_p:.3f}) -- one shared ACOUSTIC modality "
-                f"(WEIGHT_ACOUSTIC/BASELINE_ACOUSTIC), not three (ADR 0007 5){style.reset}"
-            )
         print(
-            f"  {style.dim}no decide() and no actuation on this path -- acoustic is "
-            f"corroboration only, and fuse() is stateless per event{style.reset}"
+            f"  {style.dim}handle_acoustic_event() itself alerts nothing here. The "
+            f"confidence is handed to handle_footfall_event() as the ACOUSTIC modality, "
+            f"with seismic dropped, and the event earns deterrence and airtime only if "
+            f"the camera confirms (ADR 0033){style.reset}"
+        )
+        print(
+            f"  {style.dim}not run in this replay: there is no camera and no actuator "
+            f"on the bench, so start_vision_event only records that it was called"
+            f"{style.reset}"
         )
     else:
         print(
-            f"  {style.dim}route: fused as unavailable -- excluded from the sum, not "
-            f"scored as negative evidence (INVENTED mapping, ADR 0007 never routes "
-            f"ambient){style.reset}"
+            f"  {style.dim}route: nowhere at all -- ambient is the absence of anything "
+            f"to act on{style.reset}"
         )
-        print(f"  dropped = {[m.value for m in fusion.dropped]}")
-        fused_p = f"{style.dim}{fusion.probability:.3f}{style.reset}"
-        print(f"  fuse                      fused P(elephant)   = {fused_p}  (prior alone)")
         print(
-            f"  {style.dim}Modality.ACOUSTIC not in outcome.fusion.contributions -- "
-            f"excluded, not scored as a zero{style.reset}"
+            f"  {style.dim}deliberately not scored as evidence against an elephant "
+            f"either: silence on the microphone says nothing about the ground "
+            f"(INVENTED mapping, ADR 0007 never routes ambient){style.reset}"
         )
     print()
 
@@ -484,9 +480,9 @@ def _print_acoustic_summary(style: _Style) -> None:
     rule = "=" * _WIDTH
     print(style.bold + rule + style.reset)
     print(
-        "5 classes, 3 routes (ADR 0007 5, ADR 0033): gunshot and chainsaw "
-        "bypass fuse() entirely and alert officers directly; elephant_call "
-        "fuses as the ACOUSTIC modality; ambient fuses as unavailable."
+        "4 classes, 3 routes (ADR 0007 5, ADR 0033): gunshot and chainsaw "
+        "alert officers directly; elephant_call starts a vision-gated event "
+        "and alerts only on a camera confirmation; ambient routes nowhere."
     )
     print(
         f"every input above used one fixed synthetic confidence "
@@ -565,10 +561,14 @@ def main() -> int:
     _print_acoustic_header(style)
     time.sleep(args.interval)
 
-    # First fusing class's fused P, so later fusing classes can show they
-    # land on the identical value -- see _print_acoustic()'s docstring note.
-    first_fused_p: float | None = None
     for class_label in AcousticClass:
+        # Records the call rather than running the event: a vision-gated
+        # event needs the camera and the actuators, and this replay has
+        # neither. Returning None is what the real binding returns when the
+        # event mutex refuses, so the handler's own "dropped" path is the
+        # one exercised here -- what pass 2 is demonstrating is the
+        # routing, not the event.
+        started: list[float] = []
         with _capturing_reflex_log() as log_lines:
             outcome = reflex_loop.handle_acoustic_event(
                 services_config.SCHEMA_VERSION,
@@ -576,15 +576,10 @@ def main() -> int:
                 ILLUSTRATIVE_ACOUSTIC_CONFIDENCE,
                 ILLUSTRATIVE_CAPTURE_REF,
                 send_lora_alert=_never_called("send_lora_alert"),
+                start_vision_event=started.append,
                 safe_mode=True,
             )
-        _print_acoustic(class_label, outcome, first_fused_p, log_lines, style)
-        if (
-            first_fused_p is None
-            and outcome.fusion is not None
-            and Modality.ACOUSTIC in outcome.fusion.used
-        ):
-            first_fused_p = outcome.fusion.probability
+        _print_acoustic(class_label, outcome, bool(started), log_lines, style)
         time.sleep(args.interval)
 
     _print_acoustic_summary(style)

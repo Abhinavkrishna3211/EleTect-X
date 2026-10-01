@@ -32,6 +32,7 @@ import math
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -188,6 +189,30 @@ class _FakeSendLoraAlert:
         self.calls.append((schema_version, acoustic_class, confidence, capture_ref))
         self.call_log.append("send_lora_alert")
         return self.ack
+
+
+# A finished event, as handle_acoustic_event() sees one coming back out of
+# the injected start_vision_event. Only the three fields the handler logs
+# are present: a real FootfallOutcome here would say nothing extra and
+# would have to be rebuilt every time the dataclass gains a field.
+_FAKE_FOOTFALL = SimpleNamespace(vision_confirmed=True, species="Elephant", alerted=True)
+
+
+class _FakeStartVisionEvent:
+    """Recording stand-in for main.py's _start_vision_event binding.
+
+    Returns None by default, which is what the real binding returns when
+    another event already owned the camera and this one was dropped. Tests
+    that care about what came back pass an outcome in.
+    """
+
+    def __init__(self, outcome=None):
+        self.outcome = outcome
+        self.calls: list[float] = []
+
+    def __call__(self, confidence):
+        self.calls.append(confidence)
+        return self.outcome
 
 
 class _FakeCamera:
@@ -1421,9 +1446,11 @@ def _route(
     safe_mode=True,
     call_log=None,
     send_lora_alert=None,
+    start_vision_event=None,
 ):
     log = call_log if call_log is not None else []
     fake = send_lora_alert if send_lora_alert is not None else _FakeSendLoraAlert(call_log=log)
+    vision = start_vision_event if start_vision_event is not None else _FakeStartVisionEvent()
     outcome = reflex_loop.handle_acoustic_event(
         schema_version,
         class_label,
@@ -1431,6 +1458,7 @@ def _route(
         capture_ref,
         safe_mode=safe_mode,
         send_lora_alert=fake,
+        start_vision_event=vision,
     )
     return outcome, fake, log
 
@@ -1445,20 +1473,27 @@ def test_acoustic_event_is_logged_and_returns_its_outcome(caplog):
     assert any("gunshot" in record.message for record in caplog.records)
 
 
-def test_gunshot_never_reaches_fusion_and_logs_a_direct_alert(caplog):
+def test_gunshot_never_reaches_the_elephant_path_and_logs_a_direct_alert(caplog):
     """ADR 0007 5's central rule, as a regression guard.
 
     The ADR is explicit that a gunshot is not evidence toward "is an elephant
-    present", and that folding it into the elephant-presence fusion score
-    would be a modeling error. A None fusion here means fuse() was never
-    called at all - an event that fused with acoustic unavailable still
-    carries a real FusionResult (see test_ambient_is_fused_as_unavailable
-    below), so this assertion distinguishes the two.
+    present", and that folding it into the elephant-presence score would be
+    a modeling error. Two assertions say so from different directions:
+    nothing fused (there is no probability anywhere in the log line), and
+    nothing started an event, so the camera was never opened and the horn
+    was never a possibility.
     """
+    vision = _FakeStartVisionEvent()
     with caplog.at_level("INFO"):
-        outcome, fake, _ = _route(class_label=AcousticClass.GUNSHOT, confidence=0.93, capture_ref=7)
+        outcome, fake, _ = _route(
+            class_label=AcousticClass.GUNSHOT,
+            confidence=0.93,
+            capture_ref=7,
+            start_vision_event=vision,
+        )
 
-    assert outcome.fusion is None
+    assert outcome.footfall is None
+    assert vision.calls == []
     assert outcome.direct_alert is True
     assert outcome.lora_ack is None
     assert fake.calls == []
@@ -1490,7 +1525,7 @@ def test_gunshot_calls_send_lora_alert_outside_safe_mode(caplog):
             send_lora_alert=_FakeSendLoraAlert(ack=True),
         )
 
-    assert outcome.fusion is None
+    assert outcome.footfall is None
     assert outcome.direct_alert is True
     assert outcome.lora_ack is True
     # The class travels with the call: lora_uplink picks the EventClass from
@@ -1519,6 +1554,64 @@ def test_send_lora_alert_is_never_called_for_the_non_alerting_classes(class_labe
     assert fake.calls == []
 
 
+def test_an_elephant_call_starts_a_vision_gated_event_and_alerts_nothing_itself():
+    """ADR 0033: the microphone opens the camera, it does not raise the alarm.
+
+    Two failures are pinned here at once, and they pull in opposite
+    directions. The first is the one this fixes: `elephant_call` used to
+    fuse and return, which meant the best class in the trained model - the
+    only one that is direct evidence of an elephant rather than a
+    correlate - could not cause anything to happen. The second is the one
+    that makes the fix dangerous if done carelessly: fuse() is stateless
+    per event, so a single high-confidence acoustic reading with nothing
+    to corroborate it crosses ALERT_PROBABILITY_THRESHOLD on its own, and
+    letting this branch alert directly would turn the acoustic model into
+    a standalone elephant detector - exactly the defect ADR 0033 removed
+    from chainsaw. Starting a vision-gated event satisfies both: the
+    confidence travels, and the camera decides.
+    """
+    vision = _FakeStartVisionEvent(outcome=_FAKE_FOOTFALL)
+
+    outcome, fake, _ = _route(
+        class_label=AcousticClass.ELEPHANT_CALL,
+        confidence=0.8,
+        capture_ref=5,
+        safe_mode=False,
+        start_vision_event=vision,
+    )
+
+    assert vision.calls == [0.8]
+    assert outcome.footfall is _FAKE_FOOTFALL
+    assert outcome.direct_alert is False
+    assert outcome.lora_ack is None
+    # Nothing on this branch touches the direct-alert transport, even
+    # outside safe_mode. Whatever reaches the air comes out of the event
+    # the camera confirmed, not out of the classification.
+    assert fake.calls == []
+
+
+def test_a_dropped_vision_event_is_reported_as_nothing_having_run():
+    """The event mutex's refusal must not read as "looked and saw nothing".
+
+    start_vision_event returns None when another event already owned the
+    camera and the actuators. An AcousticOutcome that reported that the
+    same way it reports an unconfirmed watch would tell a later reader the
+    node looked at this call, which it did not.
+    """
+    vision = _FakeStartVisionEvent(outcome=None)
+
+    outcome, _, _ = _route(
+        class_label=AcousticClass.ELEPHANT_CALL,
+        confidence=0.8,
+        capture_ref=5,
+        start_vision_event=vision,
+    )
+
+    assert vision.calls == [0.8]
+    assert outcome.footfall is None
+    assert outcome.direct_alert is False
+
+
 def test_a_chainsaw_alerts_officers_directly_and_never_fuses():
     """ADR 0033's whole point, and the regression it exists to stop.
 
@@ -1529,108 +1622,158 @@ def test_a_chainsaw_alerts_officers_directly_and_never_fuses():
     ALERT_PROBABILITY_THRESHOLD on its own, making the acoustic model a
     standalone elephant detector (docs/KNOWN_GAPS.md).
 
-    `fusion is None` is the assertion that matters: an event that fused with
-    acoustic unavailable still carries a real FusionResult, so None here
-    means fuse() was never reached at all rather than reached and ignored.
+    A chainsaw must also not take elephant_call's new route: starting a
+    vision watch and a deterrence decision over illegal felling would point
+    the horn at the wrong problem and delay the alert that matters.
     """
+    vision = _FakeStartVisionEvent()
     outcome, fake, _ = _route(
-        class_label=AcousticClass.CHAINSAW, confidence=0.9, capture_ref=3, safe_mode=False
+        class_label=AcousticClass.CHAINSAW,
+        confidence=0.9,
+        capture_ref=3,
+        safe_mode=False,
+        start_vision_event=vision,
     )
 
     assert outcome.direct_alert is True
-    assert outcome.fusion is None
+    assert outcome.footfall is None
+    assert vision.calls == []
     assert fake.calls == [(1, "chainsaw", 0.9, 3)]
 
 
 def test_the_two_acoustic_routes_are_disjoint_and_cover_the_model():
-    """No class may both fuse and alert, and none may fall off the end.
+    """No class may both start an event and alert, and none may fall off the end.
 
     The routing is three branches reading two frozensets, which is exactly
-    the shape that rots silently when a class is added to the model: a
-    5th class that is in neither set would quietly take the fusing
-    branch's `else` and be scored as elephant-presence evidence. Asserting
-    against AcousticClass itself rather than against a hand-written list is
-    what makes this test notice that.
+    the shape that rots silently when a class is added to the model: a 5th
+    class in neither set would fall through to the ambient branch and be
+    discarded with a log line, which is the quietest possible way for a
+    detection to stop existing. Asserting against AcousticClass itself
+    rather than against a hand-written list is what makes this test notice
+    that.
     """
-    fusing = reflex_loop._FUSING_ACOUSTIC_CLASSES
+    vision_event = reflex_loop._VISION_EVENT_ACOUSTIC_CLASSES
     direct = reflex_loop._DIRECT_ALERT_ACOUSTIC_CLASSES
 
-    assert fusing.isdisjoint(direct)
-    # AMBIENT is deliberately in neither: it fuses, as unavailable. Every
-    # other class the model can emit must have been routed on purpose.
-    assert set(AcousticClass) - fusing - direct == {AcousticClass.AMBIENT}
+    assert vision_event.isdisjoint(direct)
+    # AMBIENT is deliberately in neither: it is the one class whose correct
+    # handling is to do nothing. Every other class the model can emit must
+    # have been routed on purpose.
+    assert set(AcousticClass) - vision_event - direct == {AcousticClass.AMBIENT}
 
 
-def test_the_fusing_class_is_routed_through_the_one_acoustic_weight():
-    """ADR 0007 treats acoustic as one modality with one weight and baseline.
+def test_an_acoustic_elephant_call_fuses_through_the_one_acoustic_weight():
+    """ADR 0033 reuses the existing pipeline, which means the existing weight.
 
-    Checked at two different confidences deliberately: agreeing with the
-    hand computation at one value could be coincidence, agreeing at two
-    can only hold if the reading really is routed through
-    WEIGHT_ACOUSTIC/BASELINE_ACOUSTIC rather than through anything that
-    happens to pass through the same point.
+    The point of routing an elephant call into handle_footfall_event()
+    rather than building a second decision path is that it arrives as the
+    ACOUSTIC modality, through the one WEIGHT_ACOUSTIC/BASELINE_ACOUSTIC
+    pair ADR 0007 5 gave acoustic, and through ADR 0022's blindness logic -
+    not through a parallel copy that can drift. Hand-computed against the
+    real params rather than against fuse().
+
+    Checked at two confidences deliberately: agreeing at one value could be
+    coincidence, agreeing at two can only hold if the reading really is
+    routed through that pair rather than through anything that happens to
+    pass through the same point.
+
+    The seismic modality must be *dropped* rather than scored. There is no
+    geophone reading on this path, and probability=0.0 taken as a real
+    reading would read as "the ground says no" and could suppress an alert
+    the call had already earned.
     """
     for confidence in (0.62, 0.91):
         expected_log_odds, expected_p = _expected_acoustic_fusion(confidence)
 
-        outcome, _, _ = _route(
-            class_label=AcousticClass.ELEPHANT_CALL, confidence=confidence, capture_ref=11
+        outcome, _, _ = _fire(
+            probability=0.0,
+            sta_lta_ratio=0.0,
+            acoustic_confidence=confidence,
+            seismic_available=False,
         )
 
-        assert outcome.class_label is AcousticClass.ELEPHANT_CALL
-        assert outcome.direct_alert is False
-        assert outcome.fusion is not None
+        # VISION is present and at its baseline - _fire()'s default
+        # detector finds nothing on a night event, which ADR 0022 scores as
+        # blindness rather than as absence - so it contributes exactly
+        # zero and _expected_acoustic_fusion() still describes the sum.
+        assert outcome.fusion.used == (Modality.ACOUSTIC, Modality.VISION)
+        assert outcome.fusion.contributions[Modality.VISION] == pytest.approx(0.0)
+        assert Modality.SEISMIC in outcome.fusion.dropped
+        assert Modality.SEISMIC not in outcome.fusion.contributions
         assert outcome.fusion.log_odds == pytest.approx(expected_log_odds)
         assert outcome.fusion.probability == pytest.approx(expected_p)
-        assert outcome.fusion.used == (Modality.ACOUSTIC,)
-        assert set(outcome.fusion.dropped) == {Modality.SEISMIC, Modality.VISION}
-        assert Modality.SEISMIC not in outcome.fusion.contributions
-        assert Modality.VISION not in outcome.fusion.contributions
-    assert outcome.fusion.log_odds == pytest.approx(expected_log_odds)
-    assert outcome.fusion.probability == pytest.approx(expected_p)
-    assert outcome.fusion.used == (Modality.ACOUSTIC,)
 
 
-def test_ambient_is_fused_as_unavailable():
-    """Ambient is "nothing to say", excluded from the sum - never negative evidence.
+def test_ambient_routes_nowhere_at_all():
+    """Ambient is the absence of something to act on, and now costs nothing.
 
-    INVENTED mapping: ADR 0007 names only four classes and never routes
-    ambient. ADR 0001's addendum fixes the shape - a missing modality is
-    excluded, not scored down - so the fused result must land exactly on the
-    prior, with no acoustic contribution, even at a high confidence.
+    It used to go through fuse() so the result could honestly record
+    "acoustic was present and had nothing to say". With chainsaw gone to
+    the officers and elephant_call gone to the camera, that FusionResult
+    had no second modality to combine with and no reader: it was the prior,
+    every time, dressed up as a detection. What must not change is that
+    ambient is still not negative evidence - it simply ends here, rather
+    than being scored against an elephant somewhere else.
     """
-    outcome, _, _ = _route(class_label=AcousticClass.AMBIENT, confidence=0.99, capture_ref=5)
+    vision = _FakeStartVisionEvent(outcome=_FAKE_FOOTFALL)
+
+    outcome, fake, _ = _route(
+        class_label=AcousticClass.AMBIENT,
+        confidence=0.99,
+        capture_ref=5,
+        safe_mode=False,
+        start_vision_event=vision,
+    )
 
     assert outcome.direct_alert is False
-    assert outcome.fusion is not None
-    assert outcome.fusion.used == ()
-    assert set(outcome.fusion.dropped) == {
-        Modality.ACOUSTIC,
-        Modality.SEISMIC,
-        Modality.VISION,
-    }
-    assert Modality.ACOUSTIC not in outcome.fusion.contributions
-    assert outcome.fusion.log_odds == pytest.approx(cognition_config.L_PRIOR)
-    assert outcome.fusion.probability == pytest.approx(sigmoid(cognition_config.L_PRIOR))
+    assert outcome.footfall is None
+    assert outcome.lora_ack is None
+    assert vision.calls == []
+    assert fake.calls == []
 
 
-def test_acoustic_confidence_at_exactly_zero_or_one_does_not_crash():
-    """logit() rejects 0.0/1.0 outright - the shared epsilon clamp protects this call too.
+def test_the_acoustic_confidence_reaches_the_vision_event_unmodified():
+    """handle_acoustic_event() no longer converts anything, including the endpoints.
 
-    Same guard as the footfall test above, exercised on the other caller of
-    _confidence_log_odds(): the wire field is a plain float with no
-    protocol-level bound either way.
+    logit() rejects 0.0 and 1.0 outright, and both are representable values
+    a wire float could carry. The clamp that protects it now lives in
+    handle_footfall_event() alone - one clamp rather than two that can
+    drift - so what this path owes is to hand the raw value across
+    untouched. Both endpoints are exercised because a defensive clamp added
+    here later would be invisible at any ordinary confidence.
     """
-    outcome_zero, _, _ = _route(
-        class_label=AcousticClass.ELEPHANT_CALL, confidence=0.0, capture_ref=1
+    zero = _FakeStartVisionEvent()
+    one = _FakeStartVisionEvent()
+
+    _route(
+        class_label=AcousticClass.ELEPHANT_CALL,
+        confidence=0.0,
+        capture_ref=1,
+        start_vision_event=zero,
     )
-    outcome_one, _, _ = _route(
-        class_label=AcousticClass.ELEPHANT_CALL, confidence=1.0, capture_ref=2
+    _route(
+        class_label=AcousticClass.ELEPHANT_CALL,
+        confidence=1.0,
+        capture_ref=2,
+        start_vision_event=one,
     )
 
-    assert math.isfinite(outcome_zero.fusion.log_odds)
-    assert math.isfinite(outcome_one.fusion.log_odds)
-    assert outcome_zero.fusion.probability < outcome_one.fusion.probability
+    assert zero.calls == [0.0]
+    assert one.calls == [1.0]
+
+
+def test_a_footfall_event_survives_an_acoustic_confidence_at_the_endpoints():
+    """The clamp that moved still exists, on the side that now owns it.
+
+    _confidence_log_odds() is shared with the seismic reading, but nothing
+    exercised it through acoustic_confidence until this parameter existed.
+    """
+    low, _, _ = _fire(probability=0.0, acoustic_confidence=0.0, seismic_available=False)
+    high, _, _ = _fire(probability=0.0, acoustic_confidence=1.0, seismic_available=False)
+
+    assert math.isfinite(low.fusion.log_odds)
+    assert math.isfinite(high.fusion.log_odds)
+    assert low.fusion.probability < high.fusion.probability
 
 
 def test_acoustic_schema_version_mismatch_is_logged_not_raised(caplog):
@@ -1641,9 +1784,10 @@ def test_acoustic_schema_version_mismatch_is_logged_not_raised(caplog):
             class_label=AcousticClass.ELEPHANT_CALL,
             confidence=0.8,
             capture_ref=4,
+            start_vision_event=_FakeStartVisionEvent(outcome=_FAKE_FOOTFALL),
         )
 
-    assert outcome.fusion is not None
+    assert outcome.footfall is _FAKE_FOOTFALL
     assert any(
         "schema_version mismatch" in record.message and record.levelname == "WARNING"
         for record in caplog.records

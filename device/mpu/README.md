@@ -214,13 +214,14 @@ the terminal. The actuator/camera callables passed in raise if ever called, sinc
 
 **Pass 2 (acoustic routing, illustrative)** calls the real `handle_acoustic_event()` once per
 `AcousticClass` value, to make the three-way routing split (ADR 0007 §5 as ADR 0033 amends it)
-watchable rather than just provable: gunshot and chainsaw bypass `fuse()` entirely and print the
+watchable rather than just provable: gunshot and chainsaw alert officers directly and print the
 real `[SAFE_MODE]` alert line each event actually logged (captured from the real logger, not
-re-typed); elephant_call fuses as the ACOUSTIC modality and prints the live `fused P`; ambient
-fuses as unavailable, with `acoustic` visible in `fusion.dropped`. Every input in this pass uses one fixed synthetic confidence, 0.87 — **this is not
-captured bench data**, unlike pass 1: no acoustic classifier runs on the MCU yet, so there is nothing
-real to replay. Only the inputs are synthetic; the routing, the fusion and every printed number come
-from the real function call.
+re-typed); elephant_call starts a full vision-gated event, so the microphone opens the camera and
+alerts nothing by itself; ambient routes nowhere at all. Every input in this pass uses one fixed
+synthetic confidence, 0.87 — **this is not captured bench data**, unlike pass 1: no acoustic
+classifier runs on the MCU yet, so there is nothing real to replay. The vision-gated event is not
+run either — the bench has no camera and no actuators, so `start_vision_event` is a stub that
+records the call. What pass 2 demonstrates is the routing, and that part is the real function.
 
 Built for the Robu bench demo, where the actuators aren't wired to the board yet.
 

@@ -35,13 +35,15 @@ that has either repeated inside the habituation window - this device's
 closest available signal for "the footfall event is still happening" - or
 already cleared the alert threshold on seismic evidence alone.
 
-Acoustic is deliberately not wired into this path, and for the first field
-trial is not wired at all: the trial runs seismic + vision only. A footfall
-notify carries no acoustic reading, main.py does not register
-report_acoustic_event, and handle_acoustic_event() below stays complete and
-tested for when it is turned on. The footfall path reports ACOUSTIC
-unavailable, which fuse() drops rather than scores - so the absent modality
-costs nothing and biases nothing. Camera and vision now run before
+Acoustic reaches this path from one direction only: an acoustic elephant
+call starts an event here, with its classifier confidence entering as the
+ACOUSTIC modality and no geophone reading behind it (ADR 0033). A footfall
+notify itself carries no acoustic reading, and nothing correlates a separate
+acoustic event with a seismic one across time, so a seismic-triggered event
+reports ACOUSTIC unavailable, which fuse() drops rather than scores - the
+absent modality costs nothing and biases nothing. For the first field trial
+the acoustic side is off at the source anyway (services/config.py's
+ACOUSTIC_ENABLED): the trial runs seismic + vision only. Camera and vision now run before
 the alert gate, not after it - this is the "seismic wakes vision" ordering
 the field trial requires, and the reason a footfall event now opens the
 camera at all when it does not end up alerting. If decide() says no alert,
@@ -128,10 +130,10 @@ by design, not oversight:
   same two-class model is not folded into this modality; see
   _vision_check()'s own docstring for the no-qualifying-detection case and
   docs/KNOWN_GAPS.md for whether a Boar detection should ever suppress an
-  alert (an open question, not decided here). Vision is not wired into
-  handle_acoustic_event() - that path has no camera open at the moment an
-  acoustic notify arrives, and the field directive is specifically about the
-  seismic-wake ordering; see that function's own docstring, unchanged.
+  alert (an open question, not decided here). An acoustic elephant call
+  reaches vision the same way a geophone trigger does - by starting an event
+  here - rather than through a camera path of its own (ADR 0033); see
+  handle_acoustic_event()'s own docstring.
 
   One real limitation worth naming plainly: the pre-decision vision check
   runs *before* any deterrence tier is chosen, so it never gets the IR
@@ -147,23 +149,23 @@ by design, not oversight:
   design (firing IR before knowing whether this is an elephant, a real
   animal-welfare/battery tradeoff ADR 0003 has not signed off on) is built.
   See docs/KNOWN_GAPS.md.
-- **Acoustic**: handle_acoustic_event() now implements ADR 0007 5's
-  routing split as ADR 0033 amends it, so acoustic does reach fuse() - but
-  never on the footfall path above, which still passes it as unavailable
-  because no acoustic reading is in hand at that moment. Elephant_call
-  converts to log-odds and fuses as the single ACOUSTIC modality; gunshot
-  and chainsaw never touch fuse() at all (each is an alert about people,
-  not evidence that an elephant is present); ambient fuses as unavailable.
-  The direct-alert branch calls the injected send_lora_alert when safe_mode
-  is False, and logs a dry-run line instead when it is True - that callable
-  is bound to the LoRa uplink queue with no real transport behind it yet,
-  since the LoRa module is not joining, so its ack means
-  "queued/logged", never "delivered" (see docs/KNOWN_GAPS.md). Two
-  caveats stand: no acoustic classifier runs on the MCU yet, so nothing
-  calls this path in the field, and fuse() is stateless per event, so an
-  acoustic reading cannot actually corroborate a seismic one - which is
-  why handle_acoustic_event() stops at fuse() and never calls decide().
-  See docs/KNOWN_GAPS.md.
+- **Acoustic**: handle_acoustic_event() implements ADR 0007 5's routing
+  split as ADR 0033 amends it, and fuses nothing itself any more. Gunshot
+  and chainsaw alert forest officers directly - each is an alert about
+  people, not evidence that an elephant is present. Elephant_call starts a
+  full vision-gated event through handle_footfall_event() above, entering
+  as the ACOUSTIC modality with seismic unavailable, so the call reaches
+  the camera, the bandit and the deterrent through this one pipeline
+  rather than a parallel copy of it - and so it cannot alert on the
+  microphone alone. Ambient routes nowhere. The direct-alert branch calls
+  the injected send_lora_alert when safe_mode is False, and logs a dry-run
+  line instead when it is True - that callable is bound to the LoRa uplink
+  queue with no real transport behind it yet, since the LoRa module is not
+  joining, so its ack means "queued/logged", never "delivered" (see
+  docs/KNOWN_GAPS.md). One caveat still stands: no acoustic classifier
+  runs on the MCU, so in the field this path is driven by the MPU-side
+  poll (ADR 0028) rather than by a report_acoustic_event notify. See
+  docs/KNOWN_GAPS.md.
 
 Seismic and vision are both wired end-to-end into the alert-and-actuate
 path now: the MCU's own on-board footfall model already reports a
@@ -405,6 +407,30 @@ class SendLoraAlertFn(Protocol):
         ...
 
 
+class StartVisionEventFn(Protocol):
+    """Callable that turns an acoustic elephant call into a full event.
+
+    main.py binds this to handle_footfall_event() with the acoustic
+    confidence in hand and no geophone reading behind it (ADR 0033).
+    Injected rather than called directly from handle_acoustic_event()
+    because that function would otherwise have to carry every one of
+    handle_footfall_event()'s keyword bindings - the actuators, the
+    detector, the experience store, the event video - none of which it has
+    any other use for, and all of which would then have two call sites to
+    keep in step. Same reasoning as SendLoraAlertFn above.
+    """
+
+    def __call__(self, confidence: float) -> FootfallOutcome | None:
+        """Start a vision-gated event for an acoustic elephant call.
+
+        Returns the finished FootfallOutcome, or None when another event
+        already owned the camera and the actuators and this one was
+        dropped - see _one_event_at_a_time. None is "nothing ran", never
+        "it ran and saw nothing".
+        """
+        ...
+
+
 class CameraProtocol(Protocol):
     """The subset of perception.camera.Camera's interface this loop calls.
 
@@ -621,34 +647,36 @@ class FootfallOutcome:
 
 @dataclass(frozen=True)
 class AcousticOutcome:
-    """What one handle_acoustic_event() call routed and computed.
+    """What one handle_acoustic_event() call routed, and what came of it.
 
     Returned (rather than left as a side effect only) so tests can assert on
     it directly, matching FootfallOutcome's own rationale above - and in
-    particular so ADR 0007 5's rule that gunshot never reaches fuse() is
-    provable from a returned value rather than inferred from log text.
+    particular so ADR 0007 5's rule that an alert class never reaches the
+    elephant-presence path is provable from a returned value rather than
+    inferred from log text.
 
     Attributes:
         class_label: The AcousticClass this event carried, echoed back so a
             caller can branch on which route was taken without re-deriving
             it from the input.
-        fusion: The FusionResult fuse() produced for this event, or None on
-            the gunshot branch, which never calls fuse() at all (ADR 0007
-            5). None here means "never fused", never "fused to nothing" -
-            an event that fused with the acoustic modality unavailable
-            still carries a real FusionResult.
-        direct_alert: True only for gunshot: this event took the direct
-            anti-poaching alert path instead of the elephant-presence one.
-            The alert is logged rather than sent - see
-            handle_acoustic_event()'s docstring for why.
+        footfall: The FootfallOutcome the vision-gated branch produced, or
+            None on every other branch and on a vision event that another
+            event's hold on the camera dropped. None means "no event ran",
+            never "an event ran and found nothing" - a watch that looked
+            and saw nothing still returns a FootfallOutcome, with
+            vision_confirmed False.
+        direct_alert: True for gunshot and chainsaw: this event took the
+            direct officer-alert path instead of the elephant-presence one
+            (ADR 0033). Under safe_mode the alert is logged rather than
+            sent - see handle_acoustic_event()'s docstring for why.
         lora_ack: send_lora_alert's returned ack, or None if it was never
-            called (non-gunshot class, or safe_mode suppressed it). True
-            today would still only mean "queued/logged on the MCU", never
-            "delivered" - no real LoRa transport exists yet.
+            called (not a direct-alert class, or safe_mode suppressed it).
+            True today would still only mean "queued/logged on the MCU",
+            never "delivered" - no real LoRa transport exists yet.
     """
 
     class_label: AcousticClass
-    fusion: FusionResult | None
+    footfall: FootfallOutcome | None
     direct_alert: bool
     lora_ack: bool | None
 
@@ -1621,6 +1649,7 @@ def handle_footfall_event(
     household_proximity: bool = services_config.NODE_HOUSEHOLD_PROXIMITY,
     target_labels: tuple[str, ...] = VISION_TARGET_LABELS,
     seismic_available: bool = True,
+    acoustic_confidence: float | None = None,
 ) -> FootfallOutcome | None:
     """Sense -> fuse -> decide -> actuate for one report_footfall_event notify.
 
@@ -1793,6 +1822,16 @@ def handle_footfall_event(
             `probability`/`sta_lta_ratio`/`feature_vector` are still logged
             for explainability either way; only whether fuse() scores them
             changes.
+        acoustic_confidence: The classifier confidence of the acoustic
+            elephant call that started this event, or None - the default,
+            and every seismic call site - for no acoustic reading at all.
+            A float builds the ACOUSTIC ModalityReading from it, so the
+            call enters fuse() through the one shared WEIGHT_ACOUSTIC
+            ADR 0007 5 gave acoustic rather than through a second weight of
+            its own; None builds it unavailable, which fuse() drops rather
+            than scoring as "acoustic says no". handle_acoustic_event() is
+            the only caller that passes a value, via main.py's
+            _start_vision_event (ADR 0033).
 
     Returns:
         A FootfallOutcome carrying the fusion result, the decision, the
@@ -1844,13 +1883,20 @@ def handle_footfall_event(
     seismic_reading = ModalityReading(
         Modality.SEISMIC, _confidence_log_odds(probability), available=seismic_available
     )
-    # Acoustic: no reading in hand on this path. A footfall notify carries
-    # none, and nothing correlates an acoustic event with this one across
-    # time yet - acoustic fuses only on its own event, in
-    # handle_acoustic_event(). Also deliberately not wired for the first
-    # field trial at all, which is seismic + vision only (see module
-    # docstring). See docs/KNOWN_GAPS.md.
-    acoustic_reading = ModalityReading(Modality.ACOUSTIC, 0.0, available=False)
+    # Acoustic: present only when an acoustic elephant call started this
+    # event (ADR 0033). On a seismic trigger there is no acoustic reading in
+    # hand - a footfall notify carries none, and nothing correlates a
+    # separate acoustic event with this one across time - so the modality
+    # enters unavailable, which fuse() drops rather than scoring 0.0 as
+    # "acoustic says no". Note which number is converted: the call's own
+    # confidence, through the same _confidence_log_odds() clamp seismic
+    # uses, so there is one conversion for both modalities rather than a
+    # second copy living in handle_acoustic_event(). See docs/KNOWN_GAPS.md.
+    acoustic_reading = ModalityReading(
+        Modality.ACOUSTIC,
+        0.0 if acoustic_confidence is None else _confidence_log_odds(acoustic_confidence),
+        available=acoustic_confidence is not None,
+    )
 
     # What this event decides on the geophone alone, computed before the
     # camera is even opened. Two pure function calls on readings that are
@@ -2334,24 +2380,24 @@ def handle_footfall_event(
     )
 
 
-# Which AcousticClass values are evidence toward "is an elephant present".
+# Which AcousticClass values start a full vision-gated event (ADR 0033).
 #
-# ADR 0007 5 named chainsaw/vehicle/animal_call. None of those three is here
-# any more. `vehicle` and a generic `animal_call` do not exist - the trained
-# model is 4-class (ADR 0027) - and ADR 0033 took `chainsaw` out, because a
-# chainsaw is evidence of *people*, not of an elephant. Treating it as
-# elephant-presence evidence was a modelling error that ADR 0027 flagged and
-# deferred ("deserves its own decision with field evidence"): it let a
-# chainsaw at 0.9 fuse past the alert threshold on its own, and it forced one
-# shared WEIGHT_ACOUSTIC onto two classes that are not remotely comparable in
-# what they imply.
+# ADR 0007 5 named chainsaw/vehicle/animal_call as the classes that fuse.
+# None of those three is here any more. `vehicle` and a generic
+# `animal_call` do not exist - the trained model is 4-class (ADR 0027) - and
+# ADR 0033 took `chainsaw` out to the officers, because a chainsaw is
+# evidence of *people*, not of an elephant.
 #
 # What is left is the one class that is direct evidence rather than a
-# correlate. The set is kept as a set, rather than collapsed to an equality
-# check, because ADR 0007 5's shape - a named set of fusing classes, routed
-# through one shared modality weight - is the thing being described, and a
-# future model with more than four classes will add to it.
-_FUSING_ACOUSTIC_CLASSES = frozenset({AcousticClass.ELEPHANT_CALL})
+# correlate, and it no longer merely fuses: it opens the camera. An
+# elephant call that only contributed a log-odds term to a stateless
+# single-modality fuse() could not do anything with the result, which is
+# how the best class in the acoustic model spent months unable to cause
+# anything to happen. The set is kept as a set, rather than collapsed to an
+# equality check, because the shape being described - a named set of
+# classes routed to one destination - is what a future model with more
+# classes will add to.
+_VISION_EVENT_ACOUSTIC_CLASSES = frozenset({AcousticClass.ELEPHANT_CALL})
 
 # Which AcousticClass values bypass fusion and alert forest officers
 # directly (ADR 0033). Neither is a deterrence problem - you do not answer a
@@ -2375,9 +2421,10 @@ def handle_acoustic_event(
     capture_ref: int,
     *,
     send_lora_alert: SendLoraAlertFn,
+    start_vision_event: StartVisionEventFn,
     safe_mode: bool = SAFE_MODE,
 ) -> AcousticOutcome:
-    """Route one report_acoustic_event notify per ADR 0007 5's fusion/alert split.
+    """Route one acoustic classification per ADR 0007 5, as ADR 0033 amends it.
 
     Which of three branches an event takes is the whole point of this
     function:
@@ -2391,31 +2438,31 @@ def handle_acoustic_event(
       oversimplification. Both take the direct alert path to forest
       officers, independent of fusion and of the deterrence decision
       entirely: you do not deter a chainsaw with a horn and LEDs.
-    - **elephant_call** converts to log-odds via _confidence_log_odds() and
-      fuses as the single ACOUSTIC modality, through cognition/config.py's
-      WEIGHT_ACOUSTIC and BASELINE_ACOUSTIC, whose magnitudes are themselves
-      still invented (docs/KNOWN_GAPS.md). It is the only fusing class left,
-      and the only one that was ever direct evidence of an elephant rather
-      than a correlate of one. Splitting WEIGHT_ACOUSTIC is no longer a gap:
-      with chainsaw gone there is nothing left to split it between.
-    - **ambient** fuses as unavailable. INVENTED mapping: ADR 0007 names only
-      four classes and never assigns ambient a route at all, but ADR 0001's
-      addendum settles the shape - a modality with nothing to say is excluded
-      from the sum, never scored as negative evidence. It still goes through
-      fuse(), so the result honestly records "acoustic was present and had
-      nothing to say" rather than "acoustic never reported".
+    - **elephant_call** starts a full vision-gated event. It calls the
+      injected start_vision_event, which runs handle_footfall_event() with
+      this confidence as the ACOUSTIC modality and no geophone reading
+      behind it. The buried geophone misses elephants on soft ground, on
+      leaf litter, and beyond its radius, while the call carries much
+      further - this is the path for exactly those animals, and a node that
+      hears one approach and declines to look has failed at its purpose.
+      What it must not do is alert on the microphone alone: fuse() is
+      stateless per event, so a single high-confidence acoustic reading
+      with nothing to corroborate it would cross
+      ALERT_PROBABILITY_THRESHOLD by itself and make the acoustic model a
+      standalone elephant detector, exactly what ADR 0007/0009 scope it out
+      of being. Routing it through the existing pipeline is what puts the
+      camera between the call and the horn, and it inherits ADR 0022's
+      blindness logic, the bandit, the retreat tail, the event video and
+      the uplink rather than a parallel copy of each.
+    - **ambient** routes nowhere, and that is the whole of it. It used to go
+      through fuse() so the result could honestly record "acoustic was
+      present and had nothing to say", but with the other three classes
+      routed elsewhere that FusionResult had no second modality to combine
+      with and no reader: it was the prior, every time, dressed up as a
+      detection.
 
-    Two things this deliberately does not do:
+    One thing this deliberately does not do:
 
-    - **It never calls decide() and never actuates.** fuse() is stateless
-      per event, so an acoustic classification arrives with no concurrent
-      seismic or vision reading to corroborate. With both unavailable, a
-      single high-confidence acoustic reading fuses on its own past
-      ALERT_PROBABILITY_THRESHOLD - which would make acoustic a standalone
-      elephant detector, exactly what ADR 0007/0009 scope it out of being.
-      The missing piece is cross-modality temporal state, tracked as its own
-      entry in docs/KNOWN_GAPS.md rather than papered over here with a
-      threshold tweak.
     - **The direct alert it does send is not a real uplink.** send_lora_alert
       is bound in main.py to the LoRa uplink queue, and there is no MCU-side
       transport behind that yet - the module is not answering AT probes
@@ -2433,22 +2480,31 @@ def handle_acoustic_event(
         schema_version: As received from the MCU; logged if it does not
             match services.config.SCHEMA_VERSION.
         class_label: One of bridge.rpc.AcousticClass's values.
-        confidence: Classifier confidence, 0-1. Epsilon-clamped before
-            logit() on the fusing branch; unused on the other two beyond
-            being logged.
+        confidence: Classifier confidence, 0-1. Handed to
+            start_vision_event verbatim on the elephant_call branch -
+            handle_footfall_event() owns the epsilon clamp logit() needs,
+            so there is one clamp rather than two that can drift. Unused on
+            the other two branches beyond being logged.
         capture_ref: Index into the MCU's raw-window ring buffer.
         send_lora_alert: Injected callable matching SendLoraAlertFn, bound in
             main.py to the LoRa uplink queue. Only ever invoked on the
             direct-alert branch, and only when safe_mode is False. It is
             handed class_label.value so the uplink can pick the right
             EventClass.
+        start_vision_event: Injected callable matching StartVisionEventFn,
+            bound in main.py to handle_footfall_event(). Only ever invoked
+            on the elephant_call branch. Required rather than defaulted on
+            purpose: an elephant call that silently goes nowhere because a
+            caller forgot to bind it is the same defect ADR 0033 removed
+            for chainsaw, and a default would hide it behind a green suite.
         safe_mode: When True (the default), the direct-alert branch logs a
             dry-run line and never calls send_lora_alert. When False, it
             calls send_lora_alert for real and logs whatever ack comes back.
 
     Returns:
-        An AcousticOutcome carrying the class, the FusionResult (None on the
-        direct-alert branch), and whether this event took that path.
+        An AcousticOutcome carrying the class, the FootfallOutcome the
+        vision-gated branch produced (None on every other branch), and
+        whether this event took the direct-alert path.
     """
     if schema_version != services_config.SCHEMA_VERSION:
         logger.warning(
@@ -2470,7 +2526,7 @@ def handle_acoustic_event(
                 class_label.value,
             )
             return AcousticOutcome(
-                class_label=class_label, fusion=None, direct_alert=True, lora_ack=None
+                class_label=class_label, footfall=None, direct_alert=True, lora_ack=None
             )
         ack = send_lora_alert(schema_version, class_label.value, confidence, capture_ref)
         logger.info(
@@ -2486,36 +2542,44 @@ def handle_acoustic_event(
             class_label.value,
         )
         return AcousticOutcome(
-            class_label=class_label, fusion=None, direct_alert=True, lora_ack=ack
+            class_label=class_label, footfall=None, direct_alert=True, lora_ack=ack
         )
 
-    fuses = class_label in _FUSING_ACOUSTIC_CLASSES
-    readings = [
-        ModalityReading(
-            Modality.ACOUSTIC,
-            _confidence_log_odds(confidence) if fuses else 0.0,
-            available=fuses,
-        ),
-        # Seismic/vision: no reading in hand on this path. An acoustic notify
-        # carries neither, and nothing correlates a footfall event with this
-        # one across time yet - see this function's docstring on why that is
-        # also the reason decide() is not called here.
-        ModalityReading(Modality.SEISMIC, 0.0, available=False),
-        ModalityReading(Modality.VISION, 0.0, available=False),
-    ]
-    fusion_result = fuse(readings, cognition_config.DEFAULT_FUSION_PARAMS)
+    if class_label in _VISION_EVENT_ACOUSTIC_CLASSES:
+        footfall = start_vision_event(confidence)
+        if footfall is None:
+            logger.info(
+                "acoustic %s confidence=%.3f capture_ref=%d: vision event "
+                "dropped - another event already owned the camera and the "
+                "actuators, so nothing ran for this call",
+                class_label.value,
+                confidence,
+                capture_ref,
+            )
+        else:
+            logger.info(
+                "acoustic %s confidence=%.3f capture_ref=%d started a "
+                "vision-gated event: confirmed=%s species=%s alerted=%s "
+                "(ADR 0033 - the call opens the camera, the camera decides)",
+                class_label.value,
+                confidence,
+                capture_ref,
+                footfall.vision_confirmed,
+                footfall.species,
+                footfall.alerted,
+            )
+        return AcousticOutcome(
+            class_label=class_label, footfall=footfall, direct_alert=False, lora_ack=None
+        )
 
     logger.info(
-        "acoustic event: class_label=%s confidence=%.3f capture_ref=%d "
-        "fused_P=%.3f used=%s dropped=%s (fusion only - no decide() or "
-        "actuation on this path, acoustic is corroboration per ADR 0007/0009)",
+        "acoustic event: class_label=%s confidence=%.3f capture_ref=%d - no "
+        "route. Ambient is the absence of anything to act on, not evidence "
+        "against an elephant, so nothing here fuses, watches or alerts",
         class_label.value,
         confidence,
         capture_ref,
-        fusion_result.probability,
-        [m.value for m in fusion_result.used],
-        [m.value for m in fusion_result.dropped],
     )
     return AcousticOutcome(
-        class_label=class_label, fusion=fusion_result, direct_alert=False, lora_ack=None
+        class_label=class_label, footfall=None, direct_alert=False, lora_ack=None
     )

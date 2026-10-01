@@ -175,22 +175,33 @@ _lora_uplink = LoraUplink(
 )
 
 
-def _on_footfall_event(
+def _run_footfall_event(
     schema_version: int,
     probability: float,
     sta_lta_ratio: float,
     feature_vector: list[float],
-) -> None:
-    """Bridge.provide() adapter for report_footfall_event - see schema.md.
+    **extra,
+) -> reflex_loop.FootfallOutcome | None:
+    """Run one full event, and put the result on the uplink if it earned one.
 
-    Thin wrapper: the real logic is reflex_loop.handle_footfall_event(),
-    tested independently in tests/test_reflex_loop.py. This function exists
-    only to bind the real Bridge.call-backed drive_horn/drive_led/pulse_ir,
-    the real camera, the real save_burst, and the real SQLite-backed
-    experience store in as the injected dependencies reflex_loop's signature
-    requires. `event_video` is None unless config.EVENT_VIDEO_ENABLED is
-    set, in which case it is the same object as `camera` - see the
-    construction block above.
+    Hoisted out of _on_footfall_event below because there are now two ways
+    an event starts - a geophone notify and an acoustic elephant call
+    (ADR 0033) - and the bindings the two share must not be able to drift
+    into two different sets.
+
+    The real logic is reflex_loop.handle_footfall_event(), tested
+    independently in tests/test_reflex_loop.py. This function exists only
+    to bind the real Bridge.call-backed drive_horn/drive_led/pulse_ir, the
+    real camera, the real save_burst, and the real SQLite-backed
+    experience store in as the injected dependencies reflex_loop's
+    signature requires. `event_video` is None unless
+    config.EVENT_VIDEO_ENABLED is set, in which case it is the same object
+    as `camera` - see the construction block above. `extra` is whatever the
+    starting trigger adds on top of that, which today is the acoustic
+    path's acoustic_confidence/seismic_available pair.
+
+    The finished outcome is handed to the LoRa uplink, which decides
+    whether it is worth airtime and sends it off this thread.
     """
     outcome = reflex_loop.handle_footfall_event(
         schema_version,
@@ -225,18 +236,66 @@ def _on_footfall_event(
         save_frames=save_burst,
         experience=_experience,
         event_video=_event_video,
+        **extra,
     )
     if outcome is None:
         # Another event already owned the camera and the actuators, so
         # this notify ran nothing at all - no trigger recorded, no watch,
         # no deterrence. There is no outcome to put on air, and inventing
         # one would tell a ranger a node responded when it did not.
-        return
+        return None
     _lora_uplink.submit(
         event_from_footfall(
             outcome,
             safe_mode=reflex_loop.SAFE_MODE,
         )
+    )
+    return outcome
+
+
+def _on_footfall_event(
+    schema_version: int,
+    probability: float,
+    sta_lta_ratio: float,
+    feature_vector: list[float],
+) -> None:
+    """Bridge.provide() adapter for report_footfall_event - see schema.md.
+
+    Thin wrapper over _run_footfall_event above, which holds every binding
+    and the uplink. The returned outcome is dropped here because a notify
+    has no return channel to put it on.
+    """
+    _run_footfall_event(schema_version, probability, sta_lta_ratio, feature_vector)
+
+
+def _start_vision_event(confidence: float) -> reflex_loop.FootfallOutcome | None:
+    """Start a full vision-gated event from an acoustic elephant call.
+
+    ADR 0033: an elephant call never alerts on the microphone alone. It
+    runs the same pipeline a geophone trigger runs - the vision watch, the
+    bandit, the deterrence tier, the retreat tail, the event video and the
+    uplink - with no geophone reading behind it.
+
+    `seismic_available=False` carries that absence into fusion: it is what
+    makes fuse() drop the seismic modality instead of scoring
+    probability=0.0 as "the ground says no", which would drag the combined
+    log-odds down and could suppress an alert the call had already earned.
+    It is also what earns this event the extended watch, since an animal
+    the geophone never heard is exactly the case that needs the longer
+    look.
+
+    The zeroed probability/sta_lta_ratio/feature_vector are logged for
+    explainability like any other event's. They are honest rather than
+    invented: there is no geophone reading on this path, and
+    seismic_available=False is the field that says so.
+    """
+    return _run_footfall_event(
+        config.SCHEMA_VERSION,
+        0.0,
+        0.0,
+        [0.0] * 8,
+        acoustic_confidence=confidence,
+        seismic_available=False,
     )
 
 
@@ -250,9 +309,11 @@ def _on_acoustic_event(
 
     Discards the returned AcousticOutcome: a notify has no return channel,
     so the outcome exists for tests and for a future caller that wants to
-    branch on the routing, not for this adapter. A direct alert's uplink -
-    gunshot or chainsaw - is already sent from inside the handler, through
-    send_lora_alert.
+    branch on the routing, not for this adapter. Both uplinks this can
+    produce are already sent from inside the handler - a direct alert's
+    through send_lora_alert, and a vision-confirmed elephant call's from
+    _run_footfall_event, which an elephant call reaches through
+    _start_vision_event.
     """
     reflex_loop.handle_acoustic_event(
         schema_version,
@@ -260,6 +321,7 @@ def _on_acoustic_event(
         confidence,
         capture_ref,
         send_lora_alert=_send_lora_alert,
+        start_vision_event=_start_vision_event,
     )
 
 
