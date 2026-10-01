@@ -80,6 +80,11 @@ export interface EventRow {
   fusion: Fusion | null
   corridor: Corridor | null
   uplink: UplinkMeta | null
+  // Which officer took a 'critical' event, and when (migration 0006). Written
+  // only by acknowledge_event(), so acked_by is always the officer who pressed
+  // it; null means nobody has said they are going yet.
+  acked_by: string | null
+  acked_at: string | null
   created_at: string
 }
 
@@ -129,6 +134,30 @@ const PRIORITY_DISPLAY: Record<string, PriorityDisplay> = {
 
 export function priorityDisplay(priority: string | null): PriorityDisplay {
   return PRIORITY_DISPLAY[priority ?? 'normal'] ?? PRIORITY_DISPLAY.normal
+}
+
+// 'critical' is the one priority that asks for something an officer has to do
+// rather than know: the node spent its whole escalation ladder and the animal
+// was still there, so somebody has to physically go. Splitting the two is the
+// coordination the acknowledgement exists for - `open` is what still needs a
+// person, `taken` is what a named officer has already committed to - because
+// the failure here is two officers driving out to the same node, or both
+// assuming the other did.
+export interface CriticalQueue {
+  open: EventRow[]
+  taken: EventRow[]
+}
+
+// Takes already-merged rows (the caller holds one copy per event id).
+export function criticalQueue(events: EventRow[]): CriticalQueue {
+  const open: EventRow[] = []
+  const taken: EventRow[] = []
+  for (const e of events) {
+    if (!isCritical(e.priority)) continue
+    ;(e.acked_at == null ? open : taken).push(e)
+  }
+  const newestFirst = (a: EventRow, b: EventRow) => b.ts.localeCompare(a.ts)
+  return { open: open.sort(newestFirst), taken: taken.sort(newestFirst) }
 }
 
 // Did the animal stay through a full deterrence sequence? Read from the routed

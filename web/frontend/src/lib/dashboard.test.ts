@@ -4,6 +4,7 @@ import {
   fusedConfidence,
   geoPoints,
   headlineSpecies,
+  criticalQueue,
   isCritical,
   isUrgent,
   knownSpecies,
@@ -327,5 +328,66 @@ describe('headlineSpecies', () => {
   it('still returns an unrecognised species rather than nothing at all', () => {
     expect(headlineSpecies([ev({ species: 'wild_dog' })])).toBe('wild_dog')
     expect(headlineSpecies([ev({ species: 'wild_dog' }), ev({ species: 'fox' })])).toBe('fox')
+  })
+})
+
+
+describe('criticalQueue', () => {
+  const crit = (id: number, ts: string, acked_at: string | null = null) =>
+    ev({ id, ts, priority: 'critical', acked_at })
+
+  it('separates the criticals nobody has taken from the ones somebody has', () => {
+    const { open, taken } = criticalQueue([
+      crit(1, '2026-10-02T01:00:00Z'),
+      crit(2, '2026-10-02T02:00:00Z', '2026-10-02T02:05:00Z'),
+    ])
+    expect(open.map((e) => e.id)).toEqual([1])
+    expect(taken.map((e) => e.id)).toEqual([2])
+  })
+
+  it('ignores every priority that is not critical', () => {
+    // A 'high' elephant still pages officers and residents; it does not ask
+    // anyone to drive out, so it has no business in this queue.
+    const { open, taken } = criticalQueue([
+      ev({ id: 1, ts: '2026-10-02T01:00:00Z', priority: 'high', acked_at: null }),
+      ev({ id: 2, ts: '2026-10-02T01:00:00Z', priority: 'normal', acked_at: null }),
+      ev({ id: 3, ts: '2026-10-02T01:00:00Z', priority: null, acked_at: null }),
+    ])
+    expect(open).toEqual([])
+    expect(taken).toEqual([])
+  })
+
+  it('puts the newest event first in both halves', () => {
+    const { open, taken } = criticalQueue([
+      crit(1, '2026-10-02T01:00:00Z'),
+      crit(3, '2026-10-02T03:00:00Z'),
+      crit(2, '2026-10-02T02:00:00Z'),
+      crit(4, '2026-10-02T04:00:00Z', '2026-10-02T04:01:00Z'),
+      crit(5, '2026-10-02T05:00:00Z', '2026-10-02T05:01:00Z'),
+    ])
+    expect(open.map((e) => e.id)).toEqual([3, 2, 1])
+    expect(taken.map((e) => e.id)).toEqual([5, 4])
+  })
+
+  it('counts an event as taken on acked_at, not on acked_by', () => {
+    // acknowledge_event() writes both in one statement, but the queue decides
+    // on the timestamp alone: a row with a uuid and no time has not been
+    // acknowledged by anything this application can produce, and treating it
+    // as handled would drop a real event out of the open list.
+    const { open, taken } = criticalQueue([
+      ev({
+        id: 1,
+        ts: '2026-10-02T01:00:00Z',
+        priority: 'critical',
+        acked_by: 'aaaaaaaa-0000-0000-0000-000000000001',
+        acked_at: null,
+      }),
+    ])
+    expect(open.map((e) => e.id)).toEqual([1])
+    expect(taken).toEqual([])
+  })
+
+  it('is empty on an empty sector', () => {
+    expect(criticalQueue([])).toEqual({ open: [], taken: [] })
   })
 })

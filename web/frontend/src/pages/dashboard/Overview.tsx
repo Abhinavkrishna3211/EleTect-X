@@ -3,6 +3,7 @@ import { useRealtimeTable } from '@/hooks/useRealtimeTable'
 import { LiveMap } from '@/components/dashboard/LiveMap'
 import { FleetSummaryTiles } from '@/components/dashboard/FleetSummaryTiles'
 import { AlertsFeed } from '@/components/dashboard/AlertsFeed'
+import { CriticalQueue } from '@/components/dashboard/CriticalQueue'
 import { DecisionCard } from '@/components/dashboard/DecisionCard'
 import { ConfidenceRadar } from '@/components/dashboard/ConfidenceRadar'
 import { NodeDetailPanel } from '@/components/dashboard/NodeDetailPanel'
@@ -69,6 +70,8 @@ export function Overview() {
         </h1>
         <span className="text-brand-fg/45 font-mono text-[12.5px] font-medium">{clockLabel}</span>
       </div>
+
+      <CriticalQueue events={events} nodeNames={nodeNames} onSelect={setSelectedNodeId} />
 
       <FleetSummaryTiles nodes={nodes} />
 
