@@ -3808,3 +3808,323 @@ def test_both_species_confirmed_at_once_prefers_elephant():
         reflex_loop._deterrence_species(check, target_labels=("Elephant", "Boar"))
         == "Elephant"
     )
+
+
+# ---------------------------------------------------------------------------
+# The retained vision track (D9)
+# ---------------------------------------------------------------------------
+#
+# The detector has always returned real bounding boxes and _vision_check()
+# has always discarded them on the line that reduces them to a scalar. These
+# assert the boxes now survive the reduction, and - the part that is easy to
+# get subtly wrong - that "looked and saw nothing" stays distinguishable from
+# "could not look" at every layer, because conflating those two is what fills
+# a future model's negative class with unlabelled night elephants.
+
+
+# A box on an untargeted, unconfigured class. Nothing in the deterrence path
+# will ever read it; the record must keep it anyway.
+CATTLE = Detection(label="Cattle", confidence=0.71, x=4.0, y=5.0, width=30.0, height=22.0)
+
+
+def _stamped_frames(stamps: list[float]) -> list[Frame]:
+    """Frames carrying the exact monotonic stamps a test wants to read back."""
+    return [Frame(image=None, index=i, timestamp_s=t) for i, t in enumerate(stamps)]
+
+
+def test_the_track_keeps_every_box_including_labels_nothing_is_configured_for():
+    """The record is of what the camera saw, not of what this node deters.
+
+    DETERRENT_TARGET_LABELS is deployment configuration and moves; a corpus
+    filtered through one deployment's settings cannot be re-analysed under
+    another's. Cattle is the case that matters in the field - it is the
+    single most common thing a forest-edge geophone fires on, it is in
+    neither the target labels nor the species gate, and it is exactly the
+    negative evidence a future seismic model needs.
+    """
+    detect = _ScriptedVisionDetect([[[ELEPHANT, CATTLE], [CATTLE], [ELEPHANT]]])
+
+    check = reflex_loop._vision_check(detect, _frames(3))
+
+    assert [[d.label for d in s.detections] for s in check.track] == [
+        ["Elephant", "Cattle"],
+        ["Cattle"],
+        ["Elephant"],
+    ]
+    # ...and the box itself survives intact, not just its label: the
+    # geometry is the entire reason the track is worth keeping.
+    cattle = check.track[0].detections[1]
+    assert (cattle.x, cattle.y, cattle.width, cattle.height) == (4.0, 5.0, 30.0, 22.0)
+    assert cattle.confidence == pytest.approx(0.71)
+
+
+def test_a_frame_the_detector_found_nothing_in_is_a_sample_not_a_hole():
+    """A frame that looked and saw nothing is an observation, not an absence.
+
+    It is also the free negative class. The trap this pins: dropping empty
+    frames would make a quiet frame indistinguishable from a frame that
+    was never captured, and the difference between them is the difference
+    between the no_animal and unlabelled buckets.
+    """
+    detect = _ScriptedVisionDetect([[[], [ELEPHANT], []]])
+
+    check = reflex_loop._vision_check(detect, _frames(3))
+
+    assert len(check.track) == 3
+    assert check.track[0].detections == ()
+    assert check.track[2].detections == ()
+    assert [d.label for d in check.track[1].detections] == ["Elephant"]
+
+
+def test_a_pass_with_no_frames_leaves_no_track_at_all():
+    """No frames means the camera could not look - there is nothing to record.
+
+    The companion to the test above: zero samples, not samples with zero
+    detections.
+    """
+    check = reflex_loop._vision_check(_FakeVisionDetect([ELEPHANT]), [])
+
+    assert check.track == ()
+    assert check.reading.available is False
+
+
+def test_a_detector_outage_leaves_no_track_rather_than_an_empty_one():
+    """A failed detector saw nothing *and* observed nothing - same as no frames.
+
+    The frames exist here, which is what makes this worth asserting
+    separately: it would be easy to build the track from the frames alone
+    and record three "saw nothing" samples for a pass where nothing was
+    ever actually looked at.
+    """
+    detect = _ScriptedVisionDetect([DetectionError("fake: inference failed")])
+
+    check = reflex_loop._vision_check(detect, _frames(3))
+
+    assert check.track == ()
+    assert check.reading.available is False
+
+
+def test_a_sample_carries_its_own_frame_s_capture_stamp():
+    """The timestamp has to be the camera's, or nothing aligns to anything.
+
+    This is the number perception.video's footage and
+    perception.seismic_stream's sample-to-clock mapping are both already
+    on. A stamp taken when inference returned would carry the detector's
+    latency - hundreds of milliseconds on this hardware - into every
+    alignment, and the error would be invisible because the stamps would
+    still look plausible.
+    """
+    stamps = [1000.25, 1000.50, 1000.75]
+    detect = _ScriptedVisionDetect([[ELEPHANT]])
+
+    check = reflex_loop._vision_check(detect, _stamped_frames(stamps))
+
+    assert [s.timestamp_s for s in check.track] == stamps
+    assert [s.frame_index for s in check.track] == [0, 1, 2]
+
+
+def test_the_frame_index_is_the_frame_s_own_not_its_position_in_the_list():
+    """Frame.index is the camera's numbering, and it is what has to be stored.
+
+    They coincide in every ordinary burst, which is what makes enumerate()
+    an easy and invisible substitution here. They stop coinciding the
+    moment a capture drops a frame - perception.camera numbers what it
+    received, so a burst missing its second frame is indices 0, 2, 3 - and
+    a reader correlating a box back to the footage would then be off by
+    one for the rest of the burst.
+    """
+    frames = [
+        Frame(image=None, index=4, timestamp_s=1.0),
+        Frame(image=None, index=7, timestamp_s=2.0),
+    ]
+
+    check = reflex_loop._vision_check(_FakeVisionDetect([ELEPHANT]), frames)
+
+    assert [s.frame_index for s in check.track] == [4, 7]
+
+
+def test_a_single_burst_pass_numbers_its_poll_one():
+    """Callers outside a watch loop are poll 1, not poll 0.
+
+    Matches VisionWatch.confirmed_on_poll's 1-based numbering, so the two
+    can be compared without an off-by-one at the reader.
+    """
+    check = reflex_loop._vision_check(_FakeVisionDetect([ELEPHANT]), _frames(2))
+
+    assert [s.poll for s in check.track] == [1, 1]
+
+
+def test_a_short_detector_response_is_paired_by_index_and_never_raises(caplog):
+    """A malformed response degrades the record; it must not fail the watch.
+
+    An animal is in front of the camera at this instant. One result list
+    for a three-frame burst is a detector bug, and the right response is a
+    short track and a log line - a strict zip here would raise inside the
+    watch loop and take the whole event with it.
+    """
+    detect = _ScriptedVisionDetect([[[ELEPHANT]]])
+
+    with caplog.at_level("WARNING"):
+        check = reflex_loop._vision_check(detect, _frames(3))
+
+    assert len(check.track) == 1
+    assert check.track[0].frame_index == 0
+    assert check.confirmed is True
+    assert "1 result lists for 3 frames" in caplog.text
+
+
+def test_the_watch_keeps_the_boxes_from_every_poll_not_just_the_confirming_one():
+    """The approach is the measurement; the arrival on its own is not.
+
+    `frames` deliberately keeps only two bursts because frames are
+    hundreds of megabytes. Boxes are not, and the polls in between are
+    where a trajectory lives - an animal that crosses the frame over four
+    polls has four range estimates, and keeping only the last one is
+    keeping the one moment the trajectory cannot be computed from.
+    """
+    camera = _FakeCamera(frame_count=2)
+    detect = _ScriptedVisionDetect([[], [CATTLE], [], [ELEPHANT]])
+
+    watch, _ = _watch(camera, detect, 45.0)
+
+    assert watch.confirmed_on_poll == 4
+    # Two frames a poll, four polls, nothing dropped.
+    assert len(watch.track) == 8
+    assert [s.poll for s in watch.track] == [1, 1, 2, 2, 3, 3, 4, 4]
+    assert [s.frame_index for s in watch.track] == [0, 1] * 4
+    assert [d.label for d in watch.track[2].detections] == ["Cattle"]
+    assert [d.label for d in watch.track[6].detections] == ["Elephant"]
+    # And the frames really were discarded, which is what makes the track
+    # the only surviving record of polls 2 and 3.
+    assert len(watch.frames) == 4
+
+
+def test_a_streak_rejected_poll_still_contributes_its_boxes(monkeypatch):
+    """The debounce decides what a poll is worth to fuse(), not what was seen.
+
+    The first Boar poll is downgraded to BASELINE_VISION because
+    VISION_SPECIES_CONSECUTIVE_POLLS has not been met yet. It is still a
+    boar in frame, and its box is the first half of the approach the poll
+    that does confirm completes - so the rebuilt VisionCheck has to carry
+    the track across, not reset it to empty along with the reading.
+
+    The streak is set here rather than read from services/config.py: the
+    13 Sept fox-gate relaxation currently leaves that mapping empty, so
+    the live tuning cannot reach this branch at all, and the branch is
+    what is under test. Patching the dict is also what keeps this honest
+    if the relaxation is ever reverted.
+    """
+    monkeypatch.setitem(services_config.VISION_SPECIES_CONSECUTIVE_POLLS, "Boar", 2)
+    camera = _FakeCamera(frame_count=1)
+    detect = _ScriptedVisionDetect([[BOAR], [BOAR]])
+
+    watch, _ = _watch(camera, detect, 45.0, target_labels=("Boar",))
+
+    # Poll 1 was rejected by the streak gate, poll 2 confirmed.
+    assert watch.confirmed_on_poll == 2
+    assert [s.poll for s in watch.track] == [1, 2]
+    assert [d.label for d in watch.track[0].detections] == ["Boar"]
+    assert [d.label for d in watch.track[1].detections] == ["Boar"]
+
+
+def test_the_rebuilt_check_from_a_rejected_poll_keeps_that_poll_s_boxes(monkeypatch):
+    """The same claim on the other field the rebuild feeds: `watch.check`.
+
+    The accumulator above reads the original check, so it cannot see
+    whether the rebuilt one kept its track. `watch.check` can: a watch
+    that only ever saw a streak-rejected poll returns that rebuilt check
+    as its `best`, and that is the VisionCheck every downstream reader
+    gets. A rebuild that dropped the track would hand them a check
+    claiming the camera observed nothing, on a poll where it observed a
+    boar.
+    """
+    monkeypatch.setitem(services_config.VISION_SPECIES_CONSECUTIVE_POLLS, "Boar", 2)
+    camera = _FakeCamera(frame_count=1)
+    # A single Boar poll, then nothing - the streak is never completed, so
+    # the watch runs to its deadline unconfirmed on the rebuilt check.
+    detect = _ScriptedVisionDetect([[BOAR], []])
+
+    watch, _ = _watch(camera, detect, 2.0, target_labels=("Boar",))
+
+    assert watch.confirmed_on_poll is None
+    assert watch.check.confirmed is False
+    assert watch.check.reading.log_odds == pytest.approx(cognition_config.BASELINE_VISION)
+    assert [d.label for s in watch.check.track for d in s.detections] == ["Boar"]
+
+
+def test_an_empty_poll_contributes_no_samples_to_the_watch_track():
+    """A watch the camera never fed stays empty rather than looking quiet.
+
+    At the watch layer this is the same distinction the per-pass tests
+    make: a camera that returned nothing on every poll must not be
+    recorded as a camera that watched and saw nothing, because the first
+    is unlabelled and the second is a training negative.
+    """
+    camera = _FakeCamera(frame_count=0)
+
+    watch, _ = _watch(camera, _FakeVisionDetect([ELEPHANT]), 45.0)
+
+    assert watch.track == ()
+    assert watch.check.reading.available is False
+
+
+def test_an_unconfirmed_watch_still_returns_everything_it_saw():
+    """Most watches never confirm, and those are most of the corpus.
+
+    The confirming return is the easy one to remember to thread a new
+    field through; the unconfirmed return is the one that runs on the
+    overwhelming majority of triggers - wind, rain and cattle - and it is
+    where the negative class comes from.
+    """
+    camera = _FakeCamera(frame_count=2)
+    detect = _ScriptedVisionDetect([[CATTLE]])
+
+    watch, _ = _watch(camera, detect, 2.0)
+
+    assert watch.confirmed_on_poll is None
+    assert watch.polls == 3
+    assert len(watch.track) == 6
+    assert all([d.label for d in s.detections] == ["Cattle"] for s in watch.track)
+
+
+def test_the_track_is_ordered_by_poll_then_by_frame():
+    """Readers slice it by time, so arrival order has to be capture order.
+
+    Both consumers of this - aligning boxes to the seismic record, and
+    differencing consecutive box heights for a relative range - read it as
+    a time series and would silently produce a scrambled trajectory rather
+    than an error if it were not sorted.
+    """
+    camera = _FakeCamera(frame_count=3)
+    detect = _ScriptedVisionDetect([[], [], [ELEPHANT]])
+
+    watch, _ = _watch(camera, detect, 45.0)
+
+    keys = [(s.poll, s.frame_index) for s in watch.track]
+    assert keys == sorted(keys)
+    assert keys == [(p, f) for p in (1, 2, 3) for f in (0, 1, 2)]
+    # Non-decreasing in wall-clock terms too, since every stamp is the
+    # camera's own and the polls ran in order.
+    stamps = [s.timestamp_s for s in watch.track]
+    assert stamps == sorted(stamps)
+
+
+def test_an_unconfirmed_watch_s_track_is_ordered_the_same_way():
+    """Both returns, not just the confirming one.
+
+    The two VisionWatch constructions are several hundred lines apart and
+    have drifted from each other before. The unconfirmed one is also the
+    one that runs on the overwhelming majority of triggers, so an
+    ordering defect there would corrupt most of the corpus while every
+    confirmed encounter looked fine.
+    """
+    camera = _FakeCamera(frame_count=2)
+    detect = _ScriptedVisionDetect([[CATTLE]])
+
+    watch, _ = _watch(camera, detect, 2.0)
+
+    assert watch.confirmed_on_poll is None
+    keys = [(s.poll, s.frame_index) for s in watch.track]
+    assert keys == [(p, f) for p in (1, 2, 3) for f in (0, 1)]
+    stamps = [s.timestamp_s for s in watch.track]
+    assert stamps == sorted(stamps)

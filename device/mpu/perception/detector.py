@@ -83,8 +83,14 @@ class Detection:
             image's pixel coordinates, not the model's internal 96x96
             input space - confirmed 28 Aug against a live 416x416 test
             image (the response's own "resized" field states the remap).
-            Unused by fusion today; carried through for a future
-            evidence-overlay or crop feature.
+            Still unused by fusion, which wants a scalar - but no longer
+            discarded: services/reflex_loop.py's VisionTrackSample keeps
+            every box of every poll, because the box height across a
+            watch is the only measurement this node makes of how far
+            away the animal is and whether it is closing. Pixel space is
+            what makes that usable, and it is why these must stay in the
+            original image's coordinates rather than being normalised
+            here.
     """
 
     label: str

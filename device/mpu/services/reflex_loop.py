@@ -720,6 +720,63 @@ def _confidence_log_odds(probability: float) -> float:
 
 
 @dataclass(frozen=True)
+class VisionTrackSample:
+    """Every box one frame of one vision poll produced, with its own timestamp.
+
+    The detector has always returned real bounding boxes in original-image
+    pixel space (perception.detector.Detection), and _vision_check() has
+    always reduced them to one scalar reading and thrown the boxes away on
+    the same line. Nothing about that reduction is wrong - fuse() wants a
+    scalar - but it discards, every poll, the only measurement this node
+    makes of *where* the animal is, at the only moment it is possible to
+    make it. Keeping the boxes costs a few hundred bytes per watch, and
+    recovering them later costs a second detector pass that can disagree
+    with the first.
+
+    One sample is one frame, not one detection, and that distinction is the
+    whole point of the type. A frame whose `detections` tuple is empty says
+    the camera looked and the detector found nothing - which is a real
+    observation, and the negative class any future seismic model has to
+    learn from. A frame that produced *no sample at all* says the camera
+    could not look. Those two are not the same fact, and filing the second
+    as the first is precisely what teaches a model that elephants only
+    exist in daylight.
+
+    Boxes are kept unfiltered: every label the detector named, not only the
+    configured targets, and not only the ones that cleared the burst
+    majority or the poll streak. Those gates are deployment configuration -
+    DETERRENT_TARGET_LABELS and VISION_SPECIES_BURST_MAJORITY_LABELS both
+    move - and a corpus filtered through today's settings cannot be
+    re-analysed under tomorrow's. The gates belong on the deterrence
+    decision, which already applies them; they do not belong on the record.
+
+    Attributes:
+        poll: 1-based index of the watch poll this frame came from. Zero
+            polls is impossible - _watch_for_vision() increments before it
+            captures - so 1 is the first poll, matching
+            VisionWatch.confirmed_on_poll's own numbering.
+        frame_index: perception.camera.Frame.index - position within this
+            poll's burst, counting from 0.
+        timestamp_s: The frame's own Frame.timestamp_s: time.monotonic() at
+            the instant the camera handed it over. Deliberately the frame's
+            stamp and not a stamp taken when the detector returned, because
+            this is the number that has to line up with
+            perception.video's event footage and with
+            perception.seismic_stream's sample->clock mapping, both of
+            which are already on this same monotonic base. A stamp taken
+            after inference would carry the detector's latency - hundreds
+            of milliseconds on this hardware - into every alignment.
+        detections: Every box the detector returned for this frame, in the
+            order it returned them. Empty means "looked, saw nothing".
+    """
+
+    poll: int
+    frame_index: int
+    timestamp_s: float
+    detections: tuple[Detection, ...]
+
+
+@dataclass(frozen=True)
 class VisionCheck:
     """What one pre-decision vision pass produced.
 
@@ -744,11 +801,19 @@ class VisionCheck:
             one and not the other, and re-running the detector to answer
             the second one would be both slower and capable of
             disagreeing with the first.
+        track: One VisionTrackSample per frame this pass read, in burst
+            order - the detector's raw boxes, unreduced. Empty when there
+            were no frames to check or the detector failed, which are the
+            two "the camera could not look" cases; a pass that looked and
+            saw nothing still yields one sample per frame, each with an
+            empty `detections`. See VisionTrackSample for why that
+            distinction is load-bearing.
     """
 
     reading: ModalityReading
     confirmed: bool
     species: tuple[str, ...] = ()
+    track: tuple[VisionTrackSample, ...] = ()
 
 
 def _requires_burst_majority(label: str) -> bool:
@@ -766,6 +831,7 @@ def _vision_check(
     detect_vision: VisionDetectFn,
     frames: list[Frame],
     target_labels: tuple[str, ...] = VISION_TARGET_LABELS,
+    poll: int = 1,
 ) -> VisionCheck:
     """Convert a vision-check burst into one VISION ModalityReading; never raises.
 
@@ -844,12 +910,20 @@ def _vision_check(
         target_labels: Which of the model's classes count as
             target-presence evidence. Defaults to VISION_TARGET_LABELS,
             i.e. services.config.DETERRENT_TARGET_LABELS.
+        poll: 1-based watch-poll index, stamped onto every
+            VisionTrackSample this pass produces so a watch's track can be
+            read back per poll. Defaults to 1 for the single-burst callers
+            that are not inside a watch loop at all.
 
     Returns:
-        A VisionCheck carrying the ModalityReading for Modality.VISION and
+        A VisionCheck carrying the ModalityReading for Modality.VISION,
         whether this pass counts as a confirmation for ADR 0020's
-        keep-gate. The three "no qualifying detection" cases above all
-        report confirmed=False, whatever their reading.
+        keep-gate, and the unreduced per-frame detector output in `track`.
+        The three "no qualifying detection" cases above all report
+        confirmed=False, whatever their reading; the first two of them -
+        no frames, and a detector failure - also report an empty track,
+        because in neither case did the camera and the detector between
+        them actually look at anything.
     """
     if not frames:
         return VisionCheck(ModalityReading(Modality.VISION, 0.0, available=False), False)
@@ -861,6 +935,33 @@ def _vision_check(
     except DetectionError as exc:
         logger.warning("vision detect failed, continuing without vision evidence: %s", exc)
         return VisionCheck(ModalityReading(Modality.VISION, 0.0, available=False), False)
+
+    # Built before any of the gating below, from the detector's raw output,
+    # so the record is of what the camera saw rather than of what this
+    # deployment's configuration currently cares about - see
+    # VisionTrackSample. Paired by position: detect_vision()'s contract is
+    # one result list per input image in the order given
+    # (perception.detector.VisionDetectFn). A stub or a partial response
+    # that returns a different number of lists is paired as far as it goes
+    # and the mismatch is logged rather than raised - a malformed detector
+    # response must degrade this to a short track, never fail the watch
+    # that an animal is standing in front of.
+    if len(detections_by_frame) != len(frames):
+        logger.warning(
+            "vision detector returned %d result lists for %d frames - "
+            "pairing by index, the track will be short",
+            len(detections_by_frame),
+            len(frames),
+        )
+    track = tuple(
+        VisionTrackSample(
+            poll=poll,
+            frame_index=frame.index,
+            timestamp_s=frame.timestamp_s,
+            detections=tuple(frame_detections),
+        )
+        for frame, frame_detections in zip(frames, detections_by_frame, strict=False)
+    )
 
     # Per-label burst gate - see this function's own docstring for why.
     # A majority-gated label needs "more than half" ("half or more" is not
@@ -902,6 +1003,7 @@ def _vision_check(
             ModalityReading(Modality.VISION, cognition_config.BASELINE_VISION, available=True),
             False,
             species,
+            track,
         )
 
     best_confidence = max(d.confidence for d in matches)
@@ -909,6 +1011,7 @@ def _vision_check(
         ModalityReading(Modality.VISION, _confidence_log_odds(best_confidence), available=True),
         True,
         species,
+        track,
     )
 
 
@@ -952,6 +1055,19 @@ class VisionWatch:
             means the MCU refused - almost always its IR_MIN_INTERVAL_MS
             duty gate, which is the illuminator working as designed, not a
             fault.
+        track: Every VisionTrackSample from every poll of the window, in
+            poll order then burst order - the union, for the same reason
+            `species` is a union and for the opposite reason `frames` is
+            not. A boar that walks through on poll 2 and is gone by the
+            poll that ends the watch left its boxes on poll 2 and nowhere
+            else; dropping the polls that did not confirm would throw away
+            the entire approach and keep only the arrival. The cost is
+            bounded and small where keeping the frames is neither: a
+            45s watch is at most ~46 polls of VISION_BURST_FRAMES samples,
+            each a handful of Detection records of six floats and a
+            string, against the several hundred megabytes of 720p frames
+            the `frames` docstring above explains this type refuses to
+            hold.
     """
 
     check: VisionCheck
@@ -962,6 +1078,7 @@ class VisionWatch:
     species: tuple[str, ...] = ()
     ir_pulses: int = 0
     ir_ack: bool | None = None
+    track: tuple[VisionTrackSample, ...] = ()
 
     @property
     def reading_available(self) -> bool:
@@ -1185,6 +1302,13 @@ def _watch_for_vision(
     seen_species: dict[str, None] = {}
     species_streaks: dict[str, int] = {}
 
+    # The union across every poll, appended to as each poll resolves rather
+    # than reconstructed from the kept frames at the end - the kept frames
+    # are deliberately only two bursts of a window that may run 45s, and
+    # the boxes from the polls in between are exactly the approach a
+    # trajectory is measured from. See VisionWatch.track.
+    track: list[VisionTrackSample] = []
+
     # None until a poll yields frames to read it off; see the illumination
     # note in the docstring. Latched once decided.
     night: bool | None = None
@@ -1288,7 +1412,10 @@ def _watch_for_vision(
             empty_polls = 0
             if not first_frames:
                 first_frames = frames
-            check = _vision_check(detect_vision, frames, target_labels=target_labels)
+            check = _vision_check(
+                detect_vision, frames, target_labels=target_labels, poll=polls
+            )
+            track.extend(check.track)
             for label in list(species_streaks):
                 if label not in check.species:
                     species_streaks[label] = 0
@@ -1330,6 +1457,12 @@ def _watch_for_vision(
                         ),
                         False,
                         check.species,
+                        # The streak gate decides what this poll is worth
+                        # as evidence, not what the camera saw. A boar that
+                        # has not yet repeated is still a boar in frame,
+                        # and its boxes are the first half of the approach
+                        # the poll that does confirm will complete.
+                        check.track,
                     )
             if effective_check.confirmed:
                 logger.info(
@@ -1358,6 +1491,7 @@ def _watch_for_vision(
                     species=tuple(seen_species),
                     ir_pulses=ir_pulses,
                     ir_ack=ir_ack,
+                    track=tuple(track),
                 )
             # An available-but-unconfirmed reading beats the unavailable one
             # this started with: it means the camera and the detector both
@@ -1392,6 +1526,7 @@ def _watch_for_vision(
         species=tuple(seen_species),
         ir_pulses=ir_pulses,
         ir_ack=ir_ack,
+        track=tuple(track),
     )
 
 
