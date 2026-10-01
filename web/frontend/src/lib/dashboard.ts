@@ -327,6 +327,12 @@ export function toLatLng(p: MapPoint): [number, number] {
   return [p.top, p.left]
 }
 
+// Kothamangalam forest edge - the sector the pilot deployment covers. The map
+// centres here, nodes without a fix fall back to it, and node placement is
+// sanity-checked against it (lib/fleet.ts). It lives here rather than in
+// LiveMap because it is a fact about the deployment, not about the map.
+export const SECTOR_CENTER: [number, number] = [10.06, 76.63]
+
 // Compact relative time ("40 s ago", "12 m ago", "2 d ago") for last_seen /
 // event timestamps. Returns "never" for a missing timestamp.
 export function relativeTime(iso: string | null): string {

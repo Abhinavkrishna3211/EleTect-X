@@ -4,6 +4,8 @@ import {
   compareVersions,
   dailyMeans,
   parsePosition,
+  positionSanity,
+  SECTOR_SANITY_KM,
   evaluateRules,
   fleetFirmwareMax,
   flagLabel,
@@ -296,5 +298,44 @@ describe('parsePosition', () => {
     expect(parsePosition('ten', '76.6')).toBe('invalid')
     expect(parsePosition('76.6', '190')).toBe('invalid')
     expect(parsePosition('-91', '76.6')).toBe('invalid')
+  })
+})
+
+describe('positionSanity', () => {
+  it('passes a position inside the pilot sector', () => {
+    expect(positionSanity({ lat: 10.058, lng: 76.628 })).toBeNull()
+  })
+
+  it('names 0,0 rather than reporting it as a distance', () => {
+    expect(positionSanity({ lat: 0, lng: 0 })).toMatch(/Atlantic/)
+  })
+
+  // The error this exists for: both halves are valid degrees, so parsePosition
+  // accepts it and the node lands in Kazakhstan with nobody within 3 km.
+  it('diagnoses a transposed pair instead of just calling it far', () => {
+    const msg = positionSanity({ lat: 76.63, lng: 10.06 })
+    expect(msg).toMatch(/swapped/)
+    expect(msg).toContain('10.06, 76.63')
+  })
+
+  it('reports an ordinary distant position as a distance', () => {
+    const msg = positionSanity({ lat: 28.61, lng: 77.21 }) // Delhi
+    expect(msg).toMatch(/from the deployment sector/)
+    expect(msg).not.toMatch(/swapped/)
+  })
+
+  // A latitude cannot exceed 90, so a pair whose longitude is out of latitude
+  // range cannot be a transposition - it must not be reported as one.
+  it('does not call a pair swapped when the swap would be out of range', () => {
+    const msg = positionSanity({ lat: 10.06, lng: 176.63 })
+    expect(msg).toMatch(/from the deployment sector/)
+    expect(msg).not.toMatch(/swapped/)
+  })
+
+  it('accepts a position at the edge of the sanity radius and flags one past it', () => {
+    const near = 10.06 + (SECTOR_SANITY_KM - 5) / 111.32
+    const far = 10.06 + (SECTOR_SANITY_KM + 5) / 111.32
+    expect(positionSanity({ lat: near, lng: 76.63 })).toBeNull()
+    expect(positionSanity({ lat: far, lng: 76.63 })).not.toBeNull()
   })
 })

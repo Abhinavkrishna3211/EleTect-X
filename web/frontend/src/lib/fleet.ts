@@ -9,7 +9,8 @@
 // page view never writes — an officer confirms a candidate before it becomes a
 // `maintenance` row (see Fleet.tsx). CONTEXT.md §6/§7: predictive, explainable.
 
-import type { HealthRow, NodeRow } from './dashboard'
+import { SECTOR_CENTER, type HealthRow, type NodeRow } from './dashboard'
+import { haversine } from './planner'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -220,4 +221,37 @@ export function parsePosition(lat: string, lng: string): { lat: number; lng: num
   if (lat.trim() === '' || lng.trim() === '' || !Number.isFinite(la) || !Number.isFinite(ln)) return 'invalid'
   if (la < -90 || la > 90 || ln < -180 || ln > 180) return 'invalid'
   return { lat: la, lng: ln }
+}
+
+// How far from SECTOR_CENTER a node may sit before placement asks for a second
+// look. Generous on purpose: the pilot sector is a few km across, so 60 km
+// cannot be reached by a legitimate placement mistake-free deployment of this
+// division, while still clearing any plausible expansion within it.
+export const SECTOR_SANITY_KM = 60
+
+// parsePosition only knows whether a coordinate is *well-formed*. Every error
+// that actually matters here produces a well-formed coordinate somewhere else
+// on Earth, and the consequence is silent: send-alert fans out to residents
+// within 3 km of the node (functions/send-alert/index.ts), so a node placed in
+// the wrong hemisphere looks placed on every map and pages nobody. Nothing in
+// the system notices, because an elephant that triggers no alert leaves no
+// trace that an alert was owed.
+//
+// This returns advice, never a refusal - the division can extend beyond the
+// pilot sector and the UI must not stand in the way. The two named cases are
+// the ones worth diagnosing by hand because they are the ones that actually
+// happen: 0,0 is an empty form submitted as zeros, and a transposition is the
+// classic lat/lng error, which is invisible here precisely because 76.63 is a
+// perfectly valid latitude.
+export function positionSanity(pos: { lat: number; lng: number }): string | null {
+  if (pos.lat === 0 && pos.lng === 0) {
+    return '0, 0 is in the Atlantic - no resident is within 3 km of it. Leave both fields blank if the position is unknown.'
+  }
+  const km = haversine([pos.lat, pos.lng], SECTOR_CENTER) / 1000
+  if (km <= SECTOR_SANITY_KM) return null
+  const swapped = haversine([pos.lng, pos.lat], SECTOR_CENTER) / 1000
+  if (Math.abs(pos.lng) <= 90 && swapped <= SECTOR_SANITY_KM) {
+    return `Latitude and longitude look swapped - ${pos.lng}, ${pos.lat} is in the sector and ${pos.lat}, ${pos.lng} is ${Math.round(km)} km away.`
+  }
+  return `That is ${Math.round(km)} km from the deployment sector. Residents are matched within 3 km of the node, so check this is right before saving.`
 }

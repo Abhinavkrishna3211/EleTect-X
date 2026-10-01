@@ -1,11 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { statusDisplay, type NodeRow } from '@/lib/dashboard'
+import { SECTOR_CENTER, statusDisplay, type NodeRow } from '@/lib/dashboard'
 
-// Kothamangalam forest edge — the sector the pilot deployment covers. Used as
-// the map centre and the fallback for nodes that have not reported a fix yet.
-const SECTOR_CENTER: [number, number] = [10.06, 76.63]
 const SECTOR_ZOOM = 13
 
 // OpenStreetMap's standard tiles: road hierarchy, place names and forest
