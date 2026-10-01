@@ -15,8 +15,11 @@ codec is needed - leave the device profile's codec empty.
      settings. The service-role key bypasses RLS; keep it out of git and out
      of the frontend.
    - `CHIRPSTACK_APPLICATION_ID` - the application ID from the ChirpStack UI
-     (Tenant → Applications). Optional, but recommended once you have more
-     than one test application on the same broker.
+     (Tenant → Applications), or several separated by commas. Optional, but
+     recommended once you have more than one test application on the same
+     broker.
+   - `MQTT_CLIENT_ID` - optional, defaults to `eletect-ingest`. The broker
+     keeps a queue per client ID, so two bridges must never share one.
 3. Install dependencies and run:
    ```
    npm install
@@ -32,8 +35,8 @@ codec is needed - leave the device profile's codec empty.
   seismic-only alert or a multi-species node), confidence, a short `action`
   label, and the decoded frame plus RSSI/SNR/fCnt in `events.uplink`.
   Priority is `high` for camera-confirmed wildlife and for gunshot/chainsaw,
-  `normal` for a seismic-only alert - only `high` fans out through
-  `send-alert`.
+  `normal` for a seismic-only alert. A node that sets the no-retreat flag
+  makes it `critical`. `high` and `critical` fan out through `send-alert`.
 - **Status frame** -> a `health` row with battery mV, uptime, geophone and
   home-test flags in `metrics`.
 - A frame the node re-sent (same `seq` from the same node within 15 minutes)
@@ -42,7 +45,29 @@ codec is needed - leave the device profile's codec empty.
   `battery_pct` / `solar_w` / `temp_c` make a `health` row and a `species`
   field makes an `events` row.
 
+- A write Supabase refuses or never answers is retried with backoff (2 s
+  doubling to 1 min) for up to 30 minutes, then logged as given up. The
+  duplicate check above makes a retry of a write that did land harmless.
+- The MQTT session is persistent and subscribed at QoS 1, so uplinks that
+  arrive while the bridge is down are queued by the broker and delivered when
+  it reconnects. That only holds if ChirpStack publishes at QoS 1
+  (`[integration.mqtt] qos=1`) and Mosquitto persists its queue across its own
+  restarts - both are set in `chirpstack-stack`.
+
 Run the decoder tests with `npm test`.
+
+## Running it for real
+
+In the field the bridge runs as the `eletect-ingest` service in
+`chirpstack-stack`'s `docker-compose.yml`, built from this directory's
+`Dockerfile` (compiled JS, no dev dependencies, non-root) and restarted
+automatically. Its secrets come from `chirpstack-stack/ingest.env`, which is
+not committed. After changing code here:
+
+```
+docker compose up -d --build eletect-ingest
+docker compose logs -f eletect-ingest
+```
 
 ## Testing without hardware
 
