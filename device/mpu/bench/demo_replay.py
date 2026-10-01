@@ -13,7 +13,7 @@ first's provenance:
 - **Pass 2 (acoustic routing, illustrative).** Calls the real
   handle_acoustic_event() once per AcousticClass value to make ADR 0007 5's
   three-way routing split watchable rather than merely provable: gunshot
-  bypasses fuse() entirely, chainsaw/vehicle/animal_call fuse as one shared
+  bypasses fuse() entirely, elephant_call/chainsaw fuse as one shared
   ACOUSTIC modality, ambient fuses as unavailable. The routing, the fusion
   and every printed number are real -- but the *inputs* are not captured
   data. No acoustic classifier runs on the MCU yet (docs/KNOWN_GAPS.md), so
@@ -485,7 +485,7 @@ def _print_acoustic_summary(style: _Style) -> None:
     print(style.bold + rule + style.reset)
     print(
         "5 classes, 3 routes (ADR 0007 5): gunshot bypasses fuse() entirely; "
-        "chainsaw/vehicle/animal_call fuse as one shared ACOUSTIC modality; "
+        "elephant_call/chainsaw fuse as one shared ACOUSTIC modality; "
         "ambient fuses as unavailable."
     )
     print(

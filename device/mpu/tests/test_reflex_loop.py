@@ -1481,8 +1481,7 @@ def test_gunshot_calls_send_lora_alert_outside_safe_mode(caplog):
     "class_label",
     [
         AcousticClass.CHAINSAW,
-        AcousticClass.VEHICLE,
-        AcousticClass.ANIMAL_CALL,
+        AcousticClass.ELEPHANT_CALL,
         AcousticClass.AMBIENT,
     ],
 )
@@ -1516,17 +1515,16 @@ def test_chainsaw_feeds_fusion_as_the_acoustic_modality():
     "class_label, confidence",
     [
         (AcousticClass.CHAINSAW, 0.62),
-        (AcousticClass.VEHICLE, 0.77),
-        (AcousticClass.ANIMAL_CALL, 0.91),
+        (AcousticClass.ELEPHANT_CALL, 0.91),
     ],
 )
-def test_the_three_fusing_classes_share_one_acoustic_modality(class_label, confidence):
-    """ADR 0007 treats chainsaw/vehicle/animal_call as one modality, not three.
+def test_the_fusing_classes_share_one_acoustic_modality(class_label, confidence):
+    """ADR 0007 treats the fusing classes as one modality, not one weight each.
 
     Each class is checked at a *different* confidence deliberately: agreeing
-    on one shared input would not distinguish "all three use WEIGHT_ACOUSTIC"
-    from "all three happen to coincide at this particular value". Matching
-    the single-modality hand computation across three distinct inputs can
+    on one shared input would not distinguish "both use WEIGHT_ACOUSTIC"
+    from "both happen to coincide at this particular value". Matching
+    the single-modality hand computation across distinct inputs can
     only hold if each really is routed through the same weight and baseline.
     """
     expected_log_odds, expected_p = _expected_acoustic_fusion(confidence)
@@ -1570,8 +1568,12 @@ def test_acoustic_confidence_at_exactly_zero_or_one_does_not_crash():
     _confidence_log_odds(): the wire field is a plain float with no
     protocol-level bound either way.
     """
-    outcome_zero, _, _ = _route(class_label=AcousticClass.VEHICLE, confidence=0.0, capture_ref=1)
-    outcome_one, _, _ = _route(class_label=AcousticClass.VEHICLE, confidence=1.0, capture_ref=2)
+    outcome_zero, _, _ = _route(
+        class_label=AcousticClass.ELEPHANT_CALL, confidence=0.0, capture_ref=1
+    )
+    outcome_one, _, _ = _route(
+        class_label=AcousticClass.ELEPHANT_CALL, confidence=1.0, capture_ref=2
+    )
 
     assert math.isfinite(outcome_zero.fusion.log_odds)
     assert math.isfinite(outcome_one.fusion.log_odds)

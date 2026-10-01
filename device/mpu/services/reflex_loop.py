@@ -150,7 +150,7 @@ by design, not oversight:
 - **Acoustic**: handle_acoustic_event() now implements ADR 0007 5's
   routing split, so acoustic does reach fuse() - but never on the footfall
   path above, which still passes it as unavailable because no acoustic
-  reading is in hand at that moment. Chainsaw/vehicle/animal_call convert
+  reading is in hand at that moment. Elephant_call/chainsaw convert
   to log-odds and fuse as the single ACOUSTIC modality; gunshot never
   touches fuse() at all (it is an anti-poaching alert, not evidence that
   an elephant is present); ambient fuses as unavailable. The gunshot
@@ -2283,15 +2283,21 @@ def handle_footfall_event(
 
 
 # Which AcousticClass values are evidence toward "is an elephant present".
-# ADR 0007 5 names exactly these three and treats them as one modality rather
-# than three: they all feed the same WEIGHT_ACOUSTIC/BASELINE_ACOUSTIC pair in
-# cognition/config.py. The other two classes are each excluded for their own
-# distinct reason - see handle_acoustic_event().
+# They feed one shared WEIGHT_ACOUSTIC/BASELINE_ACOUSTIC pair in
+# cognition/config.py rather than one weight each, per ADR 0007 5. The other
+# two classes are each excluded for their own distinct reason - see
+# handle_acoustic_event().
+#
+# ADR 0007 5 named chainsaw/vehicle/animal_call. Two of those no longer exist:
+# the trained model is 4-class and can emit neither `vehicle` nor a generic
+# `animal_call` (ADR 0027), so those branches were unreachable. `elephant_call`
+# replaces them and is the strongest member of this set by a wide margin - it
+# is the only class here that is direct evidence of an elephant rather than a
+# correlate of one.
 _FUSING_ACOUSTIC_CLASSES = frozenset(
     {
         AcousticClass.CHAINSAW,
-        AcousticClass.VEHICLE,
-        AcousticClass.ANIMAL_CALL,
+        AcousticClass.ELEPHANT_CALL,
     }
 )
 
@@ -2317,11 +2323,15 @@ def handle_acoustic_event(
       error, not just an oversimplification. It takes its own direct alert
       path to forest officers, independent of fusion and of the deterrence
       decision entirely: you do not deter a gunshot with a horn and LEDs.
-    - **chainsaw/vehicle/animal_call** convert to log-odds via
+    - **elephant_call/chainsaw** convert to log-odds via
       _confidence_log_odds() and fuse as the single ACOUSTIC modality. One
-      modality for all three, per ADR 0007 - they share cognition/config.py's
+      modality for both, per ADR 0007 - they share cognition/config.py's
       WEIGHT_ACOUSTIC and BASELINE_ACOUSTIC, whose magnitudes are themselves
-      still invented (docs/KNOWN_GAPS.md).
+      still invented (docs/KNOWN_GAPS.md). Note the two are not equally
+      informative and this shared weight does not distinguish them: an
+      elephant call is direct evidence of an elephant, a chainsaw is evidence
+      of people who often precede one. Splitting the weight is tracked in
+      docs/KNOWN_GAPS.md, not decided here.
     - **ambient** fuses as unavailable. INVENTED mapping: ADR 0007 names only
       four classes and never assigns ambient a route at all, but ADR 0001's
       addendum settles the shape - a modality with nothing to say is excluded

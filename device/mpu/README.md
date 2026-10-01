@@ -216,7 +216,7 @@ the terminal. The actuator/camera callables passed in raise if ever called, sinc
 `AcousticClass` value, to make ADR 0007 §5's three-way routing split (landed alongside this pass)
 watchable rather than just provable: gunshot bypasses `fuse()` entirely and prints the real
 `[SAFE_MODE]` alert line the event actually logged (captured from the real logger, not re-typed);
-chainsaw/vehicle/animal_call fuse as one shared ACOUSTIC modality and print the live `fused P`,
+elephant_call/chainsaw fuse as one shared ACOUSTIC modality and print the live `fused P`,
 identical across the three; ambient fuses as unavailable, with `acoustic` visible in
 `fusion.dropped`. Every input in this pass uses one fixed synthetic confidence, 0.87 — **this is not
 captured bench data**, unlike pass 1: no acoustic classifier runs on the MCU yet, so there is nothing

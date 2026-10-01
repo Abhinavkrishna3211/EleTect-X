@@ -36,13 +36,19 @@ class AcousticClass(str, Enum):
     """Classifier output label for `report_acoustic_event`.
 
     Values match schema.md's `class_label` enum literally - the MCU sends
-    one of these five strings, not a raw integer index.
+    one of these four strings, not a raw integer index.
+
+    These are exactly the four classes the trained acoustic model can emit
+    (ADR 0027). An enum member the classifier cannot produce is not free:
+    `vehicle` and `animal_call` were carried here for weeks while nothing
+    could ever send them, and reflex_loop.py routed both as elephant
+    evidence - dead branches that read like working detection. The wire
+    contract states what the system can actually say.
     """
 
     GUNSHOT = "gunshot"
     CHAINSAW = "chainsaw"
-    VEHICLE = "vehicle"
-    ANIMAL_CALL = "animal_call"
+    ELEPHANT_CALL = "elephant_call"
     AMBIENT = "ambient"
 
 
