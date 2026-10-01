@@ -189,14 +189,59 @@ def event_from_footfall(
     )
 
 
-def gunshot_event(confidence: float, capture_ref: int, *, safe_mode: bool) -> LoraEvent:
-    """The direct gunshot alert (ADR 0007 5) as an uplink event."""
+# The two acoustic classes that alert forest officers directly rather than
+# fusing into an elephant-presence score (ADR 0033). Both carry tier=0: no
+# deterrence runs on either, so there is no tier to report. Keyed by the
+# routed AcousticClass value rather than exposed as two free functions, so
+# that adding a third direct-alert class is one table entry and cannot
+# leave services/reflex_loop.py routing a class this module cannot build.
+_DIRECT_ALERT_CLASS = {
+    "gunshot": EventClass.GUNSHOT,
+    "chainsaw": EventClass.CHAINSAW,
+}
+
+
+def direct_alert_event(
+    acoustic_class: str, confidence: float, capture_ref: int, *, safe_mode: bool
+) -> LoraEvent:
+    """An acoustic direct-alert uplink (ADR 0033), by AcousticClass value.
+
+    Args:
+        acoustic_class: A bridge.rpc.AcousticClass value - "gunshot" or
+            "chainsaw". Any other value is a routing bug upstream, not a
+            field condition, so this raises rather than degrading: an
+            unroutable class must not become a silent UNCONFIRMED uplink
+            that reads to an officer as a confirmed sighting of nothing.
+        confidence: Classifier confidence, 0-1.
+        capture_ref: Links the uplink back to the local record.
+        safe_mode: Sets FLAG_SAFE_MODE so the backend can tell a dry run
+            from a real detection.
+    """
+    try:
+        event_class = _DIRECT_ALERT_CLASS[acoustic_class]
+    except KeyError:
+        raise ValueError(
+            f"{acoustic_class!r} is not a direct-alert acoustic class; "
+            f"expected one of {sorted(_DIRECT_ALERT_CLASS)}"
+        ) from None
     return LoraEvent(
-        event_class=EventClass.GUNSHOT,
+        event_class=event_class,
         confidence=float(confidence),
         tier=0,
         flags=FLAG_SAFE_MODE if safe_mode else 0,
         capture_ref=capture_ref,
+    )
+
+
+def gunshot_event(confidence: float, capture_ref: int, *, safe_mode: bool) -> LoraEvent:
+    """The direct gunshot alert (ADR 0007 5) as an uplink event.
+
+    Retained as a named shorthand for direct_alert_event("gunshot", ...) -
+    the gunshot branch predates the chainsaw one and is referenced by name
+    in ADR 0007 5, the tests and docs/KNOWN_GAPS.md.
+    """
+    return direct_alert_event(
+        "gunshot", confidence, capture_ref, safe_mode=safe_mode
     )
 
 

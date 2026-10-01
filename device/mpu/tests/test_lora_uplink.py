@@ -13,6 +13,7 @@ from comms.lora_uplink import (
     EventClass,
     LoraEvent,
     LoraUplink,
+    direct_alert_event,
     event_from_footfall,
     gunshot_event,
     observed_class,
@@ -131,6 +132,37 @@ def test_multi_species_node_still_names_the_species():
     assert ev is not None
     assert ev.event_class is EventClass.BOAR
     assert ev.flags & FLAG_VISION_CONFIRMED
+
+
+def test_direct_alert_event_builds_both_poaching_classes():
+    """The two classes that reach an officer without fusing (ADR 0033).
+
+    Both carry tier 0: no deterrence runs on either, so there is no tier to
+    report, and a non-zero one would read to an officer as a node that had
+    tried something.
+    """
+    assert direct_alert_event("gunshot", 0.95, 7, safe_mode=False) == LoraEvent(
+        EventClass.GUNSHOT, pytest.approx(0.95), 0, 0, 7
+    )
+    assert direct_alert_event("chainsaw", 0.8, 9, safe_mode=False) == LoraEvent(
+        EventClass.CHAINSAW, pytest.approx(0.8), 0, 0, 9
+    )
+
+
+def test_direct_alert_event_refuses_a_class_it_cannot_route():
+    """An unroutable class is a routing bug upstream, not a field condition.
+
+    Degrading to UNCONFIRMED would put a frame on air that reads to an
+    officer as a confirmed sighting of nothing, so this raises instead.
+    """
+    with pytest.raises(ValueError, match="not a direct-alert acoustic class"):
+        direct_alert_event("elephant_call", 0.9, 1, safe_mode=False)
+
+
+def test_direct_alert_event_carries_safe_mode():
+    """A dry run must be distinguishable from a real gunshot at the backend."""
+    ev = direct_alert_event("gunshot", 0.95, 7, safe_mode=True)
+    assert ev.flags == FLAG_SAFE_MODE
 
 
 def test_gunshot_event():
