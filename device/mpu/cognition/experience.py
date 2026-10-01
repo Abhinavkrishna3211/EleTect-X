@@ -37,6 +37,7 @@ Two behaviours worth knowing before reading the methods:
 from __future__ import annotations
 
 import sqlite3
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -190,9 +191,35 @@ def _migrate(connection: sqlite3.Connection) -> None:
 class ExperienceStore:
     """Persistent action values and event history for the deterrence bandit.
 
-    Not thread-safe and not intended to be: the MPU's event path is a single
-    Bridge-driven callback (device/mpu/main.py), so one connection owned by
-    one caller is the whole concurrency story.
+    Thread-safe, because the MPU's event path stopped being a single
+    Bridge-driven callback. device/mpu/main.py binds one store into
+    `_footfall_kwargs` and two different threads reach it through that one
+    dict: the Bridge callback thread that serves report_footfall_event, and
+    - under HOME_TEST_MODE - services/home_test.py's long-lived deterrence
+    worker. sqlite3 connections default to check_same_thread=True, so the
+    second thread to arrive did not get a race, it got an outright
+    sqlite3.ProgrammingError, swallowed by _fire_deterrence's broad except
+    and costing that encounter its deterrence silently.
+
+    Safety is two things together and neither works alone:
+
+    - check_same_thread=False, which stops sqlite3 refusing the call. On
+      its own this only converts a loud failure into a quiet one, since
+      the module is compiled serialized-threadsafe but this class's own
+      read-modify-write sequences are not atomic.
+    - One RLock held across each public method, which is what actually
+      makes them atomic. settle_pending() reads an action value, computes
+      the update from it and writes it back; two threads interleaving
+      there would lose one event's learning with no error anywhere.
+
+    The lock is reentrant rather than plain because a deadlocked event
+    thread on a field node is a dead node, and no public method calls
+    another today - so reentrancy costs nothing and removes the failure
+    mode where a later one does.
+
+    Every method holds the lock for at most a handful of statements
+    against single-digit-row tables, so contention is bounded by the work
+    itself rather than by any wait.
     """
 
     def __init__(self, db_path: Path = services_config.EXPERIENCE_DB_PATH):
@@ -209,6 +236,7 @@ class ExperienceStore:
         """
         self._db_path = db_path
         self._connection: sqlite3.Connection | None = None
+        self._lock = threading.RLock()
 
     @property
     def db_path(self) -> Path:
@@ -222,12 +250,19 @@ class ExperienceStore:
         DATA_DIR's path but explicitly leaves its creation to this module,
         and nothing else in the tree creates it. Blocks only for the open
         and the CREATE TABLE IF NOT EXISTS batch, both one-time per process.
+
+        Takes no lock of its own: every caller is a public method that
+        already holds one, and that is also what makes the open itself
+        atomic - two threads cannot both find self._connection None and
+        both build a schema.
         """
         if self._connection is not None:
             return self._connection
         if self._db_path != IN_MEMORY_PATH:
             self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(str(self._db_path))
+        # The lock above is what provides safety; this only stops sqlite3
+        # refusing a call from a thread other than the one that opened it.
+        connection = sqlite3.connect(str(self._db_path), check_same_thread=False)
         connection.executescript(_SCHEMA)
         _migrate(connection)
         connection.commit()
@@ -269,17 +304,18 @@ class ExperienceStore:
             repeat_count() therefore excludes this event's own row by rowid
             rather than by timestamp; see there.
         """
-        connection = self._connect()
-        repeats = connection.execute(
-            "SELECT COUNT(*) FROM triggers WHERE event_ts_s >= ? AND event_ts_s <= ?",
-            (event_ts_s - window_s, event_ts_s),
-        ).fetchone()[0]
-        connection.execute(
-            "INSERT INTO triggers (event_ts_s, species) VALUES (?, ?)",
-            (event_ts_s, UNATTRIBUTED),
-        )
-        connection.commit()
-        return int(repeats)
+        with self._lock:
+            connection = self._connect()
+            repeats = connection.execute(
+                "SELECT COUNT(*) FROM triggers WHERE event_ts_s >= ? AND event_ts_s <= ?",
+                (event_ts_s - window_s, event_ts_s),
+            ).fetchone()[0]
+            connection.execute(
+                "INSERT INTO triggers (event_ts_s, species) VALUES (?, ?)",
+                (event_ts_s, UNATTRIBUTED),
+            )
+            connection.commit()
+            return int(repeats)
 
     def attribute_trigger(self, event_ts_s: float, species: str) -> int:
         """Name the animal behind a trigger already recorded, after the fact.
@@ -314,14 +350,15 @@ class ExperienceStore:
             rather than a field condition and is logged by the caller, not
             raised here.
         """
-        connection = self._connect()
-        cursor = connection.execute(
-            "UPDATE triggers SET species = ? WHERE id = ("
-            "SELECT MAX(id) FROM triggers WHERE event_ts_s = ? AND species = ?)",
-            (species, event_ts_s, UNATTRIBUTED),
-        )
-        connection.commit()
-        return int(cursor.rowcount)
+        with self._lock:
+            connection = self._connect()
+            cursor = connection.execute(
+                "UPDATE triggers SET species = ? WHERE id = ("
+                "SELECT MAX(id) FROM triggers WHERE event_ts_s = ? AND species = ?)",
+                (species, event_ts_s, UNATTRIBUTED),
+            )
+            connection.commit()
+            return int(cursor.rowcount)
 
     def repeat_count(self, event_ts_s: float, window_s: float, species: str) -> int:
         """How many triggers of one species precede `event_ts_s` in the window.
@@ -344,15 +381,16 @@ class ExperienceStore:
         a caller bug, and answering "no repeats" would hide it behind a
         plausible number.
         """
-        connection = self._connect()
-        count = connection.execute(
-            "SELECT COUNT(*) FROM triggers WHERE species = ? "
-            "AND event_ts_s >= ? AND event_ts_s <= ? "
-            "AND id < COALESCE("
-            "(SELECT MAX(id) FROM triggers WHERE event_ts_s = ?), 0x7FFFFFFFFFFFFFFF)",
-            (species, event_ts_s - window_s, event_ts_s, event_ts_s),
-        ).fetchone()[0]
-        return int(count)
+        with self._lock:
+            connection = self._connect()
+            count = connection.execute(
+                "SELECT COUNT(*) FROM triggers WHERE species = ? "
+                "AND event_ts_s >= ? AND event_ts_s <= ? "
+                "AND id < COALESCE("
+                "(SELECT MAX(id) FROM triggers WHERE event_ts_s = ?), 0x7FFFFFFFFFFFFFFF)",
+                (species, event_ts_s - window_s, event_ts_s, event_ts_s),
+            ).fetchone()[0]
+            return int(count)
 
     def action_values(self, species: str = UNATTRIBUTED) -> dict[tuple[int, Tier], float]:
         """Load one species' learned action values, keyed for select_tier().
@@ -372,12 +410,13 @@ class ExperienceStore:
             {(context, Tier): value} for that species. Pairs never visited
             are absent, which select_tier() reads as 0.0.
         """
-        connection = self._connect()
-        rows = connection.execute(
-            "SELECT context, tier, value FROM action_values WHERE species = ?",
-            (species,),
-        ).fetchall()
-        return {(int(context), Tier(tier)): float(value) for context, tier, value in rows}
+        with self._lock:
+            connection = self._connect()
+            rows = connection.execute(
+                "SELECT context, tier, value FROM action_values WHERE species = ?",
+                (species,),
+            ).fetchall()
+            return {(int(context), Tier(tier)): float(value) for context, tier, value in rows}
 
     def record_attempt(
         self, event_ts_s: float, context: int, tier: Tier, species: str = UNATTRIBUTED
@@ -396,13 +435,14 @@ class ExperienceStore:
                 the trigger that eventually settles it may well be a
                 different animal. Defaults to UNATTRIBUTED.
         """
-        connection = self._connect()
-        connection.execute(
-            "INSERT INTO attempts (event_ts_s, context, tier, species) "
-            "VALUES (?, ?, ?, ?)",
-            (event_ts_s, int(context), int(tier), species),
-        )
-        connection.commit()
+        with self._lock:
+            connection = self._connect()
+            connection.execute(
+                "INSERT INTO attempts (event_ts_s, context, tier, species) "
+                "VALUES (?, ?, ?, ?)",
+                (event_ts_s, int(context), int(tier), species),
+            )
+            connection.commit()
 
     def settle_pending(self, now_ts_s: float, params: BanditParams) -> SettledAttempt | None:
         """Score the oldest unsettled attempt against the quiet that followed it.
@@ -440,52 +480,53 @@ class ExperienceStore:
             A SettledAttempt describing what was scored, or None if nothing
             was pending.
         """
-        connection = self._connect()
-        row = connection.execute(
-            "SELECT id, event_ts_s, context, tier, species FROM attempts "
-            "WHERE settled = 0 ORDER BY event_ts_s LIMIT 1"
-        ).fetchone()
-        if row is None:
-            return None
+        with self._lock:
+            connection = self._connect()
+            row = connection.execute(
+                "SELECT id, event_ts_s, context, tier, species FROM attempts "
+                "WHERE settled = 0 ORDER BY event_ts_s LIMIT 1"
+            ).fetchone()
+            if row is None:
+                return None
 
-        attempt_id, event_ts_s, context, tier_value, species = row
-        context = int(context)
-        species = str(species)
-        tier = Tier(tier_value)
-        gap_s = now_ts_s - float(event_ts_s)
-        reward = proxy_reward(gap_s, params.reward_horizon_s)
+            attempt_id, event_ts_s, context, tier_value, species = row
+            context = int(context)
+            species = str(species)
+            tier = Tier(tier_value)
+            gap_s = now_ts_s - float(event_ts_s)
+            reward = proxy_reward(gap_s, params.reward_horizon_s)
 
-        stored = connection.execute(
-            "SELECT value, visits FROM action_values "
-            "WHERE species = ? AND context = ? AND tier = ?",
-            (species, context, int(tier)),
-        ).fetchone()
-        old_value = float(stored[0]) if stored is not None else 0.0
-        visits = (int(stored[1]) if stored is not None else 0) + 1
-        value = updated_value(old_value, reward, params.step_size)
+            stored = connection.execute(
+                "SELECT value, visits FROM action_values "
+                "WHERE species = ? AND context = ? AND tier = ?",
+                (species, context, int(tier)),
+            ).fetchone()
+            old_value = float(stored[0]) if stored is not None else 0.0
+            visits = (int(stored[1]) if stored is not None else 0) + 1
+            value = updated_value(old_value, reward, params.step_size)
 
-        connection.execute(
-            "INSERT INTO action_values (species, context, tier, value, visits) "
-            "VALUES (?, ?, ?, ?, ?) "
-            "ON CONFLICT(species, context, tier) DO UPDATE SET value = excluded.value, "
-            "visits = excluded.visits",
-            (species, context, int(tier), value, visits),
-        )
-        connection.execute(
-            "UPDATE attempts SET settled = 1, reward = ?, next_trigger_ts_s = ? WHERE id = ?",
-            (reward, now_ts_s, attempt_id),
-        )
-        connection.commit()
+            connection.execute(
+                "INSERT INTO action_values (species, context, tier, value, visits) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(species, context, tier) DO UPDATE SET value = excluded.value, "
+                "visits = excluded.visits",
+                (species, context, int(tier), value, visits),
+            )
+            connection.execute(
+                "UPDATE attempts SET settled = 1, reward = ?, next_trigger_ts_s = ? WHERE id = ?",
+                (reward, now_ts_s, attempt_id),
+            )
+            connection.commit()
 
-        return SettledAttempt(
-            context=context,
-            tier=tier,
-            gap_s=gap_s,
-            reward=reward,
-            value=value,
-            visits=visits,
-            species=species,
-        )
+            return SettledAttempt(
+                context=context,
+                tier=tier,
+                gap_s=gap_s,
+                reward=reward,
+                value=value,
+                visits=visits,
+                species=species,
+            )
 
     def close(self) -> None:
         """Release the connection; idempotent, like Camera.close().
@@ -493,6 +534,7 @@ class ExperienceStore:
         Safe to call on a store that was never used - there is nothing to
         close until the first real operation opened something.
         """
-        if self._connection is not None:
-            self._connection.close()
-            self._connection = None
+        with self._lock:
+            if self._connection is not None:
+                self._connection.close()
+                self._connection = None

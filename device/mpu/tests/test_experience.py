@@ -14,6 +14,7 @@ calling cognition/bandit.py's functions in the test body
 """
 
 import sqlite3
+import threading
 
 import pytest
 
@@ -377,3 +378,90 @@ def test_reopening_does_not_wipe_the_existing_schema(tmp_path):
     finally:
         connection.close()
     assert rows == 2
+
+
+# --- thread safety -----------------------------------------------------------
+
+
+def test_a_second_thread_can_use_a_store_the_first_thread_opened(tmp_path):
+    """The sqlite3.ProgrammingError that cost HOME_TEST_MODE encounters silently.
+
+    device/mpu/main.py binds one store into _footfall_kwargs, and two
+    threads reach it through that dict: the Bridge callback serving
+    report_footfall_event, and home_test.py's deterrence worker. Whichever
+    arrived first owned the connection; the other used to be refused
+    outright by sqlite3's check_same_thread, inside a broad except that
+    turned the refusal into a missing deterrence rather than a crash.
+
+    Opened from this thread deliberately - calling _connect() lazily from
+    the worker would hide the bug by making the worker the owner.
+    """
+    store = _store(tmp_path)
+    store.record_trigger(1000.0, 600.0)
+
+    raised: list[BaseException] = []
+
+    def from_another_thread() -> None:
+        try:
+            store.record_trigger(1100.0, 600.0)
+            store.record_attempt(1100.0, 0, Tier.TIER_1)
+            store.settle_pending(1200.0, PARAMS)
+        except BaseException as exc:  # noqa: BLE001 - the point is to report it
+            raised.append(exc)
+
+    worker = threading.Thread(target=from_another_thread)
+    worker.start()
+    worker.join(timeout=5.0)
+
+    assert not worker.is_alive()
+    assert raised == []
+    assert store.repeat_count(1200.0, 600.0, "") == 2
+    store.close()
+
+
+def test_concurrent_settles_do_not_lose_an_update(tmp_path):
+    """check_same_thread=False alone would make this fail quietly, not loudly.
+
+    settle_pending() reads an action value, computes the next one from it
+    and writes it back. Interleave two of those and one event's learning
+    vanishes with no error raised anywhere - which is why the lock, not
+    just the connection flag, is what makes this class safe.
+
+    Asserted on visits rather than value: visits is an exact integer count
+    of how many settles were applied, so a lost update is unambiguous,
+    where a value comparison would depend on the interleaving order.
+    """
+    store = _store(tmp_path)
+    attempts = 8
+    for i in range(attempts):
+        store.record_attempt(1000.0 + i, 0, Tier.TIER_1)
+
+    start = threading.Barrier(attempts)
+
+    def settle_one() -> None:
+        start.wait(timeout=5.0)
+        store.settle_pending(2000.0, PARAMS)
+
+    workers = [threading.Thread(target=settle_one) for _ in range(attempts)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=5.0)
+
+    assert not any(worker.is_alive() for worker in workers)
+    assert store.action_values()[(0, Tier.TIER_1)] is not None
+    connection = sqlite3.connect(str(store.db_path))
+    try:
+        visits = connection.execute(
+            "SELECT visits FROM action_values WHERE species = '' AND context = 0 AND tier = ?",
+            (int(Tier.TIER_1),),
+        ).fetchone()[0]
+        unsettled = connection.execute(
+            "SELECT COUNT(*) FROM attempts WHERE settled = 0"
+        ).fetchone()[0]
+    finally:
+        connection.close()
+
+    assert visits == attempts
+    assert unsettled == 0
+    store.close()
