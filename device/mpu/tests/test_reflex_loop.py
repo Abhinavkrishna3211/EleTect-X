@@ -511,6 +511,28 @@ def test_safe_mode_suppresses_all_actuation_and_camera():
     assert log == []  # nothing in this event touched the camera or storage either
 
 
+def test_a_trigger_with_no_geophone_drops_the_modality_rather_than_scoring_it():
+    """probability=0.0 with no geophone must be excluded, not read as a denial.
+
+    This is why the flag reaches fuse() and not only the watch.
+    `probability` is zero on a trigger the geophone never saw, and zero is
+    honest - but a zero *scored* as a real reading is a strong statement
+    that the ground is quiet, which drags the combined log-odds down and
+    could suppress an alert the other modalities had already earned.
+    Dropped and scored-as-zero are only distinguishable from outside by
+    exactly this comparison, which is why both events are run rather than
+    one asserted against a hand-computed number.
+    """
+    dropped, _, _ = _fire(probability=0.0, seismic_available=False)
+    scored, _, _ = _fire(probability=0.0)
+
+    assert Modality.SEISMIC in dropped.fusion.dropped
+    assert Modality.SEISMIC not in dropped.fusion.contributions
+    assert Modality.SEISMIC in scored.fusion.used
+    assert scored.fusion.contributions[Modality.SEISMIC] < 0.0
+    assert dropped.fusion.log_odds > scored.fusion.log_odds
+
+
 def test_low_probability_does_not_alert_and_never_calls_any_actuator():
     """A weak footfall probability must not clear the threshold or fire anything.
 
@@ -2109,6 +2131,50 @@ def test_the_extended_window_can_never_be_shorter_than_the_base():
     assert reflex_loop._watch_length_s(
         repeat_count=5, seismic_alone_alerts=True, base_s=8.0, extended_s=2.0
     ) == 8.0
+
+
+def test_a_trigger_with_no_geophone_at_all_earns_the_long_look():
+    """An absent sensor is not a sensor that said no.
+
+    seismic_alone_alerts is structurally always False with no geophone in
+    the picture at all - there is no seismic evidence to alert on - which
+    is a different thing from a real reading that came back weak. There is
+    no false-positive-rate argument for economizing the watch against a
+    sensor that was never asked, so a trigger with no geophone behind it
+    earns the same long look a strong geophone reading would.
+
+    Before this parameter existed such a trigger took the *short* window,
+    which is backwards: it is the case with the least corroboration and so
+    the most to gain from looking longer.
+    """
+    assert (
+        reflex_loop._watch_length_s(
+            repeat_count=0,
+            seismic_alone_alerts=False,
+            seismic_available=False,
+            base_s=8.0,
+            extended_s=45.0,
+        )
+        == 45.0
+    )
+
+
+def test_seismic_available_defaults_true_so_the_field_path_is_unaffected():
+    """Every existing caller omits seismic_available; behaviour must not move.
+
+    A real geophone notify always has a reading behind it, so this default
+    keeps the field path exactly what it was before this parameter
+    existed. Asserted rather than assumed because the whole value of a
+    defaulted parameter is that no existing call site had to be touched -
+    which also means no existing call site would notice if the default
+    were wrong.
+    """
+    assert (
+        reflex_loop._watch_length_s(
+            repeat_count=0, seismic_alone_alerts=False, base_s=8.0, extended_s=45.0
+        )
+        == 8.0
+    )
 
 
 # --- _watch_for_vision ------------------------------------------------------

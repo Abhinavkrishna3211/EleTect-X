@@ -925,13 +925,14 @@ def _watch_length_s(
     *,
     repeat_count: int,
     seismic_alone_alerts: bool,
+    seismic_available: bool = True,
     base_s: float = services_config.VISION_WATCH_BASE_S,
     extended_s: float = services_config.VISION_WATCH_EXTENDED_S,
 ) -> float:
     """Decide how long this trigger has earned the camera for (ADR 0022).
 
-    Two conditions extend the window, and both are values already computed
-    for other reasons, so neither costs a sensor read:
+    Three conditions extend the window, and all three are values already
+    computed for other reasons, so none costs a sensor read:
 
     - `repeat_count > 0`: another qualifying trigger arrived at this node
       within HABITUATION_WINDOW_S. That is the closest thing this device
@@ -947,22 +948,40 @@ def _watch_length_s(
       140m the geophone reaches) and the only way the event produces usable
       footage. See ADR 0022 - that is a real reversal of ADR 0020, not a
       refinement of it.
+    - `not seismic_available`: there is no geophone reading to weigh at
+      all, because something other than the geophone started this event.
+      `seismic_alone_alerts` is structurally always False here - there is
+      no seismic evidence to alert on - and that is a different thing from
+      a real geophone reading that came back weak. The wind-and-cattle
+      case below is a signal this device chose not to trust; an absent
+      reading is not a signal at all. There is no false-positive-rate
+      argument for economizing the watch against a sensor that was never
+      asked, so a trigger with no geophone behind it gets the same benefit
+      of the doubt a strong geophone reading already gets. Without this,
+      every such trigger silently took the *shortest* window of the three,
+      which is backwards: it is exactly the case with the least
+      corroboration and therefore the most to gain from looking longer.
 
-    Everything else - a lone, weak, unrepeated trigger - gets base_s. That
-    is the wind-and-cattle case, and it is the one that has to stay cheap.
+    Everything else - a lone, weak, unrepeated trigger with a real geophone
+    behind it - gets base_s. That is the wind-and-cattle case, and it is the
+    one that has to stay cheap.
 
     Args:
         repeat_count: Triggers inside the habituation window before this
             one, as returned by ExperienceStore.record_trigger().
         seismic_alone_alerts: Whether decide() says alert on the seismic
             reading alone, with vision reported unavailable.
-        base_s: Window for a trigger that qualifies for neither condition.
-        extended_s: Window for one that qualifies for either.
+        seismic_available: False on a trigger with no geophone reading at
+            all (see above). Defaults to True so every existing caller -
+            the geophone notify, which is the real field path - is
+            unaffected.
+        base_s: Window for a trigger that qualifies for none of the three.
+        extended_s: Window for one that qualifies for any of them.
 
     Returns:
         Seconds to watch. Never less than base_s.
     """
-    if repeat_count > 0 or seismic_alone_alerts:
+    if repeat_count > 0 or seismic_alone_alerts or not seismic_available:
         return max(base_s, extended_s)
     return base_s
 
@@ -1601,6 +1620,7 @@ def handle_footfall_event(
     rng: random.Random = _DEFAULT_RNG,
     household_proximity: bool = services_config.NODE_HOUSEHOLD_PROXIMITY,
     target_labels: tuple[str, ...] = VISION_TARGET_LABELS,
+    seismic_available: bool = True,
 ) -> FootfallOutcome | None:
     """Sense -> fuse -> decide -> actuate for one report_footfall_event notify.
 
@@ -1763,6 +1783,16 @@ def handle_footfall_event(
             _watch_for_vision, for the same reason household_proximity is:
             so tests can exercise all three scope states without
             monkeypatching module state.
+        seismic_available: True (the default, and every geophone-notify
+            call site) builds the SEISMIC ModalityReading from
+            `probability` as before. False builds it with available=False
+            instead, so fuse() drops the modality rather than scoring
+            `probability` as a real reading, and _watch_length_s() grants
+            the extended window. For an entry point that starts an
+            encounter with no geophone behind it.
+            `probability`/`sta_lta_ratio`/`feature_vector` are still logged
+            for explainability either way; only whether fuse() scores them
+            changes.
 
     Returns:
         A FootfallOutcome carrying the fusion result, the decision, the
@@ -1804,8 +1834,15 @@ def handle_footfall_event(
     repeat_count = experience.record_trigger(event_wall_s, bandit_params.habituation_window_s)
     settled = experience.settle_pending(event_wall_s, bandit_params)
 
+    # seismic_available=False is for an event something other than the
+    # geophone started. `probability` is still carried and still logged -
+    # it is zero on those paths, and zero is an honest value for "no
+    # geophone reading", but fuse() must not read it as one. An
+    # unavailable modality is excluded from the sum; a probability of 0.0
+    # scored as a real reading would read as "the ground says no" and
+    # could pull a genuine detection back below the alert threshold.
     seismic_reading = ModalityReading(
-        Modality.SEISMIC, _confidence_log_odds(probability), available=True
+        Modality.SEISMIC, _confidence_log_odds(probability), available=seismic_available
     )
     # Acoustic: no reading in hand on this path. A footfall notify carries
     # none, and nothing correlates an acoustic event with this one across
@@ -1856,6 +1893,7 @@ def handle_footfall_event(
             watch_s = _watch_length_s(
                 repeat_count=repeat_count,
                 seismic_alone_alerts=seismic_alone.alert,
+                seismic_available=seismic_available,
                 base_s=vision_watch_base_s,
                 extended_s=vision_watch_extended_s,
             )
