@@ -53,6 +53,7 @@ Observed, side by side, with no page refresh:
 This confirms the `useRealtimeTable` subscription (`postgres_changes` on
 `nodes`, already in the `supabase_realtime` publication) delivers UPDATEs to the
 Overview screen live, with both the map marker and the derived fleet-summary
-counts reacting correctly. Screenshots of this manual run were shared in chat
-but not saved to disk, so they are not checked in — this note stands in as the
-verification record.
+counts reacting correctly. Screenshots of this manual run were reviewed at the
+time but not saved to disk, so they are not checked in — this note stands in as
+the verification record. Re-running the check is cheap; trusting an unsaved
+screenshot is not, so treat this as a logged observation rather than evidence.

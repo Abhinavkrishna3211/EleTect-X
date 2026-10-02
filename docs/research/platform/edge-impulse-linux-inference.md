@@ -345,7 +345,12 @@ enumerates the camera and on the camera honoring UVC manual-exposure.
 
 ## Recommended actions for EleTect X
 
-1. **Stop trying to make the GPU `.eim` run.** Ship the CPU int8 EON `.eim`. It is
+> **Scope:** the int8 recommendation below was reached on the **vision** track and holds there.
+> It does **not** generalise to acoustic. On the acoustic model, int8 costs 14.5 points of
+> accuracy and is *slower* on this board (6 ms vs 1 ms), so that track ships float32 - see
+> ADR 0026 and `ml/acoustic/ACOUSTIC_MODEL_REPORT.md`.
+
+1. **Stop trying to make the GPU `.eim` run.** Ship the CPU int8 EON `.eim` for vision. It is
    the supported ceiling on this board. Budget ~5-7 FPS for a small model.
 2. **Cut latency by model shape, not hardware:** FOMO (if not already), grayscale
    if the detector tolerates it, smallest input resolution that still separates

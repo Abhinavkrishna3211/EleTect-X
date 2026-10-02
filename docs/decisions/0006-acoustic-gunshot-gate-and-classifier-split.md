@@ -1,8 +1,13 @@
 # ADR 0006: Acoustic pipeline — gunshot wake-gate and post-wake classifier split
 
-- **Status:** superseded by ADR-0009 (retained as the documented fallback design if ADR 0009's LPBAM
-  dual-channel concurrency test fails on the bench — see that ADR before treating anything below as the
-  field plan)
+- **Status:** superseded by [ADR 0009](0009-acoustic-capture-continuous-lpbam-classifier.md); see also
+  [ADR 0028](0028-acoustic-capture-moves-to-the-mpu-usb-microphone.md) (2026-09-29), which moved
+  acoustic capture to the MPU and made the LPBAM bench test this status once pointed at moot. Two
+  things below remain load-bearing and should not be read as retracted: the TrustZone finding (SAI1 is
+  locked for the devicetree-driven path, not for raw register access) was **confirmed correct** by
+  ADR 0028 — it simply is not the binding constraint, because the prebuilt loader never clocks the
+  peripheral in the first place; and the MAX9814 always-on wake-gate argument is deferred, not
+  rejected.
 - **Date:** 2026-07-28
 
 ## Context

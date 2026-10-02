@@ -1,6 +1,11 @@
 # ADR 0009: Acoustic capture mechanism — continuous on-MCU LPBAM classifier supersedes the SAI/comparator-gate design
 
-- **Status:** proposed — one bench test (Rung 2 LPBAM dual-channel concurrency) gates acceptance
+- **Status:** proposed, and **narrowed by [ADR 0028](0028-acoustic-capture-moves-to-the-mpu-usb-microphone.md)**
+  (2026-09-29). The bench test named below is no longer the gate: the MAX9814 this design depends on
+  was dropped during procurement, and the on-MCU path is not buildable on the UNO Q's prebuilt loader
+  regardless. ADR 0028 moves event-gated capture to the MPU and explicitly does **not** supersede this
+  ADR — the always-on gunshot path described here remains the only design that delivers always-on
+  listening at STOP-mode power, and is deferred rather than rejected. Tracked in `docs/KNOWN_GAPS.md`.
 - **Date:** 2026-07-28
 
 ## Context
