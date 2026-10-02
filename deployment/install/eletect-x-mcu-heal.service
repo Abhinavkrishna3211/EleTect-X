@@ -1,0 +1,29 @@
+[Unit]
+Description=EleTect-X: verify the STM32 sketch answers Bridge at boot, recover it if not
+Documentation=file:///home/arduino/ArduinoApps/eletect-x
+# NO After= on eletect-x-boot-reassert.service. That unit orders itself
+# After=default.target, and this unit is WantedBy=default.target, so chaining
+# the two makes an ordering cycle - systemd resolves it by DELETING this unit's
+# start job on every boot (observed on the board 2026-09-10: MCU left in DFU,
+# only the 5-min watchdog cron recovered it). This unit therefore takes on no
+# ordering beyond the implicit After=basic.target and just waits out a long
+# ExecStartPre; the heal script is idempotent and re-asserts the golden compose
+# itself, so it does not need boot-reassert to have finished first.
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Long settle: docker, the app container, arduino-router, serial-discovery and
+# boot-reassert all need to be up before the Bridge probe means anything. The
+# script tolerates a slow-linking sketch on top of this and only then escalates;
+# if the container is not up yet it exits cleanly (rc=4) and the cron watchdog
+# takes over.
+ExecStartPre=/bin/sleep 90
+# The script runs its own two reset+reflash passes internally, so one call is
+# the whole recovery. '-' so a gave-up exit does not raise a unit failure - the
+# 5-min watchdog picks it up from there.
+ExecStart=-/home/arduino/bin/eletect-x-mcu-heal.sh --boot
+TimeoutStartSec=900
+
+[Install]
+WantedBy=default.target

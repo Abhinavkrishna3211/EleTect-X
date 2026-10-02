@@ -1,0 +1,27 @@
+[Unit]
+Description=EleTect-X: hold STM32 BOOT0 (gpiochip1 line 37) low so the MCU boots the sketch, not DFU
+Documentation=file:///home/arduino/ArduinoApps/eletect-x
+# arduino-router also touches this line from an ExecStartPre, but that hold is
+# dropped the instant the router's main process starts. This unit owns a
+# permanent hold. Start it after the router so the router's ExecStartPre
+# pkill/gpioset churn is finished before we grab the line for good.
+After=arduino-router.service
+Wants=arduino-router.service
+
+[Service]
+Type=simple
+# Clear any stray holder from a previous boot or a manual recovery session so
+# this unit can take the line cleanly. The '-' prefix keeps a no-match quiet.
+ExecStartPre=-/usr/bin/pkill -f gpioset.*gpiochip1.*37
+ExecStartPre=/bin/sleep 1
+# No -t/-p: bare gpioset (libgpiod v2) blocks indefinitely, holding line 37 at
+# 0 until killed - that is the persistent hold this unit exists to keep. (The
+# router's ExecStartPre uses '-t0', which toggles once and exits immediately;
+# that is a fire-and-forget nudge, not a hold, which is exactly why nothing
+# survives to the next MCU reset without this unit.)
+ExecStart=/usr/bin/gpioset -c /dev/gpiochip1 37=0
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
