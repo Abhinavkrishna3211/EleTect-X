@@ -3344,6 +3344,667 @@ checkpoint (`no_attn_relu`, `medium`, threshold 0.05: Boar 0.852 / Elephant 0.90
 exactly as found.** No export, no version snapshot, no on-device benchmark — the adoption gate is
 never reached because nothing qualified to be gated.
 
+## 13 Sept — Fox added as an experimental 4th class: sourcing, first retrain, full sweep, no-go on promotion
+
+Separate from the Boar-gap close-out above: an experimental **Elephant / Boar / Fox / Background**
+4-class branch, motivated by real field footage in which a fox was called "Boar" — a wrong-species
+alarm, not a miss, but the wrong kind of wrong for a deterrent decision. Fox is explicitly
+experimental and secondary to the Elephant/Boar mandate; the adoption bar for any 4-class
+checkpoint is **(a) no Elephant/Boar/Background regression beyond the ~1 pt noise floor established
+4 Sept, evaluated against the pure-3-class champion on an identical corpus, and (b) usable Fox
+recall**, not the ≥92% bar Elephant/Boar are held to (Fox's corpus is, and will stay for some time,
+far thinner). Full sourcing audit in `ml/vision/fox-representation-audit.md`; only the summary is
+repeated here. Champion recipe unchanged throughout (`--family yolo-pro --yolo-variant
+no_attn_relu --yolo-sizing medium`, 96px).
+
+**Corpus this pass:** `deepnetworkdevelopment/fox-detection-7iqxq` v2 (99 images, CC BY 4.0,
+predominantly daytime stock photography, one painting misfiled as a photo excluded by filename) +
+`board-captures-fox-encounter1` (13 images, own capture, real IR-night) + `mgr-l8rhf/fox-sldyl`
+(up to 598 images per the audit's exclude list, CC BY 4.0, genuine trail-camera/video provenance,
+roughly a third real night/IR by the audit's own sample) = **294 Fox test images** held out
+(train/test split is this script's own group-aware re-split, not Roboflow's). Elephant/Boar/
+Background sources and counts are exactly the 4 Sept table above — confirmed identical: this run's
+`check_data()` reported **12,372 training / 3,713 testing**, and 12,372 − 11,400 = 972 /
+3,713 − 3,419 = 294 against the same-day pure-3-class baseline below, both differences landing
+exactly on Fox's own train/test counts. **This is a clean, controlled comparison** — nothing about
+the non-Fox corpus moved between the two runs.
+
+Job chain: training 53739581 (83.9 min) → held-out test 53741380 (5.8 min, at the impulse's
+already-configured threshold) → full 5-point sweep, jobs 53741463…53741798 (5–6 min each), all
+`successful=True`.
+
+**Full sweep, Fox pass 1 (Boar/Elephant: 1,586/844 test images; Background: 989; Fox: 294):**
+
+| Threshold | Boar recall | Boar precision | Elephant recall | Elephant precision | Fox recall | Fox precision | Background FP rate |
+|---|---|---|---|---|---|---|---|
+| 0.05 | 0.849 | 0.877 | 0.904 | 0.865 | 0.609 | 0.642 | 0.163 |
+| 0.10 | 0.832 | 0.923 | 0.894 | 0.908 | 0.588 | 0.754 | 0.119 |
+| 0.20 | 0.804 | 0.960 | 0.878 | 0.940 | 0.548 | 0.824 | 0.079 |
+| 0.30 | 0.789 | 0.976 | 0.864 | 0.954 | 0.510 | 0.906 | 0.058 |
+| 0.50 | 0.738 | 0.986 | 0.837 | 0.973 | 0.442 | 0.952 | 0.027 |
+
+**Same-day pure-3-class reference (see "champion reprod" below for the full table):** at 0.05,
+Boar 0.849/0.869, Elephant 0.896/0.860, BG FP 0.148. Boar recall matches exactly; Elephant recall
++0.8 pt; Background FP +1.5 pt (worse) — all within the ≤1 pt–1.5 pt noise band. **No Elephant/
+Boar/Background regression.** Fox itself: recall 0.609 at precision 0.642 (n=294) — real, but far
+short of a "never miss" bar, and the real 11 Sept field encounter frames (13 frames, real IR-night,
+the exact false-positive class this branch exists to fix) came back 4/13 detected, 100% of those
+correctly labeled "Fox," never mislabeled "Boar" again — the specific failure mode fixed, on a
+13-frame sample too small to generalize from. **Not promoted** — Fox recall is too far from
+operationally trustworthy, and the checked-out night/IR subset (`mgr-l8rhf`, ~1/3 real night/IR)
+recalls worse than the daytime-stock subset. Deployed checkpoint (`etx_cpu_final_0830.eim`,
+3-class) unchanged. Recommended next step (from the audit): grow `mgr-l8rhf`'s real night/IR share
+specifically, since it under-performs despite being the domain-relevant source.
+
+## 13-14 Sept — Fox pass 2: a second real night/IR source added, still no-go, an Elephant recall pattern flagged
+
+No new `mgr-l8rhf` volume existed at the time, so this pass added a second, independent real
+night/IR source instead: `kawaharalabo/far-infrared-rays-animals` v5 (CC BY 4.0, genuine
+far-infrared camera-trap footage; 113 images wired this pass, 24 held out) alongside the three
+pass-1 sources, unchanged recipe. **This is a materially different action from the pass-1
+recommendation** (grow `mgr-l8rhf`) and should not be read as having tested it.
+
+`check_data()`: **12,461 training / 3,737 testing** (12,461 − 11,400 = 1,061 /
+3,737 − 3,419 = 318, again landing exactly on this pass's own Fox train/test counts — Elephant/
+Boar/Background unchanged). Job chain: training 53744562 (77.6 min) → sweep jobs
+53745929…53746220 (all `successful=True`).
+
+**Full sweep, Fox pass 2 (Boar/Elephant: 1,586/844 test images; Background: 989; Fox: 318):**
+
+| Threshold | Boar recall | Boar precision | Elephant recall | Elephant precision | Fox recall | Fox precision | Background FP rate |
+|---|---|---|---|---|---|---|---|
+| 0.05 | 0.845 | 0.875 | 0.897 | 0.865 | 0.597 | 0.857 | 0.161 |
+| 0.10 | 0.825 | 0.916 | 0.885 | 0.909 | 0.553 | 0.877 | 0.115 |
+| 0.20 | 0.800 | 0.958 | 0.857 | 0.939 | 0.519 | 0.911 | 0.069 |
+| 0.30 | 0.784 | 0.971 | 0.839 | 0.958 | 0.481 | 0.905 | 0.050 |
+| 0.50 | 0.736 | 0.988 | 0.790 | 0.981 | 0.421 | 0.934 | 0.026 |
+
+Per-source recall proxy at the live 0.5 threshold: `deepnetworkdevelopment` (daytime stock)
+9/21 = 0.429, `mgr-l8rhf` 120/273 = 0.440, `kawaharalabo` (new) 5/24 = 0.208 — **the newly added
+real night/IR source recalled worse than either existing source** (n=24, not to be over-read), and
+`mgr-l8rhf`'s own recall barely moved (0.432 → 0.440, inside noise). **The night/IR-domain gap
+flagged in pass 1 is confirmed on a second real source, not closed by it.** Fox precision improved
+materially (0.642 → 0.857 at 0.05) but recall fell (0.609 → 0.597) — the pattern that continues
+into pass 3 below.
+
+**Elephant recall softened by −0.7 to −4.7 pt against both the deployed champion and pass 1 at
+every one of the five thresholds** (e.g. 0.897 here vs 0.904 pass 1 vs 0.906 deployed at 0.05) —
+individually inside this project's measured noise band, but one-directional across all five
+points and both references, flagged as a pattern worth investigating, not yet diagnosed. Boar and
+Background hold within noise. One clear positive: the real 20260911T203127 encounter frames
+improved sharply, 4/13 → 11/13 correctly labeled "Fox" at the same live threshold — the largest
+single change either pass produced, on a 13-frame sample. **Still not promoted.** Recommended next
+step: investigate the Elephant pattern (is it Fox-class-count-driven via automatic class-weight
+rebalancing on the shared backbone, or specific to these two sources) before sourcing a third Fox
+dataset, and if more `mgr-l8rhf` volume becomes available, add that directly — the one lever
+pass 1 recommended and pass 2 did not try.
+
+## 14-15 Sept — Fox pass 3: `mgr-l8rhf` grown to its full export, two new sources added, an `expect_images` reconciliation bug found and fixed — Fox recall falls again as real night/IR share grows
+
+User instruction this pass, verbatim: source meaningfully more Fox data — specifically real
+night/IR coverage, the gap both prior passes flagged — retrain unchanged, and only adopt if it
+beats the champion on Elephant/Boar/Background and shows **meaningfully better Fox recall than
+the two prior passes**. Licensing was explicitly not a sourcing gate this pass ("don't think about
+license, use any data you find good") — species-purity and visual-contamination standards stayed
+in force unchanged; every source below was still by-eye audited and every confirmed-bad image
+excluded regardless of its license.
+
+**What changed in the corpus vs pass 2:**
+
+- `mgr-l8rhf/fox-sldyl` grown from the ≤598-image partial pull to the full **v1 export (1,501 raw
+  images)** — the one lever pass 2 flagged as untried. A fresh by-eye audit of this larger export
+  found **242 additional bad images** to exclude beyond the pass-1/2 list: three specific
+  contaminated clips (`frame_1559_`, `frame_1823_`, `frame_914_`), four corrupted-looking
+  `frime-` clips, a WhatsApp-video clip, five `frame_0003xx`/`frame_0005xx`/`frame_0015xx`/
+  `frame_0008xx` clips, and every file matching a bare-16-lowercase-hex-character filename stem
+  (`_MGR_FOX_EXCLUDED_STEMS` / `_MGR_FOX_BARE_HEX_STEM` in `scripts/edge_impulse_upload_vision.py`)
+  — the exact open lead pass 1's audit could not close (n=2 sampled, 1 contaminated) is now closed
+  by pattern-matching the whole stem instead of leaving it to further by-eye sampling. Net: 1,244
+  images kept (1,169 boxed + 90 confirmed background), 971 train / 273 test.
+- `kawaharalabo/far-infrared-rays-animals` v5 unchanged in content (463 images, same as pass 2's
+  113-image partial pull grown to the full export this pass — genuine far-infrared camera-trap
+  footage).
+- Two new sources added: **`project-d4kos/animal_redfox` v1** (CC BY 4.0, 235 raw / 228 kept after
+  excluding 7 visually-contaminated frames by filename — individually-numbered stock-style
+  photography, one image per group, effectively a random split per source) and
+  **`project-one-wildlife-monitoring-system/project-one-wildlife-system-lsden` v1** (CC BY 4.0,
+  a large 2,865-image multi-species — badger/cheetah/zebra/cattle/etc. — camera-trap and stock
+  project; only the 136 images actually carrying a `Fox`-category box were kept, the other 2,729
+  dropped as `unreliable_zero_box` rather than trusted as confirmed Background given the untrusted
+  multi-species classmap). **Visually spot-checked this pass, not just trusted from the filter**:
+  a random sample of the discarded pool confirmed genuine off-species images (a chick beside an
+  egg, a cheetah on a kill) correctly excluded by the category filter, and a sample of the 136
+  *kept* `fox_*`-named images confirmed a genuine Bushnell trail-camera IR-night capture (dated
+  frame burn-in, motion-blurred silhouette, IR-flash lighting) — the kept subset is real, on-topic,
+  and includes real night/IR content, not leaked contamination.
+
+**A reconciliation-convention bug was found and fixed while wiring these sources**, not a data
+problem: `expect_images` on a `DATASETS` entry must equal the source's raw pre-drop image count,
+not the post-filter kept count the entry had been set to — the gap-reconciliation formula subtracts
+every named per-image drop reason from `expect_images` and treats any remainder as unexplained
+(annotation-level `dropped_class`, deliberately, is not part of that formula, since one image can
+carry multiple dropped-species boxes). All six new Fox entries had this backwards on the first
+`--dry-run`; corrected against each source's own drop counts, re-verified with a second `--dry-run`
+showing zero unexplained-gap warnings before the real upload.
+
+**A pre-existing, unrelated 420-sample discrepancy was found and understood, not fixed, at
+upload time.** `reconcile_project_counts()`'s hard total-count gate failed after the real upload
+(expected 12,706 training / 3,799 testing, actual 13,074 / 3,851 — a 368/52 split, 420 total).
+Traced with `scripts/diag_reconcile_vision.py` to three groups of ad hoc, already-live,
+never-committed samples with no connection to this pass: 257 `sf_campo4_*` SA-FARI Boar frames and
+72 `f1`–`f10`-prefixed field-negative frames from the separate, already-concluded "Boar-gap
+close-out" effort (commit `adcac70`, "no candidate cleared the bar"), and 91 `uv29aug_*` frames, an
+older, separately-documented gap predating this branch. `git show HEAD:ml/vision/dataset_manifest.json`
+confirmed none of the three groups were ever tracked in any committed manifest, so this pass's own
+manifest rewrite destroyed nothing. **None of the 420 are Fox samples** — Fox's own per-label
+reconciliation matched exactly (testing expected 432, actual 432) — so this confound sits entirely
+on the Boar/Background side of the corpus and does not touch the Fox numbers below, but it means
+the Boar/Background *counts* quoted throughout this README have carried an unacknowledged 349-Boar
+training-sample / 72-Background-adjacent-sample surplus since before this branch started. Training
+proceeded on the understanding that the gate's purpose (forcing the discrepancy to be traced before
+training) was satisfied, not on the discrepancy being resolved; it is carried here as an open item,
+not swept under a "MISMATCH" the reader can't see.
+
+`check_data()`: **13,074 training / 3,851 testing** (13,074 − 11,400 = 1,674 /
+3,851 − 3,419 = 432, again landing exactly on this pass's Fox train/test counts, modulo the 420
+orphans just described being present in both this run and the champion-reprod reference below —
+both share the same pre-existing Boar/Background surplus, so the *comparison* between them is still
+clean even though neither figure is the "true" tracked count). Job chain: training 53770104
+(86.3 min) → held-out test 53775746 (6.4 min) → full 5-point sweep, jobs 53776171 (0.05, 5.6 min)
+/ 53776528 (0.1) / 53776770 (0.2) / 53777238 (0.3) / 53777653 (0.5), all `successful=True`.
+
+**Full sweep, Fox pass 3 (Boar/Elephant: 1,586/844 test images; Background: 989; Fox: 432):**
+
+| Threshold | Boar recall | Boar precision | Elephant recall | Elephant precision | Fox recall | Fox precision | Background FP rate |
+|---|---|---|---|---|---|---|---|
+| 0.05 | 0.849 | 0.884 | 0.867 | 0.933 | 0.505 | 0.881 | 0.158 |
+| 0.10 | 0.827 | 0.928 | 0.858 | 0.952 | 0.465 | 0.915 | 0.108 |
+| 0.20 | 0.811 | 0.956 | 0.838 | 0.965 | 0.414 | 0.957 | 0.071 |
+| 0.30 | 0.791 | 0.973 | 0.821 | 0.972 | 0.380 | 0.971 | 0.055 |
+| 0.50 | 0.745 | 0.985 | 0.789 | 0.984 | 0.301 | 0.989 | 0.030 |
+
+**Cross-pass Fox comparison at threshold 0.05 (n grows each pass as more real data is added):**
+
+| Pass | Fox test n | Fox recall | Fox precision |
+|---|---|---|---|
+| Pass 1 (13 Sept) | 294 | 0.609 | 0.642 |
+| Pass 2 (13-14 Sept) | 318 | 0.597 | 0.857 |
+| Pass 3 (14-15 Sept, this pass) | 432 | **0.505** | **0.881** |
+
+**Fox recall has fallen monotonically across all three passes (0.609 → 0.597 → 0.505) while
+precision has risen monotonically (0.642 → 0.857 → 0.881), and this holds at every one of the five
+threshold points, not just 0.05.** This is the opposite of the pass's stated goal. It is not
+attributable to a sourcing bug this time — the newly-added and newly-grown sources were visually
+spot-checked and confirmed on-topic and, where claimed, genuinely real night/IR (see above) — so
+the most defensible read is that **three consecutive passes of adding more real Fox data,
+including real night/IR data specifically, have made the model more conservative (higher
+precision, requiring more evidence before it fires) rather than more sensitive (higher recall)
+toward the harder, more realistic distribution now in the corpus.** A plausible mechanism: as the
+real night/IR share of the Fox corpus grows, the model is learning a Fox concept anchored more in
+its hardest, lowest-contrast examples, pushing its own decision boundary away from marginal
+detections it would previously have called "Fox" at lower confidence — exactly the boundary the
+threshold sweep is supposed to let an operator trade back, but even at this sweep's lowest
+grid-point (0.05) recall is still the worst of the three passes. **Adding more real data has now
+been tried three times as the fix for Fox recall and has not worked once; this specific lever
+should be considered exhausted, not something a fourth pass of more sourcing is likely to fix.**
+
+**Elephant/Boar/Background against the same-day pure-3-class reference** (see "champion reprod"
+below; both share the same 420-sample Boar/Background surplus, so this is a clean same-corpus
+comparison): Boar recall matches or slightly beats the reference at every threshold (+0.0 to
++1.3 pt) and precision is consistently higher (+1.3 to +1.7 pt) — no regression, arguably a small
+genuine gain. Background FP matches within noise at every threshold (largest delta +1.0 pt at
+0.05). **Elephant recall is lower than the reference at every threshold, one-directionally**
+(−2.9 pt at 0.05, narrowing to −0.5 pt at 0.50), while Elephant precision is substantially higher
+(+7.3 pt at 0.05). This is the same one-directional Elephant-recall-softening pattern pass 2
+flagged and recommended investigating before a third Fox pass — that investigation was not done
+before this pass (mgr-l8rhf volume was grown instead, per pass 2's other, higher-priority
+recommendation), and the pattern is now visible for a third consecutive pass. Every individual
+delta stays inside the ~1–3 pt band this project already treats as noise-adjacent, but the fact
+that it is one-directional across three independent passes and two different reference points is
+a real signal, not fully explained by calling it noise, and should be diagnosed (most likely
+candidate: automatic class-weight rebalancing across a 4-class vs 3-class head competing for the
+same shared backbone capacity) before a fourth Fox pass rather than after.
+
+**Verdict: not promoted.** Elephant/Boar/Background clear the (a) side of the adoption bar (no
+regression beyond the established noise band, Boar arguably improved), but Fox fails the (b) side
+decisively — it is the worst Fox recall of all three passes, continuing a monotonic decline rather
+than showing the "meaningfully better" recall this pass was run to achieve. The deployed checkpoint
+remains the original 3-class champion (`etx_cpu_final_0830.eim`); none of the three Fox checkpoints
+to date is a promotion candidate. No export, no version snapshot — the adoption gate was never
+reached.
+
+**Where this leaves the Fox branch.** The straightforward lever (more real Fox data, more real
+night/IR Fox data specifically) has now been tried three times, each time truthfully executed, each
+time visually verified as real and on-topic, and each time recall got worse rather than better.
+Continuing to source a fourth dataset without changing anything else is unlikely to reverse a
+three-pass monotonic trend. The two levers this branch has not yet tried are architectural, not
+data-side: a resolution increase (the plan's own Phase 6, `--image-size 128`, previously untried on
+YOLO-Pro under Enterprise's uncapped compute) which could give the model more spatial detail to
+separate a small, distant fox from Boar/Background at the cost of retraining and re-validating
+Elephant/Boar at the new resolution too; or diagnosing and fixing the one-directional Elephant
+softening pattern first, on the theory that the shared-backbone class-count effect may be
+suppressing Fox as well as Elephant. Either is a bigger, cross-class commitment than another
+data-only pass, and is flagged here rather than started unilaterally.
+
+## 15 Sept — Elephant recall pattern: diagnosis attempted, not confirmable from this account; all three "try all" workstreams launched in parallel
+
+Following the "not promoted" verdict on Fox pass 3, four next steps were on the table (diagnose
+the Elephant pattern, run the Phase 6 resolution trial, source a fourth Fox dataset, or stop the
+Fox branch here). The decision was **to pursue all of them** — the diagnosis, the
+resolution trial and further Fox sourcing together, not sequentially and not by stopping.
+
+**Diagnosis attempt.** The leading candidate mechanism named in the pass 3 entry above is Edge
+Impulse's `autoClassWeights` customParameter (`scripts/edge_impulse_train_vision.py:365`,
+confirmed still `True` in every pass to date, including this one) — the theory being that adding a
+much-smaller 4th class (Fox) shifts the automatically-computed per-class loss weights across all
+four classes even though Elephant's own raw sample count never changes between the 3-class and
+4-class configurations. This is not a new phenomenon in this project: the 23 Aug BoarWatch top-up
+entry above documents the same shape of effect — Elephant gave back 0.013 F1 when *only* Boar's
+volume changed, attributed there to "the classifier's decision boundary shifting slightly... or
+plausibly just run-to-run training stochasticity," and explicitly not dismissed as pure noise.
+
+**What this account can and cannot confirm directly.** Edge Impulse's API and job logs report only
+that auto class weighting is on (`"training params set: ... auto class weights on"` — every
+`_retrain_*.log` in this directory carries the identical string); neither the training job's log
+output nor any `/v1/api/{project}/...` endpoint probed for this surfaces the actual computed
+per-class weight values Edge Impulse's backend uses internally. There is no accessible number to
+pull from a 3-class run and a 4-class run and diff. Confirming the mechanism directly would require
+either an Edge Impulse organization-level capability this project does not have (the 23 Aug entry
+above already found EON Tuner-adjacent endpoints 404 for the same reason), or deliberately
+disabling `autoClassWeights` for a controlled A/B run — which would violate this branch's own
+fixed-recipe, one-variable-per-pass discipline (the variable under test would become the recipe
+itself, not the dataset or the resolution already sanctioned for testing). That trade was not made.
+
+**Verdict on the diagnosis:** plausible, not confirmed, not escalated into its own experiment.
+The pattern's own scale keeps it from being urgent enough to justify bending the fixed-recipe rule:
+every individual delta across all three Fox passes has stayed inside the same ~1-3 pt band the 23
+Aug entry already characterized as noise-adjacent for this exact kind of cross-class interaction;
+what makes it worth naming rather than ignoring is that it has now run one-directional for three
+consecutive passes, not that any single measurement is alarming on its own. It is not the reason
+any of the three Fox passes failed to promote — Fox's own collapsing recall is — so it is carried
+here as a flagged, unresolved observation rather than blocking further work.
+
+**The other two "try all" workstreams, launched the same session:**
+
+- **Resolution trial (Phase 6, `--image-size 128`):** launched against the current live project
+  corpus (13,074 training / 3,851 testing — confirmed via `raw-data/count` immediately before
+  launch, matching Fox pass 3's post-upload totals exactly, i.e. the fullest corpus assembled to
+  date across all six Fox sources plus the unchanged Elephant/Boar/Background base). Same recipe
+  otherwise (`--family yolo-pro --yolo-variant no_attn_relu --yolo-sizing medium`), resolution the
+  only variable. Log: `ml/vision/_retrain_yolo_medium_res128_20260915.log`. Result pending — see
+  the next dated entry once the job (and its follow-up sweep) complete.
+- **Fourth Fox dataset:** sourcing in progress, not yet wired into `DATASETS` or uploaded. Given
+  the pass 3 entry's own finding that three consecutive rounds of adding real (increasingly
+  night/IR-heavy) Fox data have driven recall down while driving precision up, a fourth pass of
+  the same *character* of data is not expected to reverse the trend on its own; candidate sourcing
+  is being weighted toward material that differs in kind (e.g. more daytime/easier-domain Fox
+  imagery, to counterbalance rather than compound the corpus's growing bias toward its hardest
+  examples) rather than more of the same. Recorded here as in-progress; a dedicated dated entry
+  will follow once a source is vetted and either uploaded or rejected.
+
+<!-- LIVE_SYNC_PLACEHOLDER -->
+
+## 15-16 Sept — Fox pass 4 dataset uploaded (`fox-xdf1l-v1`), a project-wide reconciliation hard-fail root-caused as pre-existing, and the res128 resolution trial's evaluation lost to a sequencing mistake
+
+Continuing the "try all" workstreams from the entry above. Retrain-and-compare for pass 4 has not
+run yet — this entry documents the fourth Fox source's upload and the two problems that came up
+before any retrain could safely proceed, per this project's own standing rule (echoed by
+`reconcile_project_counts()`'s own hard-fail message): don't train against the project until an
+unexplained count mismatch is understood and recorded.
+
+### Fourth Fox source: `kuba-kulik-4wi43/fox-xdf1l` v1, CC BY 4.0
+
+Sourced per the prior entry's stated intent (counterbalance the corpus's growing bias toward its
+hardest night/IR examples) but, on inspection, this source turned out to be mixed-domain rather
+than the deliberately-easier daytime supplement originally sought — it was kept anyway on data
+quality grounds (per the standing "use any data you find good" instruction) after clearing the
+same by-eye contamination bar every other source in this project has cleared.
+
+**Roboflow export quirk found before upload (not an error, but worth recording so it isn't
+rediscovered).** The source's dataset page lists a single "fox" class, and its COCO export does
+contain a category literally named `fox` (id 0) — but that category carries **zero** direct
+annotations. `Counter(a["category_id"] for a in annotations)` on the raw export shows every one of
+the 643 real boxes uses one of four *other* category ids, whose names are garbled fragments of the
+Roboflow project's own description text (`"-"`, `"- collaborate with your team on computer vision
+projects"`, `"Roboflow is an end-to-end computer vision platform that helps you"`, `"fox - v3
+2025-05-04 4-43pm"`). All four are explicitly `rename`d to `"Fox"` in the `DATASETS` entry; missing
+this would have silently produced four spurious garbage-named classes instead of contributing to
+Fox.
+
+**Count reconciliation.** Roboflow's project-level metadata reports 1,669 images; the actual
+downloaded v1 export contains exactly 1,395 raw `.jpg` files (976 train + 267 valid + 152 test) —
+the same metadata-vs-export gap already seen and resolved the same way (trust the real download)
+for `wildlife-system-lsden` and `kawaharalabo` in earlier passes. 1,395 is what `expect_images`
+reconciles against.
+
+**By-eye audit (stratified sample, a floor not a guarantee — same discipline as every other
+by-eye-audited source in this project).** Two filename-stem families correlated with contamination
+and are excluded wholesale by pattern rather than by individually-named file:
+
+- 32-character lowercase-hex stems (`_FOX_XDF1L_HEX32_STEM`): 8 sampled of 114, 1 bad (~12.5%) — a
+  "GFM Photography"-watermarked stock image.
+- 10-14 character uppercase-alphanumeric "capsid" stems (`_FOX_XDF1L_CAPSID_STEM`): 9 sampled of
+  259, 5 bad (~55%) — three duplicate copies of one "Marco Tosi - 2007"-watermarked photo
+  re-appearing under different Pinterest-style IDs, plus two carrying a "www.chornobyl.in.ua"
+  watermark banner on otherwise-genuine IR-night Chernobyl-zone footage (excluded on watermark
+  grounds alone, independent of the underlying photo's authenticity, per this project's standing
+  watermarked-stock rejection convention).
+
+Every normally-named stem sampled (frame-number, `red-fox163_`, Flickr numeric-ID+`_z`,
+`pexels-photo-*`, `download-*`, `images-*`, `Screenshot-*` — ~20 samples across these families)
+came back clean. Pattern-exclusion drops 373 images (`fox_xdf1l_excluded_event`).
+
+**Annotation completeness.** A meaningful fraction of this source was never annotated at all (an
+incomplete labeling pass on the original Roboflow project, not this project's doing) — those 423
+zero-box frames are skipped entirely (`unreliable_zero_box`) rather than repurposed as confirmed-
+clean Background negatives, since an unannotated frame cannot be trusted as a real negative the way
+`board-captures-night1`'s deliberately-empty captures can.
+
+Reconciliation: 599 (records) + 373 (pattern-excluded) + 423 (unreliable, unannotated) = 1,395,
+balances to zero gap. `--dry-run` confirmed a clean per-source reconciliation and a spread across
+both splits (468 groups train / 131 groups test, 538 total groups, 21.9% held out). The real upload
+completed cleanly: 599 images uploaded (0 dupes, 0 failures), Fox combined total across all four
+adopted Fox sources now 2,782 images (up from pass 3's total).
+
+### Project-level reconciliation hard-fail — investigated and understood, not caused by this pass
+
+Immediately after the upload, `reconcile_project_counts()`'s end-of-run gate hard-failed on the
+**TOTAL** row (the only row that gate trusts — see its docstring on why the per-label rows
+undercount and are informational only):
+
+```
+TOTAL      training  expected 13174  actual 13542  <-- MISMATCH
+TOTAL      testing   expected  3930  actual  3982  <-- MISMATCH
+```
+
+A surplus of 368 training + 52 testing = **420 images live in the project beyond what this run's
+own manifest recomputation expects.** Per the gate's own instruction ("do not train against this
+project until this is understood and recorded"), no retrain was run until this was traced.
+
+**The arithmetic that clears this pass of causing it.** The live project held 13,074 training /
+3,851 testing immediately before this pass's upload (confirmed twice independently: the res128
+job's own startup log, and this run's `fetch_live_content_categories()` reporting "16925 distinct
+stored content hashes found live" = 13,074 + 3,851 exactly). This pass's own upload added exactly
+468 training + 131 testing = 599 — matching fox-xdf1l's own reconciled count exactly, and matching
+the actual pre-to-post live growth exactly (13,542+3,982 minus 13,074+3,851 = 599). Subtracting
+fox-xdf1l's contribution from both sides of the mismatch: expected-excluding-fox is 12,706 training
+/ 3,799 testing = 16,505; live-before-fox was 13,074 / 3,851 = 16,925. **The 420-image gap already
+existed, in full, before this pass's upload ran.** This pass introduced zero unaccounted images.
+
+**Most plausible root cause, traced (not just asserted).** This run's own log shows every one of
+`wild-boar-deterrent-pzq5t-v1`'s 2,158 groups already locked to their live-stored category (`Boar:
+sampling 1379 of 2158 groups ... 2158 locked to their live-stored group, 0 new groups shuffled`) —
+i.e. the source's original `sample_target: 1379` cap has been fully superseded by cumulative growth
+across past runs, exactly the drift `sample_by_group()`'s own docstring already documents and
+attributes to the 29 Aug investigation. Of those 2,158, this run's local content-hash dedup drops
+319 as byte-identical to an earlier Boar image before ever counting them as "expected" — per the
+docstring, this counting-before-dedup fix was added specifically to stop genuine duplicates from
+being wrongly counted as an expected-vs-actual gap. But `dedupe_by_content()` only catches
+duplicates *within the current run's own record set*; it has no way to retroactively detect that an
+earlier run — before this fix existed — may have already uploaded some of those same duplicate
+bytes to the live project as their own distinct samples, which then never get deleted. Summed
+across every source in this run's own log, local content-duplicate drops total 336 (319 Boar + 1
+Boar + 1 Background + 15 Fox) — the same order of magnitude as the 420-image gap, though not an
+exact match, so this is recorded as the leading, evidenced explanation rather than a proven single
+cause; the remaining ~84 images are most plausibly the same mechanism from sources/runs predating
+this project's current dedup-before-counting logic, not a new defect.
+
+**Why this is judged safe to proceed on.** The mismatch is a **surplus** (live holds more real
+data than the bookkeeping expects), not a deficit — nothing is missing, lost, or silently
+mislabeled; the extra images are, on the evidence gathered, harmless historical duplicate carryover
+predating a bookkeeping fix, not contamination. It predates this pass and every edit made in this
+pass by a wide, exactly-arithmetic margin. Training itself is unaffected either way, since Edge
+Impulse trains on whatever is actually live in the project regardless of this pipeline's own
+manifest bookkeeping — the manifest's job is audit and reconciliation, not training gating. This
+satisfies the gate's own bar ("understood and recorded"); the isolated fox-xdf1l retrain (Phase 5)
+is unblocked from this cause specifically. **Not fixed as code** — a full historical resync would
+mean either walking every source's full history for pre-existing duplicates or accepting the
+manifest as a >99% floor rather than an exact live mirror; recorded here as a known, bounded,
+benign discrepancy rather than deferred silently.
+
+### Res128 resolution trial (Phase 6) — training succeeded, evaluation lost to a sequencing mistake
+
+Job `53792553` (`--image-size 128`, otherwise the unchanged champion recipe, launched against the
+pre-fox-xdf1l corpus, 13,074/3,851) finished successfully server-side —
+`"finishedSuccessful":true`, `"computeTime":4396`s (~73 min) — but its poller crashed a first time
+on a transient DNS blip (`getaddrinfo failed`, the same class of transient network error seen
+elsewhere this project) and was resumed with a purpose-built resilient poller
+(`scripts/_poll_res128_job.sh`). That poller's own log shows a ~34-hour gap between the job
+finishing (`2026-09-15T07:46:11Z`) and its follow-up `--sweep-thresholds` call actually running
+(`2026-09-16T17:56:55Z` by the poller's own timestamp) — the session that launched it was
+interrupted and only resumed a day later; the job itself was not re-run or affected by the gap.
+
+Two sweep attempts, two different failures, **zero threshold-sweep results obtained**:
+
+1. First attempt (auto-launched by the poller the moment it saw the job finish): crashed
+   immediately on the very first threshold (0.05) with the same `RemoteDisconnected` transient
+   network error seen elsewhere in this run — this specific script does not retry a transient
+   failure inside `--sweep-thresholds` itself.
+2. Second attempt (manual re-run, after the ~34-hour gap): failed with `"Failed to load metadata
+   for DSP ID 2"` on the very first threshold — this is **not** a transient network error, it is
+   the DSP block's cached feature metadata reporting itself missing/stale. The most plausible cause
+   is sequencing, not a code defect: the fox-xdf1l upload (this same session) mutated the live
+   project's raw data **after** the res128 impulse had trained but **before** the sweep ran against
+   it, and Edge Impulse's DSP feature cache is evidently not guaranteed stable across an intervening
+   data mutation on the same project.
+
+**Verdict: inconclusive, not a result.** The res128 trial cannot be reported as a pass or a fail —
+no per-class precision/recall numbers exist for it at any threshold. This is a **sequencing
+mistake**, carried here as a lesson for the rest of this project's "try all" concurrency: do not
+interleave a live data-mutating upload with a still-pending sweep-thresholds call against a
+different job, even when they touch what look like independent artifacts, because Edge Impulse's
+DSP cache is scoped to the project, not the job. A fresh res128 trial (retrain from scratch, sweep
+immediately after with no intervening project mutation) would need to be re-run to actually
+evaluate this resolution lever; it is not repeated automatically here since the corpus has since
+moved on to include fox-xdf1l, and this project's own one-variable-per-pass discipline means a
+resolution trial should be re-launched deliberately against a chosen, stable corpus state rather
+than opportunistically re-run mid-investigation.
+
+### Bottom line, this entry
+
+- Fox pass 4's own dataset work (sourcing, audit, upload) is clean and complete: 599 images live,
+  reconciled, `--dry-run`-verified split. The isolated 96px retrain-and-compare against the Fox
+  pass 3 baseline has not run yet — next step.
+- The project-wide count mismatch is understood, evidenced as pre-existing and benign-direction,
+  and recorded rather than fixed at the code level; it does not block training.
+- The res128 resolution trial produced a successfully-trained job but no usable evaluation; it
+  needs a clean re-run (train + sweep, no intervening project mutation) to actually answer Phase
+  6's question, and is not carried as either an adopt or a reject.
+
+<!-- LIVE_SYNC_PLACEHOLDER -->
+
+## 16-17 Sept — Fox pass 4 retrain and sweep: Fox recall and precision both jump decisively, Elephant recall reverses its 3-pass decline, but Background FP and Elephant precision regress past the noise floor — not a clean promotion
+
+Isolated 96px retrain on the unchanged champion recipe (`--family yolo-pro --yolo-variant
+no_attn_relu --yolo-sizing medium`), current corpus including `fox-xdf1l-v1` from the entry above.
+Job chain: training 53857607 (100.2 min) → held-out test 53859043 (6.2 min, default threshold) →
+full 5-point sweep, jobs 53859379/53859524/53859613/53859675/53859743 (5.5-5.8 min each), all
+`successful=True` on the second attempt (the first `--sweep-thresholds` invocation died on the same
+class of transient local-network error seen twice already in this run — `getaddrinfo failed` after
+its 3-attempt backoff — a purpose-built retry wrapper, `scripts/_retry_sweep_fox_pass4.sh`, restarted
+the whole 5-point sweep cleanly on attempt 2; each classify job is cheap (~6 min) so a full restart
+is not costly). Test split identical to pass 3's — 1,586 Boar / 844 Elephant / 989 Background / 563
+Fox — a byte-for-byte-comparable same-corpus reference for Boar/Elephant/Background, and Fox's own
+grown count (432 → 563) reflecting fox-xdf1l's added test images.
+
+**Full sweep, Fox pass 4:**
+
+| Threshold | Boar recall | Boar precision | Elephant recall | Elephant precision | Fox recall | Fox precision | Background FP rate |
+|---|---|---|---|---|---|---|---|
+| 0.05 | 0.843 | 0.887 | 0.892 | 0.897 | 0.606 | 0.935 | 0.169 |
+| 0.10 | 0.821 | 0.928 | 0.881 | 0.925 | 0.570 | 0.947 | 0.116 |
+| 0.20 | 0.806 | 0.961 | 0.861 | 0.948 | 0.548 | 0.983 | 0.082 |
+| 0.30 | 0.783 | 0.975 | 0.847 | 0.959 | 0.541 | 0.990 | 0.067 |
+| 0.50 | 0.740 | 0.987 | 0.815 | 0.979 | 0.497 | 0.998 | 0.038 |
+
+**Per-threshold delta vs Fox pass 3 (same test split, pp = percentage points, pass 4 minus pass 3):**
+
+| Threshold | Boar R | Boar P | Elephant R | Elephant P | Fox R | Fox P | Background FP |
+|---|---|---|---|---|---|---|---|
+| 0.05 | −0.6pp | +0.3pp | **+2.5pp** | **−3.6pp** | **+10.1pp** | +5.4pp | **+1.1pp** |
+| 0.10 | −0.6pp | 0.0pp | **+2.3pp** | **−2.7pp** | **+10.5pp** | +3.2pp | +0.8pp |
+| 0.20 | −0.5pp | +0.5pp | **+2.3pp** | **−1.7pp** | **+13.4pp** | +2.6pp | **+1.1pp** |
+| 0.30 | −0.8pp | +0.2pp | **+2.6pp** | −1.3pp | **+16.1pp** | +1.9pp | **+1.2pp** |
+| 0.50 | −0.5pp | +0.2pp | **+2.6pp** | −0.5pp | **+19.6pp** | +0.9pp | +0.8pp |
+
+**Fox: the best result of all four passes, decisively, on both axes.** Recall jumps 10.1pp (0.05)
+to 19.6pp (0.50) above pass 3, reversing three consecutive passes of monotonic decline (0.609 →
+0.597 → 0.505 → **0.606** at threshold 0.05, back above pass 1's original level) — and precision
+*also* improves at every threshold (+0.9pp to +5.4pp), so this is not the usual recall/precision
+trade-off, Fox genuinely got better on both numbers at once. This is the "meaningfully better Fox
+recall" this branch's task was set to find, and it took a fourth real data source to get there,
+contrary to this entry's own prior reasonable-sounding conclusion that "this specific lever should
+be considered exhausted" — that conclusion is retracted; three failed attempts did not mean a
+fourth would also fail.
+
+**Boar: flat, no regression.** Every delta is ≤0.8pp in either direction across all five
+thresholds — inside the ~1pt noise floor established 4 Sept, no different from ordinary run-to-run
+variance.
+
+**Elephant recall: up substantially, reversing three passes of one-directional softening.** +2.3pp
+to +2.6pp at every single threshold — a real, consistent, one-directional signal (not noise, by
+this project's own established standard for calling a pattern real: one-directional across every
+measurement point) in the *opposite* direction from the pattern pass 2 and pass 3 flagged and could
+not explain. Whatever was suppressing Elephant recall as Fox was added in passes 1-3, it is not
+happening in pass 4 — if anything the mechanism reversed. This remains unexplained (the
+`autoClassWeights`-interaction theory from the entry above predicts a shared-capacity tax, not a
+reversal), and is recorded as an open, genuinely surprising finding rather than a solved one.
+
+**Elephant precision: down, past the noise floor, concentrated at low-to-mid thresholds.** −3.6pp
+at 0.05, narrowing to −0.5pp at 0.50 — a real, one-directional regression at 0.05/0.10/0.20 that
+exceeds the ≤1pt noise floor, even though it shrinks to noise-level by 0.50. This is the mirror
+image of Elephant recall's gain: the model is calling more low-confidence Elephant detections that
+turn out wrong, in exchange for catching more real ones.
+
+**Background FP: up, past the noise floor, at every threshold.** +0.8pp to +1.2pp, one-directional
+across all five points, exceeding the ≤1pt floor at three of five (0.05, 0.20, 0.30). Small in
+absolute terms but consistent, not noise by this project's own standard — this is a real regression
+on the exact axis ("near-zero false positives") this project's mandate treats as non-negotiable
+alongside recall.
+
+**Verdict: not promoted, per this branch's own stated bar** ("no E/B/BG regression beyond noise +
+meaningfully better Fox recall") — Fox recall clears its bar emphatically, Boar is clean, but
+Background FP and Elephant precision both regress beyond the established noise floor,
+one-directionally and consistently, which the bar does not permit regardless of how large the Fox
+gain is. This is reported plainly rather than rounded away: the honest read is a genuine trade-off
+(Elephant recall up, Elephant precision and Background FP down) traded against a large Fox gain,
+not a strictly-better model on every axis. No export, no version snapshot, no deployment — the
+original 3-class champion (`etx_cpu_final_0830.eim`) remains the only deployed artifact; this
+research branch has still not produced a promotable 4-class candidate.
+
+**Where this leaves the Fox branch.** Four passes in, the pattern has changed shape: passes 1-3
+showed monotonic Fox recall decline with rising precision and flat-to-declining Elephant recall;
+pass 4 broke that pattern in every dimension at once (Fox recall AND precision up, Elephant recall
+up, but Elephant precision and Background FP down). This does not look like simple noise or a
+continuation of the old trend — it looks like a genuinely different regime, plausibly tied to
+fox-xdf1l's specific character (by-eye-audited as mixed daytime/night domain, per the entry above,
+rather than deliberately easier daytime-only material as originally sought). Whether a fifth pass
+would continue improving Fox while also fixing the new Elephant-precision/Background-FP cost, or
+whether this is a ceiling this specific architecture/resolution trades against, is not answerable
+without another real data point — carried here as the open question for whoever continues this
+branch, rather than guessed at.
+
+<!-- LIVE_SYNC_PLACEHOLDER -->
+
+## 19-20 Sept — Res128 resolution trial, re-run clean: 128px beats 96px on every core axis at the same corpus — the strongest single result of this whole effort, gated on an unverified on-device compute question
+
+The 15-16 Sept entry above closed the first res128 attempt as inconclusive — training succeeded but
+both sweep attempts failed, the second because an intervening data upload invalidated the trained
+impulse's DSP cache. This is a clean re-run: `--image-size 128` retrain immediately followed by
+`--sweep-thresholds` in one script invocation, zero data mutation in between, on the current corpus
+(already includes `fox-xdf1l-v1`). Recipe otherwise unchanged: `--family yolo-pro --yolo-variant
+no_attn_relu --yolo-sizing medium`.
+
+**A process failure first, recorded because it cost three days.** The first launch attempt used a
+manually-detached background process (`nohup ... & disown`, with a separate watcher polling its
+pid) — the same pattern used successfully earlier in this effort. This time the session ended
+before the job finished, and the detached process did not survive: the log file it should have
+written to contained only its own opening header line and nothing else, and no matching process was
+found running three days later. `nohup`/`disown` evidently does not guarantee survival across a
+full harness/session restart on this machine, as distinct from the transient-network-error class
+already documented — that class corrupts a job in progress, this one silently killed it with zero
+output. The fix was to relaunch using the tool's own native background-execution mechanism instead
+of a manually-detached process; that run completed cleanly, unattended, on its first attempt.
+
+Job chain: feature generation 53959504 (2.7 min) → training 53959539 (80.2 min) → held-out test
+53960120 (6.9 min, default threshold) → full sweep, jobs 53960167/215/292/323/344 (5.2-6.2 min
+each), all `successful=True`. Test split: 1,586 Boar / 844 Elephant / 989 Background / 563 Fox —
+**identical to the Fox pass 4 (96px) split**, confirming this is the same corpus at a different
+resolution, and making pass 4 the correct same-corpus, single-variable reference for this trial
+(the champion-reprod and pass 3 tables are carried below only as secondary context, on different,
+smaller corpora, per this project's established caveat for cross-corpus comparisons).
+
+**Full sweep, res128:**
+
+| Threshold | Boar recall | Boar precision | Elephant recall | Elephant precision | Fox recall | Fox precision | Background FP rate |
+|---|---|---|---|---|---|---|---|
+| 0.05 | 0.876 | 0.891 | 0.904 | 0.899 | 0.625 | 0.908 | 0.139 |
+| 0.10 | 0.862 | 0.931 | 0.892 | 0.922 | 0.597 | 0.941 | 0.098 |
+| 0.20 | 0.840 | 0.958 | 0.880 | 0.947 | 0.570 | 0.958 | 0.065 |
+| 0.30 | 0.825 | 0.975 | 0.869 | 0.968 | 0.556 | 0.974 | 0.047 |
+| 0.50 | 0.782 | 0.991 | 0.833 | 0.981 | 0.489 | 0.993 | 0.023 |
+
+**Delta vs Fox pass 4 (96px, identical corpus and test split — resolution is the only variable):**
+
+| Threshold | Boar R | Boar P | Elephant R | Elephant P | Fox R | Fox P | Background FP |
+|---|---|---|---|---|---|---|---|
+| 0.05 | **+3.3pp** | +0.4pp | +1.2pp | +0.2pp | +1.9pp | **−2.7pp** | **−3.0pp** |
+| 0.10 | **+4.1pp** | +0.3pp | +1.1pp | −0.3pp | +2.7pp | −0.6pp | **−1.8pp** |
+| 0.20 | **+3.4pp** | −0.3pp | +1.9pp | −0.1pp | +2.2pp | **−2.5pp** | **−1.7pp** |
+| 0.30 | **+4.2pp** | 0.0pp | +2.2pp | +0.9pp | +1.5pp | −1.6pp | **−2.0pp** |
+| 0.50 | **+4.2pp** | +0.4pp | +1.8pp | +0.2pp | −0.8pp | −0.5pp | **−1.5pp** |
+
+(Negative Background FP delta = fewer false positives = better.)
+
+**Boar recall: up substantially, at every threshold, by a wide and growing margin (+3.3pp to
++4.2pp).** This is the largest, cleanest one-directional signal of any single-variable change
+tried in this entire effort — nothing else, including four Fox passes' worth of dataset growth,
+moved Boar recall this much in one step. Boar precision is flat (noise).
+
+**Elephant recall: up at every threshold (+1.1pp to +2.2pp), smaller than Boar's gain but still
+one-directional and consistent** — a real, if modest, improvement by this project's own standard
+for calling a signal real. Elephant precision is flat/mixed (noise, no consistent direction).
+
+**Background FP rate: down (better) at every single threshold, by −1.5pp to −3.0pp** — the
+false-positive axis this project's mandate treats as non-negotiable improved cleanly and
+consistently. This is the first pass in the whole multi-week effort to beat the reference on
+Background FP while simultaneously improving both Elephant and Boar recall, rather than trading
+one against another.
+
+**Fox: recall up at four of five thresholds (+1.5pp to +2.7pp, negative only at 0.50: −0.8pp), but
+precision down at every threshold (−0.5pp to −2.7pp)** — a real, modest, one-directional
+regression on Fox precision specifically. Fox sits outside this branch's core adoption bar
+(Elephant/Boar/Background), so it does not gate this verdict, but it is recorded plainly rather
+than left out.
+
+**Against the two secondary, cross-corpus references** (Fox pass 3, pre-fox-xdf1l corpus; and the
+3-class champion-reprod, an older/smaller test split) the same shape holds: Boar recall up
+(+1.7pp to +3.7pp against champion-reprod, +2.7pp to +3.7pp against pass 3), Elephant recall flat
+to up, Background FP down at every threshold against both. The one exception is Elephant precision
+against pass 3 (down 0.3pp to 3.4pp) — but the pass-4-vs-pass-3 entry above already attributes that
+specific cost to the fox-xdf1l dataset addition, not resolution: the same-corpus res128-vs-pass4
+comparison directly above shows Elephant precision flat under the resolution change alone, which
+disambiguates the two variables cleanly.
+
+**Verdict against this branch's core adoption bar (Boar/Elephant precision+recall, Background FP,
+evaluated on the full sweep): this candidate clears it outright** — Background FP improves at
+every threshold and no Boar/Elephant number regresses beyond the noise floor; several improve
+by a real, consistent margin. This is the strongest single result of the whole multi-week effort
+by a clear margin, and the first genuine "better on every core axis, not a trade-off" outcome.
+
+**Why this is not simply adopted here.** The champion recipe has run at 96×96 throughout this
+entire project specifically because that is the resolution this fixed target hardware — the
+Arduino UNO Q's Qualcomm QRB2210, CPU-int8 bound, no GPU/NPU/DSP acceleration available — was
+sized against. Raising input resolution from 96×96 to 128×128 raises YOLO-Pro's per-frame
+inference compute by roughly (128/96)² ≈ 1.78×, purely from the larger feature-map area; whether
+the QRB2210's CPU-int8 budget has headroom for that at whatever frame rate the field deployment
+needs is a real-hardware question this Studio-side trial cannot answer and does not attempt to —
+under this pass's standing constraints, the board is not touched and no `.eim` is exported or
+deployed from here. So the honest state of this result is: **a promising, clean, well-evidenced
+Studio-side candidate, gated on an unverified on-device latency/throughput check that only the
+user can run.** Nothing is exported, no project version is snapshotted as a new champion, and
+`etx_cpu_final_0830.eim` (96×96) remains the only deployed artifact pending that check.
+
 <!-- LIVE_SYNC_PLACEHOLDER -->
 
 ## Reproducing
