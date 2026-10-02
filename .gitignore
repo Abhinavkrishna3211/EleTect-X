@@ -71,6 +71,14 @@ device/mpu/bench/camera_check/fox_encounter_*/
 device/mpu/bench/camera_check/encounter_clips_*/
 device/mpu/bench/camera_check/*.lnk
 
+# Same rule for the 29 Sept real-clip model comparison: the extracted frames and
+# the saved detection crops are evidence pulled off the board, while clips.jsonl,
+# live.jsonl and the scripts that wrote them are the record and stay tracked. A
+# clone cannot regenerate the jsonl - the frames it scored are not here - which is
+# why the derived files are tracked and the inputs are not.
+device/mpu/bench/realclip_eval_20260929/frames/
+device/mpu/bench/realclip_eval_20260929/live_hits/
+
 # --- MPU runtime state (bandit experience DB + deterrent-event captures) ---
 device/mpu/data/
 
