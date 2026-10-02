@@ -14,10 +14,24 @@
 # Usage:
 #   BOARD_HOST=eletect-x.local APP_NAME=eletect-x scripts/sync-to-board.sh
 #
+# Pass --dry-run to see exactly what would be copied and deleted without
+# touching the board. Every rsync here runs with --delete, so the board's
+# copy is made to match the repo exactly; --dry-run is the cheap way to
+# confirm that is what you actually want before it happens.
+#
 # Defaults match the board name used during App Lab's First Setup wizard
 # (DEVICE_DEVELOPMENT_WORKFLOW.md 2) — override if this board was set up
 # under a different name.
 set -euo pipefail
+
+DRY_RUN=""
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN="--dry-run" ;;
+    *) echo "unknown argument: $arg (only --dry-run is accepted)" >&2; exit 2 ;;
+  esac
+done
+[ -n "$DRY_RUN" ] && echo "==> DRY RUN - nothing on the board will change"
 
 BOARD_USER="${BOARD_USER:-arduino}"
 BOARD_HOST="${BOARD_HOST:-eletect-x.local}"
@@ -54,14 +68,18 @@ if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "${BOARD_USER}@${BOARD_HOST}" true
 fi
 
 echo "==> 3. Ensure app skeleton exists on the board (${APP_ROOT})"
-ssh "${BOARD_USER}@${BOARD_HOST}" "mkdir -p '${APP_ROOT}/sketch' '${APP_ROOT}/python' '${APP_ROOT}/assets'"
+if [ -n "$DRY_RUN" ]; then
+  echo "   (dry run: would mkdir -p sketch/ python/ assets/ under ${APP_ROOT})"
+else
+  ssh "${BOARD_USER}@${BOARD_HOST}" "mkdir -p '${APP_ROOT}/sketch' '${APP_ROOT}/python' '${APP_ROOT}/assets'"
+fi
 
 echo "==> 4. rsync app-lab/${APP_NAME}/ -> app root (app.yaml + assets/, not sketch/python)"
 # App Lab needs app.yaml at the app root to recognize the folder as an app at
 # all (device/mpu/README.md's "App Lab / Bridge field notes" gap on this).
 # assets/ is currently empty (.gitkeep only) but always synced so a future
 # asset lands without a script change.
-rsync -avz --delete \
+rsync -avz --delete ${DRY_RUN} \
   --exclude='sketch/' \
   --exclude='python/' \
   --exclude='README.md' \
@@ -84,7 +102,7 @@ echo "==> 5. rsync src/ -> sketch/ (one-directional, deletes files removed local
 #
 # config_local.h is per-unit (see config.h) and lives only on the board, so it
 # is excluded both ways: never pushed, and never deleted by --delete.
-rsync -avz --delete \
+rsync -avz --delete ${DRY_RUN} \
   --exclude='config_local.h' \
   "${MCU_DIR}/src/" \
   "${BOARD_USER}@${BOARD_HOST}:${APP_ROOT}/sketch/"
@@ -102,13 +120,39 @@ echo "==> 7. rsync device/mpu/ -> python/ (one-directional, deletes files remove
 # (device/mpu/README.md), never this script, per the one-app-at-a-time
 # discipline DEVICE_DEVELOPMENT_WORKFLOW.md 3 already applies to Bridge
 # functions.
-rsync -avz --delete \
+#
+# data/ is the one that bites. Every other exclude above answers "what in
+# the repo should not go to the board"; data/ is the opposite question, and
+# the list had no entry for it. services/config.py resolves DATA_DIR and
+# CAPTURE_DIR relative to the module, so on the board they are
+# python/data/ and python/data/captures/ — the bandit's learned action
+# values and every deterrent-event frame burst. The directory is gitignored
+# (.gitignore 'device/mpu/data/') and so does not exist in the repo at all,
+# which with --delete means the source has nothing there and rsync removes
+# the destination copy. Running this script after an edit — which the header
+# tells you to do every time — therefore wiped the node's accumulated field
+# learning and its captured evidence, silently, as a side effect of pushing
+# a one-line change. Never sync this directory in either direction; pull it
+# off the board deliberately, with its own command, when you want it.
+#
+# models/vision/ keeps the deployed .eim but not the experiment archive:
+# candidates_*/ and champion_archive_*/ are several hundred MB of models
+# the board will never load, on a device whose root filesystem has a few
+# GB free.
+rsync -avz --delete ${DRY_RUN} \
   --exclude='tests/' \
   --exclude='bench/' \
   --exclude='pyproject.toml' \
   --exclude='__pycache__/' \
   --exclude='*.pyc' \
+  --exclude='data/' \
+  --exclude='models/vision/candidates_*/' \
+  --exclude='models/vision/champion_archive_*/' \
   "${MPU_DIR}/" \
   "${BOARD_USER}@${BOARD_HOST}:${APP_ROOT}/python/"
 
-echo "==> 8. DONE. Build/flash from App Lab, or over SSH with the Arduino App CLI."
+if [ -n "$DRY_RUN" ]; then
+  echo "==> 8. DRY RUN complete - nothing changed. Re-run without --dry-run to sync."
+else
+  echo "==> 8. DONE. Build/flash from App Lab, or over SSH with the Arduino App CLI."
+fi
