@@ -1,6 +1,6 @@
 # Arduino UNO Q — pinout and hardware reference
 
-Source of truth for every pin assignment in `device/mcu/include/config.h`. Extracted directly from
+Source of truth for every pin assignment in `device/mcu/src/config.h`. Extracted directly from
 Arduino's own official pinout PDF and hardware page — not a third-party summary, not inferred.
 
 **Primary sources (fetch these directly if anything below is ambiguous — the PDF is a visual diagram,

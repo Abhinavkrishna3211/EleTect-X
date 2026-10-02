@@ -189,7 +189,7 @@ def report_system_status(
     """Handle one periodic heartbeat from the MCU.
 
     Bridge target: `notify`. Fires on a slow periodic timer (proposed:
-    every 10 minutes, SYSTEM_STATUS_PERIOD_MS in device/mcu/include/
+    every 10 minutes, SYSTEM_STATUS_PERIOD_MS in device/mcu/src/
     config.h), independent of any trigger, so the dashboard has a liveness
     signal through quiet periods. A missed status for >2x the period is the
     stale-node signal - that logic lives in web/backend, not here
@@ -301,7 +301,7 @@ def pulse_ir(schema_version: int, duration_ms: int) -> bool:
     """Request an IR illuminator pulse for night capture.
 
     Bridge target: `call`. Gated by the IR MOSFET's own thermal/duty
-    limits (device/mcu/include/config.h); an over-duration request clamps,
+    limits (device/mcu/src/config.h); an over-duration request clamps,
     and the clamp is reported in the ack, never silently dropped
     (schema.md). Not idempotent - never retried on timeout.
 

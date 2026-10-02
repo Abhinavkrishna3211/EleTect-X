@@ -6,7 +6,7 @@ camera_check/capture_check.py's pattern: run standalone, save output to
 disk, no live-display assumption.
 
 Reads a text console log saved from a bench session run with
-SEISMIC_DEBUG_VERBOSE=1 (device/mcu/include/config.h), where
+SEISMIC_DEBUG_VERBOSE=1 (device/mcu/src/config.h), where
 state_machine.cpp prints one [window] header line followed immediately by
 one CSV line of raw volts on every existing [trigger] event, and renders
 one PNG per dump - this is the Part C2 sensitivity/waveform-
