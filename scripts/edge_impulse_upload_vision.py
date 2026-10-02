@@ -1964,6 +1964,14 @@ def main():
         if content_dupes:
             boxes = sum(len(r["boxes"]) for r in records)
             background = sum(1 for r in records if not r["boxes"])
+            # labelled has to be recomputed here as well, not just boxes and
+            # background. It is what the manifest publishes as
+            # images_with_boxes, and leaving it at its pre-dedupe value is why
+            # three manifest entries do not add up: wild-boar-deterrent-pzq5t
+            # reports 2158 boxed images against 1839 total, wcs-sus-scrofa is
+            # over by 1 and mgr-l8rhf/fox-sldyl by 15. The group_caps and
+            # sample_target stages above both already recompute it.
+            labelled = len(records) - background
             print(
                 f"    dropped {len(content_dupes)} (content_duplicate: byte-identical to an "
                 f"earlier {ds['label']} image, possibly from a different source)"
