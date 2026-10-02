@@ -171,3 +171,42 @@ def test_stub_return_annotation_matches_schema(name):
         f"`{name}` return type mismatch: bridge/rpc.py annotates "
         f"{actual_return}, schema.md implies {expected_return}."
     )
+
+
+# ---------------------------------------------------------------------------
+# class_label enum parity
+# ---------------------------------------------------------------------------
+#
+# The scheme exists in three places at once: schema.md's `class_label` cell,
+# bridge/rpc.py's AcousticClass, and whatever the acoustic model was actually
+# trained to emit. They silently disagreed for two weeks (docs/KNOWN_GAPS.md,
+# 23 Sept): the enum still carried the original five-class scheme while the
+# trained model was four-class, so `elephant_call` - the one class that should
+# drive deterrence - had no member and could not cross the wire at all, while
+# `vehicle` and `animal_call` were routed as elephant evidence by
+# reflex_loop.py and could never be sent. Nothing failed; the branches just
+# sat there looking like working detection.
+#
+# The first two copies are checkable here and now are. The third is not
+# reachable from a host test - no model file is in the repo - so ADR 0027
+# names ml/acoustic/harness/*_meta.json as its record and the on-target
+# benchmark as the check.
+
+CLASS_LABEL_RE = re.compile(r"class_label:\s*enum\{([^}]*)\}")
+
+
+def test_acoustic_class_enum_matches_schema_md():
+    """AcousticClass's values are exactly schema.md's `class_label` literals, in order."""
+    text = SCHEMA_PATH.read_text(encoding="utf-8")
+    match = CLASS_LABEL_RE.search(text)
+    assert match, "schema.md no longer declares a `class_label: enum{...}` cell."
+
+    from_schema = [v.strip() for v in match.group(1).split(",") if v.strip()]
+    from_enum = [member.value for member in rpc.AcousticClass]
+
+    assert from_enum == from_schema, (
+        f"bridge/rpc.py's AcousticClass is {from_enum} but schema.md's "
+        f"class_label enum is {from_schema}. Both sides are hand-written "
+        "against the table (ENGINEERING_CONVENTIONS.md 6) - update whichever "
+        "one is wrong, and check the trained model still emits the same set."
+    )
