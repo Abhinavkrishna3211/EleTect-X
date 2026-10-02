@@ -62,10 +62,42 @@ def test_dismissed_trigger_is_not_sent():
     assert event_from_footfall(_outcome(alert=False), safe_mode=False) is None
 
 
-def test_vision_overruled_alert_is_not_sent():
-    """An alert the camera overruled must not reach anyone's phone."""
-    out = _outcome(alert=True, suppressed_by_vision=True)
-    assert event_from_footfall(out, safe_mode=False) is None
+def test_vision_overruled_alert_still_reaches_the_dashboard():
+    """ADR 0022 Decision B gates the horn, not the warning.
+
+    The inverse of this test used to assert `is None`, which is what the
+    code did and not what either of its two governing comments said: the
+    gate in services/reflex_loop.py and the constant in services/config.py
+    both state that a suppressed event is still recorded, settled and
+    uplinked on the seismic decision. A daylight herd behind scrub - the
+    geophone over threshold, the camera working and finding nothing - got
+    no horn, correctly, and then no frame either, which left the forest
+    department with no record that anything happened at all.
+
+    What goes out is deliberately the weakest thing the wire can say.
+    No species, because the camera named none; no FLAG_VISION_CONFIRMED
+    and no FLAG_DETERRENT_FIRED, because neither happened. web/ingest
+    scores an UNCONFIRMED class 'normal' and send-alert pages nobody for
+    it, so this costs one dashboard row and wakes no phone.
+    """
+    out = _outcome(alert=True, suppressed_by_vision=True, probability=0.71)
+    ev = event_from_footfall(out, safe_mode=False)
+    assert ev is not None
+    assert ev.event_class == EventClass.UNCONFIRMED
+    assert ev.flags == 0
+    assert ev.tier == 0
+
+
+def test_a_trigger_fusion_dismissed_is_still_not_sent():
+    """The gate that remains: no alert and no sighting means no airtime.
+
+    This is the one that protects the IN865 duty cycle, and it is a
+    different question from the vision gate above. Fusion deciding there
+    is nothing there means there is nothing to tell anyone; vision
+    declining to confirm means the two sensors disagree, which is a thing
+    worth telling someone.
+    """
+    assert event_from_footfall(_outcome(alert=False), safe_mode=False) is None
 
 
 def test_confirmed_elephant_that_was_deterred():

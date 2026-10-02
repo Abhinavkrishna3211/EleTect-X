@@ -156,9 +156,30 @@ def event_from_footfall(
     """Map a finished footfall event to an uplink, or None if it is not one.
 
     An event is worth airtime when the camera confirmed a target, or when
-    fusion alerted and vision did not overrule it. A trigger that fusion
-    dismissed stays local - IN865 duty cycle is too scarce to spend on
-    every footstep the geophone hears.
+    fusion alerted - whether or not ADR 0022 Decision B then held the
+    deterrent. A trigger that fusion dismissed stays local: IN865 duty
+    cycle is too scarce to spend on every footstep the geophone hears.
+
+    The vision gate deliberately does not reach this decision. Both the
+    gate itself (services/reflex_loop.py, above `suppressed_by_vision`)
+    and the constant that switches it on (services/config.py,
+    DETERRENT_REQUIRES_VISION_CONFIRMATION) say the same thing in words:
+    it gates the fire, not the warning. Both then note there is no
+    footfall uplink to hold or release - which stopped being true when
+    main.py grew one, and this function was the place the gate leaked
+    into. `alerted and not suppressed` meant a daylight herd behind scrub
+    - geophone over threshold, camera working and finding nothing -
+    produced no horn (intended) and no frame at all (not), so the forest
+    department was never told. 'Seismic warns, vision fires' degrades to
+    'vision decides everything', which is the single point of failure the
+    gate's own safety argument says it is not.
+
+    A released suppressed event cannot be misread as a sighting. It
+    carries EventClass.UNCONFIRMED (species is None - the camera named
+    nothing), no FLAG_VISION_CONFIRMED and no FLAG_DETERRENT_FIRED, so
+    web/ingest scores it 'normal' and send-alert pages nobody. It reaches
+    the dashboard, where a person can weigh a geophone trigger the camera
+    disagreed with - which is precisely the call that wants a human.
 
     Args:
         outcome: handle_footfall_event's return value.
@@ -169,8 +190,7 @@ def event_from_footfall(
     Returns:
         The event to send, or None.
     """
-    alerted = outcome.decision.alert and not outcome.suppressed_by_vision
-    if not (alerted or outcome.vision_confirmed):
+    if not (outcome.decision.alert or outcome.vision_confirmed):
         return None
 
     flags = 0
