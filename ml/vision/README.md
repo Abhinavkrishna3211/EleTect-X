@@ -3768,8 +3768,8 @@ Job `53792553` (`--image-size 128`, otherwise the unchanged champion recipe, lau
 pre-fox-xdf1l corpus, 13,074/3,851) finished successfully server-side —
 `"finishedSuccessful":true`, `"computeTime":4396`s (~73 min) — but its poller crashed a first time
 on a transient DNS blip (`getaddrinfo failed`, the same class of transient network error seen
-elsewhere this project) and was resumed with a purpose-built resilient poller
-(`scripts/_poll_res128_job.sh`). That poller's own log shows a ~34-hour gap between the job
+elsewhere this project) and was resumed with a throwaway resilient poller
+written for that one job id and not kept. Its log shows a ~34-hour gap between the job
 finishing (`2026-09-15T07:46:11Z`) and its follow-up `--sweep-thresholds` call actually running
 (`2026-09-16T17:56:55Z` by the poller's own timestamp) — the session that launched it was
 interrupted and only resumed a day later; the job itself was not re-run or affected by the gap.
@@ -3821,7 +3821,7 @@ Job chain: training 53857607 (100.2 min) → held-out test 53859043 (6.2 min, de
 full 5-point sweep, jobs 53859379/53859524/53859613/53859675/53859743 (5.5-5.8 min each), all
 `successful=True` on the second attempt (the first `--sweep-thresholds` invocation died on the same
 class of transient local-network error seen twice already in this run — `getaddrinfo failed` after
-its 3-attempt backoff — a purpose-built retry wrapper, `scripts/_retry_sweep_fox_pass4.sh`, restarted
+its 3-attempt backoff — a throwaway retry wrapper, not kept, restarted
 the whole 5-point sweep cleanly on attempt 2; each classify job is cheap (~6 min) so a full restart
 is not costly). Test split identical to pass 3's — 1,586 Boar / 844 Elephant / 989 Background / 563
 Fox — a byte-for-byte-comparable same-corpus reference for Boar/Elephant/Background, and Fox's own
