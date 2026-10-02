@@ -74,11 +74,19 @@ def main():
     if not api_key:
         print("EI_API_KEY not set - source secrets/vision_pipeline.env first", file=sys.stderr)
         sys.exit(1)
-    dry_run = "--dry-run" in sys.argv
+    # Opt in to the destructive path, do not opt out of it. This deletes live
+    # samples from a shared Edge Impulse project; there is no undo and no
+    # confirmation prompt, and this script's own docstring says it is meant to
+    # be run once, by hand. Defaulting to delete meant the bare command - the
+    # one you type when you are reading the file to find out what it does - was
+    # the irreversible one. --dry-run is still accepted and still means a dry
+    # run, so nothing anyone already had in their shell history changed meaning.
+    dry_run = "--apply" not in sys.argv
 
-    manifest = json.load(open(r"D:\projects\EleTect-X\ml\vision\dataset_manifest.json"))["classes"]
+    with open(r"D:\projects\EleTect-X\ml\vision\dataset_manifest.json") as mf:
+        manifest = json.load(mf)["classes"]
     expected_any = {}
-    for label, entry in manifest.items():
+    for entry in manifest.values():
         for category in ("training", "testing"):
             for name in entry[category]:
                 norm = _EXT_SUFFIX.sub("", name)
@@ -110,7 +118,7 @@ def main():
             print(f"    [{s['_category']}] id={s['id']} label={s.get('label')!r} filename={s['filename']!r}")
 
     if dry_run:
-        print("\n--dry-run: not deleting or moving anything")
+        print("\nNothing deleted or moved. Re-run with --apply to apply for real.")
         return
 
     print(f"\nDeleting {len(to_delete)} stale samples...")

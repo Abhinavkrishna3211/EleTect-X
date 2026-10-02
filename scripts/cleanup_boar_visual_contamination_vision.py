@@ -33,7 +33,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from edge_impulse_upload_vision import (  # noqa: E402
+from edge_impulse_upload_vision import (
     BOAR_VISUALLY_CONTAMINATED_FILENAMES,
     _original_filename,
 )
@@ -89,7 +89,14 @@ def main():
         print("EI_API_KEY not set - source secrets/vision_pipeline.env first", file=sys.stderr)
         sys.exit(1)
 
-    dry_run = "--dry-run" in sys.argv
+    # Opt in to the destructive path, do not opt out of it. This deletes live
+    # samples from a shared Edge Impulse project; there is no undo and no
+    # confirmation prompt, and this script's own docstring says it is meant to
+    # be run once, by hand. Defaulting to delete meant the bare command - the
+    # one you type when you are reading the file to find out what it does - was
+    # the irreversible one. --dry-run is still accepted and still means a dry
+    # run, so nothing anyone already had in their shell history changed meaning.
+    dry_run = "--apply" not in sys.argv
 
     print(f"Listing all raw-data samples in project {project_id}...")
     remote = remote_samples(project_id, api_key)
@@ -109,7 +116,7 @@ def main():
         return
 
     if dry_run:
-        print("--dry-run: not deleting anything")
+        print("Nothing deleted. Re-run with --apply to delete for real.")
         return
 
     deleted = 0

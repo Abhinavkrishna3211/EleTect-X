@@ -1,47 +1,43 @@
-"""One-shot cleanup: remove the "Image<N>_"/"images<N>_" generic-uploader-named
-contamination confirmed in the 28 Aug data-quality re-verification pass (third
-pass) from Edge Impulse project 1097972, including any pseudo-IR synthetic
-frames derived from those same source images.
+"""One-shot cleanup: remove every live Fox-labeled sample from Edge Impulse
+project 1097972 so the live impulse can be retrained on the exact champion
+recipe (Boar/Elephant/Background only) and Studio's live Testing tab shows
+real champion-equivalent numbers again.
 
-Why this is a separate pass from a plain re-upload: elephant-detection-cxnt1-v2
-was uploaded to this project before scripts/edge_impulse_upload_vision.py
-carried the exclude_generic_named_scrape filter (see
-_is_generic_named_scrape's docstring there, and ml/vision/README.md's "28 Aug -
-data-quality re-verification, third pass" entry, for how the 164-filename
-population was found and visually audited - 16/16 sampled were not real
-Asian-elephant field photography). Filtering it out of the local manifest does
-not remove what is already sitting live in the project - confirmed empirically
-via ml/datasets/vision/raw/uploaded-1097972-elephant-detection-cxnt1-v2.json,
-which records all 164 as already uploaded.
+Why this exists rather than a plain re-upload skip: scripts/edge_impulse_upload_vision.py
+is append-only - dropping the four Fox DATASETS entries stops them being re-sent, but
+the 1,379 samples already sitting live stay live, and reconcile_project_counts() would
+then hard-fail because the project holds more than the fresh manifest expects. Same
+situation, and same fix, as cleanup_pzq5t_boar_removal_vision.py and
+cleanup_thai_elephant_vision.py - except Fox removal is a whole-class drop, not a
+single-source drop, so this deletes by label rather than by a frozen source's filename
+set.
 
-Matches by filename, reusing the exact same predicate the upload script's own
-parse_coco() filter uses, imported directly, so a sample is deleted here if
-and only if the same file would be silently dropped on the next real upload -
-no separate matching logic to drift out of sync. Follows the same structure
-and live raw-data list/delete protocol as
-cleanup_broadcast_contamination_vision.py (28 Aug, second pass) - see that
-script for the raw-data pagination and filename-normalization notes, not
-repeated here.
+Why Fox is being dropped from the live project (not from the codebase's research
+record): see ml/vision/README.md's 14 Sept entry. Short version - the user asked
+Edge Impulse Studio's live project to reflect the actual champion (Boar/Elephant/
+Background, deployed as etx_cpu_final_0830.eim), and build_impulse() in
+edge_impulse_train_vision.py deletes and rebuilds the impulse on every run, so as
+long as Fox samples were live any retrain would still produce a 3-class model. The
+Fox work itself is not abandoned - it stayed a research branch (real recall gains on
+the motivating encounter, but no clean win across every metric this project tracks)
+and its source imagery is not lost: deepnetworkdevelopment-fox-detection-7iqxq-v2,
+mgr-l8rhf-fox-sldyl-v1 and kawaharalabo-far-infrared-rays-animals-v5 remain pullable
+from Roboflow at their recorded versions, and board-captures-fox-encounter1 remains
+on disk under ml/datasets/vision/raw/.
 
-Deliberately NOT run automatically by the upload script - this touches live
-project data and is meant to be run once, by hand.
+Deletes every raw-data sample (both training and testing categories) whose label's
+first comma-joined token is "Fox" - matches the same parsing convention already used
+in score_held_out() and fox_source_breakdown.py for this project's comma-joined
+per-box label field.
 """
 import json
 import os
-import re
 import sys
 import time
 import urllib.error
 import urllib.request
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from edge_impulse_upload_vision import (
-    _is_generic_named_scrape,
-    _original_filename,
-)
-
 STUDIO = "https://studio.edgeimpulse.com/v1/api"
-_EXT_SUFFIX = re.compile(r"\.(jpg|jpeg|png|bmp|webp)$", re.IGNORECASE)
 
 
 def _request(url, api_key, method="GET"):
@@ -51,7 +47,6 @@ def _request(url, api_key, method="GET"):
 
 
 def remote_samples(project_id, api_key):
-    """Every raw-data sample in the project, both categories, paginated."""
     samples = []
     for category in ("training", "testing"):
         offset = 0
@@ -71,13 +66,6 @@ def remote_samples(project_id, api_key):
                 break
             offset += limit
     return samples
-
-
-def is_contaminated(remote_filename):
-    source = _EXT_SUFFIX.sub("", _original_filename(remote_filename))
-    if _is_generic_named_scrape(source):
-        return "generic_named_scrape"
-    return None
 
 
 def main():
@@ -101,29 +89,26 @@ def main():
     print(f"  {len(remote)} remote samples")
 
     to_delete = []
-    reasons = {}
     for s in remote:
-        reason = is_contaminated(s["filename"])
-        if reason:
+        raw_label = (s.get("label") or "-").strip()
+        if raw_label.split(",")[0].strip() == "Fox":
             to_delete.append(s)
-            reasons[reason] = reasons.get(reason, 0) + 1
-
-    print(f"Matched {len(to_delete)} remote samples as contaminated:")
-    for reason, n in sorted(reasons.items()):
-        print(f"  {reason}: {n}")
 
     by_cat = {}
     for s in to_delete:
         by_cat[s["_category"]] = by_cat.get(s["_category"], 0) + 1
+    print(f"Matched {len(to_delete)} live Fox samples:")
     for cat, n in sorted(by_cat.items()):
         print(f"  in {cat}: {n}")
 
     if not to_delete:
-        print("Nothing to delete - either already cleaned up or no matches found.")
+        print("Nothing to delete.")
         return
 
     if dry_run:
         print("Nothing deleted. Re-run with --apply to delete for real.")
+        for s in to_delete[:15]:
+            print(f"  [{s['_category']}] id={s['id']} label={s.get('label')!r} filename={s['filename']!r}")
         return
 
     deleted = 0
