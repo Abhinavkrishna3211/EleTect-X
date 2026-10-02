@@ -66,7 +66,7 @@ def contact_sheet(records, out_path, cols=5, cell=260):
     draw = ImageDraw.Draw(sheet)
     try:
         font = ImageFont.truetype("arial.ttf", 12)
-    except Exception:
+    except Exception:  # noqa: BLE001 - any font-load failure falls back the same way
         font = ImageFont.load_default()
     for i, rec in enumerate(records):
         im = Image.open(rec["path"]).convert("RGB")

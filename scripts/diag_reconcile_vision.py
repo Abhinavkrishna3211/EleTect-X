@@ -15,7 +15,6 @@ very different (and much less alarming) finding than genuinely absent content.
 import json
 import os
 import re
-import sys
 import urllib.request
 
 STUDIO = "https://studio.edgeimpulse.com/v1/api"
@@ -51,7 +50,8 @@ def remote_samples(project_id, api_key):
 def main():
     api_key = os.environ["EI_API_KEY"]
     project_id = os.environ.get("EI_PROJECT_ID", "1097972")
-    manifest = json.load(open(r"D:\projects\EleTect-X\ml\vision\dataset_manifest.json"))["classes"]
+    with open(r"D:\projects\EleTect-X\ml\vision\dataset_manifest.json") as mf:
+        manifest = json.load(mf)["classes"]
 
     expected = {"training": {}, "testing": {}}
     expected_any = {}
@@ -78,7 +78,6 @@ def main():
             orphans.append(s)
     print(f"\n{len(orphans)} live samples not in any expected training/testing filename set")
 
-    same_cat_wrong = 0
     cross_cat = 0
     truly_gone = 0
     cross_examples = []

@@ -35,7 +35,6 @@ def run(host: str, duration_s: float, out_path: str) -> None:
     try:
         with open(out_path, "w") as f:
             while time.time() < deadline:
-                remaining = deadline - time.time()
                 # readline() blocks; if the stream goes idle near the deadline
                 # this can overrun slightly, which is fine for a bench capture.
                 line = proc.stdout.readline()

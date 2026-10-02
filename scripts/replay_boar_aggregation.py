@@ -113,7 +113,7 @@ class ChunkFrames:
 def parse_log(path: str) -> list[ChunkFrames]:
     chunks: list[ChunkFrames] = []
     current: ChunkFrames | None = None
-    with open(path, "r", errors="replace") as f:
+    with open(path, errors="replace") as f:
         for line in f:
             m = CHUNK_START_RE.match(line)
             if m:
@@ -242,7 +242,7 @@ def summarize(chunks: list[ChunkFrames]) -> None:
         )
 
     print()
-    print("=== Overall (all 13 chunks, %d frames) ===" % len(all_boar))
+    print(f"=== Overall (all 13 chunks, {len(all_boar)} frames) ===")
 
     base_admitted, base_n = sum(all_boar), len(all_boar)
     print(f"A. Frame baseline (any Boar box):            "

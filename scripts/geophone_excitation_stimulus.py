@@ -24,7 +24,6 @@ Usage:
 import argparse
 import datetime
 import json
-import sys
 import time
 
 import numpy as np
@@ -116,7 +115,7 @@ def play_blocking(samples: np.ndarray) -> None:
 
 
 def beep_fallback(freq_hz: float, dur_ms: int) -> None:
-    winsound.Beep(max(37, min(int(round(freq_hz)), 32767)), dur_ms)
+    winsound.Beep(max(37, min(round(freq_hz), 32767)), dur_ms)
 
 
 def run(out_path: str) -> None:
@@ -128,8 +127,12 @@ def run(out_path: str) -> None:
             "freq_hz": freq_hz,
             "start_ts": start_ts,
             "end_ts": end_ts,
-            "start_iso": datetime.datetime.fromtimestamp(start_ts).isoformat(),
-            "end_iso": datetime.datetime.fromtimestamp(end_ts).isoformat(),
+            "start_iso": datetime.datetime.fromtimestamp(
+                start_ts, datetime.UTC
+            ).astimezone().isoformat(),
+            "end_iso": datetime.datetime.fromtimestamp(
+                end_ts, datetime.UTC
+            ).astimezone().isoformat(),
             "note": note,
         })
         print(f"[{label}] {end_ts - start_ts:5.2f}s  "
@@ -215,8 +218,7 @@ def run(out_path: str) -> None:
         log_event(f"quiet_gap_after_extra_{freq:g}hz", None, t0, t1)
 
     with open(out_path, "w") as f:
-        for ev in events:
-            f.write(json.dumps(ev) + "\n")
+        f.writelines(json.dumps(ev) + "\n" for ev in events)
     print(f"=== done. {len(events)} events logged to {out_path} ===")
 
 

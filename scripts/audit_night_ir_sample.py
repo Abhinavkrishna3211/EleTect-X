@@ -47,10 +47,10 @@ def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     pools = {}
 
-    for i, (label, dir_path) in enumerate(FLAT_SOURCES.items()):
+    for label, dir_path in FLAT_SOURCES.items():
         pools[label] = flat_records(dir_path)
 
-    for i, (label, dir_path) in enumerate(COCO_SOURCES.items()):
+    for label, dir_path in COCO_SOURCES.items():
         pools[label] = parse(dir_path)
 
     manifest = {}
