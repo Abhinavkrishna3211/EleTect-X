@@ -99,3 +99,80 @@ Deno.test("fanOut: notified only counts sends that actually succeeded", async ()
   assertEquals(calls, 2);
   assertEquals(result.notified, 1);
 });
+
+
+// ---------------------------------------------------------------------------
+// Deactivated admins. Same defect and same fix as send-alert's fanOut: the
+// recipient query selects on role, which admin_set_deactivated() does not
+// touch, so without the skip a revoked admin keeps receiving every officer
+// applicant's name, department, official email and phone. Asserted on the
+// addresses fetch was actually called with, which is the thing that leaked.
+// ---------------------------------------------------------------------------
+
+function makeBanStub(bans: Record<string, string | null>) {
+  const client = {
+    auth: {
+      admin: {
+        getUserById(id: string) {
+          return Promise.resolve({
+            data: { user: { id, email: `${id}@example.test`, banned_until: bans[id] ?? null } },
+            error: null,
+          });
+        },
+      },
+    },
+  };
+  return { client };
+}
+
+// Collect every address sendEmail actually tried, with no network.
+function runFanOut(client: unknown, admins: { id: string }[]) {
+  const sentTo: string[] = [];
+  return withStubbedFetch(
+    (_input, init) => {
+      sentTo.push(JSON.parse(String(init?.body ?? "{}")).to);
+      return Promise.resolve(new Response(null, { status: 200 }));
+    },
+    () =>
+      fanOut(
+        client as unknown as Parameters<typeof fanOut>[0],
+        admins,
+        { subject: "s", body: "b" },
+      ),
+  ).then((result) => ({ result, sentTo }));
+}
+
+Deno.test("fanOut: a deactivated admin is skipped, an active one still receives", async () => {
+  const active = "11111111-0000-0000-0000-0000000000a1";
+  const banned = "22222222-0000-0000-0000-0000000000b2";
+  const future = new Date(Date.now() + 86_400_000).toISOString();
+
+  const { client } = makeBanStub({ [banned]: future });
+  const { result, sentTo } = await runFanOut(client, [{ id: active }, { id: banned }]);
+
+  assertEquals(sentTo, [`${active}@example.test`]);
+  assert(!sentTo.includes(`${banned}@example.test`));
+  assertEquals(result.notified, 1);
+});
+
+Deno.test("fanOut: an unparseable banned_until counts as banned", async () => {
+  // 'infinity' is what admin_set_deactivated() writes; Date.parse gives NaN.
+  const banned = "33333333-0000-0000-0000-0000000000c3";
+  const { client } = makeBanStub({ [banned]: "infinity" });
+  const { result, sentTo } = await runFanOut(client, [{ id: banned }]);
+
+  assertEquals(sentTo, []);
+  assertEquals(result.notified, 0);
+});
+
+Deno.test("fanOut: an expired ban and a null ban both still receive", async () => {
+  const lapsed = "44444444-0000-0000-0000-0000000000d4";
+  const never = "55555555-0000-0000-0000-0000000000e5";
+  const past = new Date(Date.now() - 86_400_000).toISOString();
+
+  const { client } = makeBanStub({ [lapsed]: past, [never]: null });
+  const { result, sentTo } = await runFanOut(client, [{ id: lapsed }, { id: never }]);
+
+  assertEquals(sentTo.sort(), [`${lapsed}@example.test`, `${never}@example.test`].sort());
+  assertEquals(result.notified, 2);
+});

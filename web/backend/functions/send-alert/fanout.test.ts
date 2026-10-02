@@ -251,3 +251,108 @@ Deno.test("fanOut: sent counts people reached, byChannel counts accepted attempt
     assertEquals(result.byChannel, { email: 1, sms: 1 });
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// Deactivated recipients. admin_set_deactivated() writes auth.users.banned_until
+// and leaves profiles.role alone, so a revoked officer still matches every
+// recipient query. These pin the skip, and in particular pin it closed: the
+// fail-open direction is the one that leaks, and it is the one a later
+// refactor would reintroduce by "simplifying" the unparseable case away.
+// ---------------------------------------------------------------------------
+
+// Like makeStub, but every lookup succeeds and carries a banned_until from the map.
+function makeBanStub(bans: Record<string, string | null>) {
+  const inserts: { table: string; row: Record<string, unknown> }[] = [];
+  const client = {
+    from(table: string) {
+      return {
+        insert(row: Record<string, unknown>) {
+          inserts.push({ table, row });
+          return Promise.resolve({ data: null, error: null });
+        },
+      };
+    },
+    auth: {
+      admin: {
+        getUserById(id: string) {
+          return Promise.resolve({
+            data: { user: { id, email: `${id}@example.test`, banned_until: bans[id] ?? null } },
+            error: null,
+          });
+        },
+      },
+    },
+  };
+  return { client, inserts };
+}
+
+function reached(inserts: { table: string; row: Record<string, unknown> }[]) {
+  return inserts.filter((i) => i.table === "alerts").map((i) => i.row.recipient).sort();
+}
+
+// Channels off: every recipient that gets through lands exactly one audit row,
+// so the row list is a faithful record of who was not skipped.
+function channelsOff() {
+  Deno.env.set("CHANNEL_EMAIL", "off");
+  Deno.env.delete("CHANNEL_SMS");
+  Deno.env.delete("CHANNEL_WHATSAPP");
+}
+
+Deno.test("fanOut: a deactivated recipient is skipped and the rest of the batch is not", async () => {
+  channelsOff();
+
+  const active = "11111111-0000-0000-0000-00000000000a";
+  const banned = "22222222-0000-0000-0000-00000000000b";
+  const future = new Date(Date.now() + 86_400_000).toISOString();
+
+  const { client, inserts } = makeBanStub({ [banned]: future });
+  await fanOut(
+    client as unknown as Parameters<typeof fanOut>[0],
+    [{ id: active, phone: null }, { id: banned, phone: null }],
+    { subject: "s", body: "b" },
+    1,
+  );
+
+  // No row at all for the deactivated account - not even an undeliverable one,
+  // because it never became a recipient.
+  assertEquals(reached(inserts), [`${active}@example.test`]);
+});
+
+Deno.test("fanOut: an unparseable banned_until counts as banned", async () => {
+  channelsOff();
+
+  // 'infinity' is exactly what admin_set_deactivated() writes, and Date.parse
+  // returns NaN for it. Failing closed costs a deactivated account one missed
+  // email; failing open keeps mailing someone whose access was revoked.
+  const banned = "33333333-0000-0000-0000-00000000000c";
+  const { client, inserts } = makeBanStub({ [banned]: "infinity" });
+  await fanOut(
+    client as unknown as Parameters<typeof fanOut>[0],
+    [{ id: banned, phone: null }],
+    { subject: "s", body: "b" },
+    2,
+  );
+
+  assertEquals(reached(inserts), []);
+});
+
+Deno.test("fanOut: an expired ban and a null ban both still receive", async () => {
+  channelsOff();
+
+  // banned_until in the past means the ban lapsed; null means there never was
+  // one. Neither is a reason to withhold an alert.
+  const lapsed = "44444444-0000-0000-0000-00000000000d";
+  const never = "55555555-0000-0000-0000-00000000000e";
+  const past = new Date(Date.now() - 86_400_000).toISOString();
+
+  const { client, inserts } = makeBanStub({ [lapsed]: past, [never]: null });
+  await fanOut(
+    client as unknown as Parameters<typeof fanOut>[0],
+    [{ id: lapsed, phone: null }, { id: never, phone: null }],
+    { subject: "s", body: "b" },
+    3,
+  );
+
+  assertEquals(reached(inserts), [`${lapsed}@example.test`, `${never}@example.test`].sort());
+});
