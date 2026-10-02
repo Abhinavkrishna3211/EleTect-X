@@ -1,5 +1,7 @@
 // EleTect X — alert fan-out (Supabase Edge Function, Deno)
-// Trigger: Database Webhook on INSERT into `events` (or call directly with an event record).
+// Trigger: Database Webhook on INSERT into `events`. The request supplies the event id and
+// nothing else that matters — the row is re-read here, because a valid JWT is not evidence
+// that an event happened (see the comment on the re-read below).
 // Sends to all officers + opted-in Public users near the node, and logs to `alerts`. Gunshot and
 // chainsaw alerts go to officers only (message.ts decides wording and audience).
 //
@@ -33,12 +35,45 @@ Deno.serve(async (req) => {
   // logic, on purpose: a Demo Mode scenario writes real `events` rows, and this
   // webhook would otherwise fan out to every officer and every opted-in resident
   // within 3 km. An unreadable payload, or any demo-tagged event, must never fan
-  // out. (Demo events are also written priority='normal', so the check below is a
-  // second, independent barrier — but this one is the guarantee.)
+  // out. (Demo events are also written priority='normal', so the checks below are
+  // further independent barriers — but this one is the guarantee.)
   if (payload === null) return new Response("unreadable payload", { status: 400 });
-  const ev = payload.record ?? payload;                       // DB webhook sends {record}
-  if (ev?.media_url === "demo") return new Response("skipped (demo)", { status: 200 });
-  if (!ev?.node_id) return new Response("no event", { status: 400 });
+  const posted = payload.record ?? payload;                   // DB webhook sends {record}
+  if (posted?.media_url === "demo") return new Response("skipped (demo)", { status: 200 });
+
+  // Take the id from the request and everything else from the database.
+  //
+  // `verify_jwt = true` on this function (supabase/config.toml) proves the caller
+  // holds a key; it does not prove which one, and the anon key ships inside the
+  // frontend bundle because that is what it is for. So the posted body is public
+  // input: anyone could POST {"record":{"node_id":"S7-01","priority":"critical",
+  // "species":"elephant"}} and page every officer and every opted-in resident
+  // within 3 km of a real node, with a message asking them to send a team. For a
+  // village that has agreed to receive these, a forged one is worse than none -
+  // it spends the credibility the real alert runs on.
+  //
+  // Re-reading closes it without an extra secret to manage: a forged payload
+  // either names an event that exists, in which case the fan-out describes
+  // something that genuinely happened, or it names nothing and stops here.
+  const eventId = Number(posted?.id);
+  if (!Number.isInteger(eventId)) return new Response("no event id", { status: 400 });
+  const { data: stored } = await db.from("events").select("*").eq("id", eventId).maybeSingle();
+  if (!stored) return new Response("no such event", { status: 404 });
+  const ev = stored;
+
+  // Fan out once per event. This is what stops the re-read above from being
+  // replayable - the id of a real critical event is otherwise a button anyone
+  // can press again - and it is the right behaviour anyway: pg_net retries a
+  // webhook whose response it never saw, and an officer should not be paged
+  // twice for one elephant. An event that reached nobody logs an
+  // `undeliverable` row, so a retry after a genuine delivery failure is
+  // correctly treated as already attempted rather than retried forever.
+  const { count: already } = await db.from("alerts")
+    .select("id", { count: "exact", head: true }).eq("event_id", eventId);
+  if ((already ?? 0) > 0) return new Response("skipped (already fanned out)", { status: 200 });
+
+  if (ev.media_url === "demo") return new Response("skipped (demo)", { status: 200 });
+  if (!ev.node_id) return new Response("no event", { status: 400 });
   if (!isPaging(ev.priority)) return new Response("skipped (not paging)", { status: 200 });
 
   const { data: node } = await db.from("nodes").select("name,lat,lng").eq("id", ev.node_id).single();
