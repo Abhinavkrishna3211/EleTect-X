@@ -69,6 +69,13 @@ IMAGE_SIZE = IMAGE_SIZE_DEFAULT
 # plan's own estimate, just a cheap one instead of a training job.
 THRESHOLD_GRID = (0.05, 0.1, 0.2, 0.3, 0.5)
 RESIZE_MODE = "squash"
+# Raw classify results are needed afterwards to score subsets (e.g. only the
+# project's own field-camera frames) without paying for another classify job.
+RESULTS_DIR = None
+# Which trained variant the held-out classify jobs score. Studio's default is
+# float32, but the UNO Q runs the int8 build - and int8 is not a safe proxy:
+# 28 Sept, every attn_silu run scored mAP@50 ~0.85 float32 vs ~0.01 int8.
+MODEL_VARIANT = "int8"
 # Edge Impulse documents 0.001 as the learning rate FOMO needs; its stock 0.0005 for
 # other object-detection heads underfits here. Chosen, not inherited.
 LEARNING_RATE = 0.001
@@ -136,7 +143,15 @@ def wait_for_job(project_id, api_key, job_id, what):
     started = time.time()
     while time.time() - started < JOB_TIMEOUT_S:
         time.sleep(JOB_POLL_S)
-        status = request(f"/{project_id}/jobs/{job_id}/status", api_key).get("job", {})
+        try:
+            status = request(f"/{project_id}/jobs/{job_id}/status", api_key).get("job", {})
+        except urllib.error.URLError as err:
+            # A local network outage longer than request()'s short backoff must not
+            # end the wait: the job keeps running server-side, and a caller that
+            # retries from scratch rebuilds the impulse underneath it (28 Sept: a
+            # finished 160px run lost its model save that way). Keep polling.
+            print(f"    status poll failed ({err}), job still presumed running")
+            continue
         if status.get("finished"):
             ok = status.get("finishedSuccessful")
             mins = (time.time() - started) / 60
@@ -315,7 +330,7 @@ def select_model(
         params["architecture-type"] = yolo_variant
 
         # Freeze-backbone and the two augmentation-strength knobs (advanced section,
-        # untried before this session - see ml/vision/README.md's customParameters
+        # untried until this pass - see ml/vision/README.md's customParameters
         # dump, confirmed live 4 Sep via GET /transfer-learning-models). Validated
         # against this model's own live customParameters rather than a hardcoded
         # tuple here, so a renamed or removed level fails loudly instead of
@@ -553,7 +568,7 @@ def _fetch_classify_result_after_regen(project_id, api_key, max_wait_s=600):
     while waited < max_wait_s:
         attempt += 1
         try:
-            result = request(f"/{project_id}/classify/all/result", api_key)
+            result = request(f"/{project_id}/classify/all/result?variant={MODEL_VARIANT}", api_key)
         except RuntimeError as err:
             if "No model testing results found" not in str(err):
                 raise
@@ -571,6 +586,16 @@ def _fetch_classify_result_after_regen(project_id, api_key, max_wait_s=600):
         waited += delay_s
         delay_s = min(delay_s * 1.5, 30.0)
     raise last_err
+
+
+def _save_result(payload, name):
+    if RESULTS_DIR is None:
+        return
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    path = os.path.join(RESULTS_DIR, f"{name}.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh)
+    print(f"  saved {path}")
 
 
 def sweep_thresholds(project_id, api_key, learn_id, grid=THRESHOLD_GRID):
@@ -620,10 +645,11 @@ def sweep_thresholds(project_id, api_key, learn_id, grid=THRESHOLD_GRID):
             f"/{project_id}/jobs/classify",
             api_key,
             method="POST",
-            body={"skipFeatureGeneration": True},
+            body={"skipFeatureGeneration": True, "modelVariants": [MODEL_VARIANT]},
         )
         wait_for_job(project_id, api_key, job["id"], f"classify @ threshold {value}")
         result = _fetch_classify_result_after_regen(project_id, api_key)
+        _save_result(result, f"classify_thr{value}")
         per_class, background = score_held_out(result)
         results[value] = (per_class, background)
     return results
@@ -642,9 +668,11 @@ def report_results(project_id, api_key, learn_id):
         print(f"    report (precision/recall/F1/support): {json.dumps(variant.get('report'))}")
 
     print("\n--- Held-out model test (classify job over the real testing split) ---")
-    job = request(f"/{project_id}/jobs/classify", api_key, method="POST", body={})
-    wait_for_job(project_id, api_key, job["id"], "model testing")
-    result = request(f"/{project_id}/classify/all/result", api_key)
+    job = request(f"/{project_id}/jobs/classify", api_key, method="POST", body={"modelVariants": [MODEL_VARIANT]})
+    wait_for_job(project_id, api_key, job["id"], f"model testing ({MODEL_VARIANT})")
+    result = request(f"/{project_id}/classify/all/result?variant={MODEL_VARIANT}", api_key)
+    _save_result(result, "classify_default")
+    _save_result(meta, "training_metadata")
     accuracy = result.get("accuracy") or {}
     print(f"  total (Edge Impulse's own aggregate, not per-class - collapses to one pseudo-class for object detection): {accuracy.get('totalSummary')}")
     per_class, background = score_held_out(result)
@@ -737,7 +765,25 @@ def main():
             "directly than spatial augmentation does. Ignored outside --family yolo-pro."
         ),
     )
+    ap.add_argument("--epochs", type=int, default=None, help="override YOLO-Pro 'epochs' (default 100)")
+    ap.add_argument(
+        "--learning-rate", type=float, default=None, help="override YOLO-Pro 'learning-rate' (default 0.001)"
+    )
+    ap.add_argument(
+        "--results-dir",
+        default=None,
+        help="write every raw classify result (and training metadata) as JSON into this directory",
+    )
+    ap.add_argument(
+        "--model-variant",
+        choices=("int8", "float32"),
+        default="int8",
+        help="trained variant the held-out tests score (default int8, what the UNO Q runs)",
+    )
     args = ap.parse_args()
+    global RESULTS_DIR, MODEL_VARIANT
+    RESULTS_DIR = args.results_dir
+    MODEL_VARIANT = args.model_variant
     if args.family == "yolo-pro" and not args.yolo_variant:
         print("--family yolo-pro requires --yolo-variant", file=sys.stderr)
         sys.exit(1)
@@ -800,6 +846,13 @@ def main():
         spatial_augmentation=args.spatial_augmentation,
         color_space_augmentation=args.color_space_augmentation,
     )
+    if custom_params:
+        if args.epochs is not None:
+            custom_params["epochs"] = str(args.epochs)
+            label += f"-epochs={args.epochs}"
+        if args.learning_rate is not None:
+            custom_params["learning-rate"] = str(args.learning_rate)
+            label += f"-lr={args.learning_rate}"
     params = training_params(visual_layer, custom_params, batch_size=args.batch_size)
     set_project_gpu(project_id, api_key, args.family == "yolo-pro")
     configure_training(project_id, api_key, learn_id, params, label)

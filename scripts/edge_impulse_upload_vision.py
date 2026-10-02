@@ -315,6 +315,83 @@ ELEPHANT_VISUALLY_CONTAMINATED_FILENAMES = {
     "49_jpg.rf.1809f1e71f73704c09540c8500b9c480.jpg",  # caparisoned ceremonial temple elephant
 }
 
+# Fox 4-class research pass (14 Sept 2026). deepnetworkdevelopment/fox-detection-7iqxq v2
+# carries exactly one non-photo frame among its 100-image export: a painting misfiled as a
+# camera-trap capture. Confirmed export carries zero augmentation, so this exact filename is
+# a stable exclusion key.
+FOX_VISUALLY_CONTAMINATED_FILENAMES = {
+    "e22a47b26f9abbf36415f77d4546e381_jpg.rf.94d94c24e39d25be0e1d5b786abbe8fe.jpg",  # painting, not a photo
+}
+
+# mgr-l8rhf/fox-sldyl v1 by-eye audit (14 Sept 2026): 13 confirmed-bad burst/clip events plus a
+# class of bare-16-hex-stem frames that are off-species (raccoon, coyote-like canid, mountain
+# scree with no animal visible). The source carries export-time augmentation (image x3 + grayscale
+# + noise + flip), so exclusion is keyed on the stable pre-augmentation filename stem, not the
+# full augmented filename. Validated against the real v1 export: excludes exactly 242 of 1501
+# images, leaving 1259 kept.
+_MGR_FOX_EXCLUDED_STEMS = (
+    "frame_1559_",  # KAROL01 raccoon burst
+    "frame_1823_",  # KAROL01 raccoon burst
+    "frame_914_",  # KAROL01 raccoon burst
+    "frime-155-_",  # coyote-like canid, not a fox
+    "frime-1615-_",  # coyote-like canid, not a fox
+    "frime-1634-_",  # coyote-like canid, not a fox
+    "frime-1696-_",  # coyote-like canid, not a fox
+    "WhatsApp-Video-2024-02-14-at-5_05_03-PM_mp4-",  # confirmed coyote clip
+    "frame_000303_",  # mountain scree, no animal visible
+    "frame_000466_",  # mountain scree, no animal visible
+    "frame_000535_",  # mountain scree, no animal visible
+    "frame_001521_",  # mountain scree, no animal visible
+    "frame_000800_",  # mountain scree, no animal visible
+)
+_MGR_FOX_BARE_HEX_STEM = re.compile(r"^[0-9a-f]{16}_")
+
+
+def _is_mgr_fox_excluded_event(filename):
+    return filename.startswith(_MGR_FOX_EXCLUDED_STEMS) or bool(
+        _MGR_FOX_BARE_HEX_STEM.match(filename)
+    )
+
+
+# kuba-kulik-4wi43/fox-xdf1l v1 by-eye audit (15 Sept 2026): two filename-stem
+# families correlate strongly with contamination and are excluded wholesale
+# rather than by individual filename. Stratified samples (not exhaustive - a
+# floor, not a guarantee, same discipline as every other by-eye-audited source
+# in this project): 32-char lowercase-hex stems (8 sampled of 114, 1 bad -
+# watermarked "GFM Photography" - ~12.5%) and 10-14 char uppercase-alphanumeric
+# "capsid" stems (9 sampled of 259, 5 bad - ~55%: three duplicate copies of one
+# "Marco Tosi - 2007"-watermarked photo re-appearing under different Pinterest-
+# style IDs, two carrying a "www.chornobyl.in.ua" watermark banner on otherwise
+# genuine IR-night Chernobyl-zone footage, excluded on watermark grounds alone
+# per this project's standing watermarked-stock rejection convention,
+# independent of the underlying photo's authenticity). Every normally-named
+# stem sampled (frame-number, red-fox163_, Flickr numeric-ID+_z,
+# pexels-photo-*, download-*, images-*, Screenshot-*) came back clean across
+# ~20 samples.
+_FOX_XDF1L_HEX32_STEM = re.compile(r"^[0-9a-f]{32}_")
+_FOX_XDF1L_CAPSID_STEM = re.compile(r"^[0-9A-Z]{10,14}_")
+
+
+def _is_fox_xdf1l_excluded_event(filename):
+    return bool(_FOX_XDF1L_HEX32_STEM.match(filename)) or bool(
+        _FOX_XDF1L_CAPSID_STEM.match(filename)
+    )
+
+
+# project-d4kos/animal_redfox v1 by-eye audit (14 Sept 2026): stock headshot, off-species canid,
+# TV broadcast frame, stock-composite, editorial collage, watermarked stock photo, captive/zoo
+# enclosure. Export carries zero augmentation, so exact filenames are stable exclusion keys.
+# Validated against the real v1 export: all 7 present, leaving 228 of 235 kept.
+ANIMAL_REDFOX_VISUALLY_CONTAMINATED_FILENAMES = {
+    "-5_jpg.rf.6cf0452e53490d358668a09343a2de30.jpg",  # stock headshot, not a camera-trap capture
+    "-340_jpg.rf.ca8e7de9b15bab86d8c938be5708eba0.jpg",  # off-species canid
+    "-500_jpg.rf.f9c777a16609e57a03295b71d66bcad2.jpg",  # YTN News broadcast frame, on-screen graphics
+    "-362_jpg.rf.010d627d926300d609b49ffbb30f0c15.jpg",  # iStock composite/stock photo
+    "-264_jpg.rf.f3de7b475ad01e3530906e59e6df5246.jpg",  # editorial collage, multiple sub-images
+    "-78_jpg.rf.151885484b0c110a55968072bbc741db.jpg",  # 123RF watermark visible
+    "-364_jpg.rf.b0090df9c3db8d776813519860821ce8.jpg",  # captive/zoo enclosure
+}
+
 DATASETS = [
     {
         "label": "Elephant",
@@ -685,7 +762,7 @@ DATASETS = [
         "local_root": os.path.join(_ROOT, "ml", "datasets", "vision", "raw", "board-captures-night1", "images"),
         # Real IR-illuminated night frames from the same deployed camera as
         # board-captures-day1, its night counterpart - 29 Aug, four distinct
-        # capture sessions through the user's own window (device could not yet
+        # capture sessions through a house window (the device could not yet
         # be field-mounted). Zero-box, same bookkeeping-only "Background" label
         # as every other true-negative source above; no elephant crossed the
         # frame, so this is a false-positive-rate source, not an Elephant-recall
@@ -709,6 +786,102 @@ DATASETS = [
         # oversampled 41x rather than 41 independent looks - worth thinning at
         # the next real re-upload rather than blocking this one on it.
         "expect_images": 207,
+        "page_boxes": 0,
+        "rename": {},
+        "drop": set(),
+    },
+    {
+        "label": "Background",
+        "slug": "board-captures-review-fp1",
+        "license": "N/A (own capture)",
+        "local_root": os.path.join(_ROOT, "ml", "datasets", "vision", "raw", "board-captures-review-fp1", "images"),
+        # 27 Sept 2026, direct response to a field false-positive complaint after the
+        # DFO deployment went live. Source: device/mpu/bench/camera_check/
+        # board_pull_20260923/review_frames_full - the deployed camera's own
+        # detection-crop log, 536 usable JPEGs (538 minus 2 non-image files) it
+        # flagged as Boar or Elephant in the field. Every one of the 536 was opened
+        # and visually classified (4-way parallel by-eye review, one pass per
+        # quarter of the set, same discipline as every other by-eye audit in this
+        # file) rather than trusted on the model's own label. Result: zero confirmed
+        # real boar or elephant sightings anywhere in the 536 - every single field
+        # detection in this pull was a false positive. Breakdown: 474 empty
+        # background (mostly a static IR-lit banana-plantation leaf-litter scene
+        # triggering at ~0.52 confidence - the dominant false-positive mode), 23
+        # human (a person misclassified as Elephant/Boar - a distinct field-trust
+        # failure, folded into this Background source since the project has no
+        # Human class and these frames must not fire Boar/Elephant either), 13
+        # other_animal (small birds), 7 artifact (a corrupted 0-byte file, phone-
+        # screen photos, a camera-lens close-up - not valid field captures), 17
+        # ambiguous (too dark/blurry/overexposed to call), and 2 fox (real fox
+        # sighting, mislabeled Boar - filed separately at
+        # board-captures-fox-encounter2, deliberately NOT wired into the Fox class
+        # here: these are full 1920x1080 frames with no hand-drawn box, and this
+        # pass's scope is the background false-positive fix, not resuming the Fox
+        # research branch). Only the 474 empty_background + 23 human = 497 verified
+        # true-negative frames are uploaded here. Full per-file classification is
+        # tracked at ml/vision/board-pull-20260923-review-triage.csv so this finding
+        # survives context loss, same discipline as fox-representation-audit.md.
+        # All 497 are real, uniform 1920x1080 captures off the actual deployed
+        # camera - the exact false-positive material this class needs, not a proxy.
+        # Filenames renamed to revfp<burst>_<seq>.jpg, bucketed by a 60-second gap
+        # in the original capture timestamp (140 bursts from 497 images: 69 true
+        # singletons, largest burst 40 consecutive frames of one static
+        # false-trigger event). The original per-file label (Boar/Elephant/Human)
+        # is dropped from the filename - it added a non-numeric trailing token
+        # that broke _FRAME_TAIL's digit-suffix match and defeated the grouping
+        # entirely (every file became its own singleton group); it is preserved
+        # instead in the triage CSV below. With the plain <burst>_<seq> form,
+        # group_key()'s trailing-number collapse strips "_<seq>" and keeps each
+        # burst of near-duplicate frames in one group, confirmed locally (140
+        # groups, sizes matching the 69-singleton/40-max burst split above) so
+        # none of them can straddle train/test - the same leakage risk this
+        # file's own docstring calls out for video-frame sources, and a real one
+        # here: many of these frames are the identical scene re-triggering every
+        # 5-10 seconds.
+        "expect_images": 497,
+        "page_boxes": 0,
+        "rename": {},
+        "drop": set(),
+    },
+    {
+        "label": "Background",
+        "slug": "board-captures-review-fp2",
+        "license": "N/A (own capture)",
+        "local_root": os.path.join(_ROOT, "ml", "datasets", "vision", "raw", "board-captures-review-fp2", "images"),
+        # 27 Sept 2026, same false-positive follow-up as board-captures-review-fp1
+        # above but from the newer field pulls (device/mpu/bench/camera_check/
+        # board_pull_20260924 through board_pull_20260927), which are a different
+        # capture mode than the 23rd pull: 36 full detection-triggered event
+        # recordings (clip.mp4 + clip_annotated.mp4, 60-220s each, 480x270 - a
+        # lower resolution than the 1920x1080 crop-log frames in fp1, since this
+        # is the continuous-recording profile rather than the single-shot
+        # detection-crop stream) instead of still crops. All 36 were sampled at
+        # 2-4 evenly-spaced frames and reviewed by eye (4-way parallel, same
+        # discipline as fp1) to classify what actually triggered the recording.
+        # Result: zero confirmed real Boar or Elephant across all 36 clips -
+        # every trigger was a false positive, a human, or an unreadable
+        # exposure-fault frame. Breakdown: 24 confirmed empty background, 1
+        # human (a person servicing the camera - folded into Background per the
+        # same policy as fp1), 6 ambiguous (mostly the camera daytime-overexposure
+        # bug the "force backlight compensation" fix (commit feed01d) already
+        # addresses - ground truth unrecoverable from a blown-out frame, so
+        # excluded rather than guessed), and 6 candidate Fox sightings across 3
+        # separate nights (23/24/27 Sept) at the same physical camera spot -
+        # filed separately, see board-captures-fox-encounter3 below, NOT wired
+        # in here. Only the 24 empty-background + 1 human = 25 clips are used:
+        # 3 frames per clip (25%/50%/75% of clip duration) were extracted from
+        # the raw (non-annotated) clip.mp4, since a single frame risks missing
+        # the scene and every-frame extraction would just duplicate a static
+        # scene across a 100+ second clip. Full per-clip classification and
+        # exact sample-offset provenance is tracked at
+        # ml/vision/board-pull-20260924-27-review-triage.csv. Filenames are
+        # revfp2_<clip>_<seq>.jpg - <clip> (001-025) is the per-source-clip
+        # group id, <seq> (001-003) the sample index within that clip, so
+        # group_key()'s trailing-number collapse keeps all 3 frames of one clip
+        # in a single train/test group (verified locally: 25 groups from 75
+        # images, matching the 25 source clips) and near-duplicate frames of the
+        # same static scene can't straddle the split.
+        "expect_images": 75,
         "page_boxes": 0,
         "rename": {},
         "drop": set(),
@@ -745,6 +918,278 @@ DATASETS = [
         # See _original_filename() / parse_coco - a contaminated source frame stays
         # contaminated after make_pseudo_ir_vision.py renames it.
         "exclude_broadcast_clips": True,
+    },
+    # 14 Sept 2026 Fox-sourcing re-pass. The prior two Fox passes (13 Sept, see
+    # ml/vision/README.md) were removed the same day by explicit decision
+    # (cleanup_fox_class_removal_vision.py) after the class was pulled from scope;
+    # the removed DATASETS entries were never committed to git (verified via
+    # `git log -S` against every source name below - no match), so this block is
+    # a from-scratch reconstruction against ml/vision/README.md's two dated Fox
+    # entries and ml/vision/fox-representation-audit.md, cross-checked live
+    # against the Roboflow API again today rather than trusted from memory. User
+    # instruction this pass: source meaningfully more real Fox data (esp. real
+    # night/IR, the gap both prior passes flagged and neither closed), do not
+    # gate on license. Four sources below are the original three plus
+    # kawaharalabo restored at their full real counts (kawaharalabo previously
+    # shipped only a 113-image partial cut for reasons no longer recoverable;
+    # this pass uses its complete 463-image real far-IR pull instead - more real
+    # data, same source, same license). Two sources are new this pass
+    # (animal_redfox, wildlife-system-lsden), each independently by-eye audited
+    # before adoption (see fox-representation-audit.md's method) rather than
+    # trusted on metadata alone - a real lesson from this same pass: the first
+    # wildlife-system-lsden pull was version 5 (heavily rotate/flip/cutout
+    # augmented, discovered only by eye and confirmed via the API's per-version
+    # augmentation field) and was discarded in favor of the actual version 1.
+    {
+        "label": "Fox",
+        "workspace": "deepnetworkdevelopment",
+        "project": "fox-detection-7iqxq",
+        "version": 2,
+        "slug": "fox-detection-7iqxq-v2",
+        "license": "CC BY 4.0",
+        # 13 Sept audit (fox-representation-audit.md): a 35/35 (full-source) by-eye
+        # pass found exactly one non-photographic image - a realistic oil/digital
+        # painting of a fox at a water's edge, not a camera capture. No export-time
+        # augmentation (re-confirmed live today: version 2's own augmentation field
+        # is {}), so the exact filename is a stable exclusion key. Daytime/stock-
+        # photography domain - a real caveat carried into the corpus composition,
+        # not a defect (species-correct, camera-correct just not IR/night).
+        "expect_images": 100,
+        "page_boxes": 104,
+        "rename": {},
+        "drop": set(),
+        "exclude_filenames": FOX_VISUALLY_CONTAMINATED_FILENAMES,
+    },
+    {
+        "label": "Fox",
+        "workspace": "mgr-l8rhf",
+        "project": "fox-sldyl",
+        "version": 1,
+        "slug": "fox-sldyl-v1",
+        "license": "CC BY 4.0",
+        # 605 project images / 1,501 export images (Roboflow applies a 3x image
+        # multiplier plus grayscale/noise/flip on export - re-confirmed live today,
+        # this project has exactly one version and it carries that augmentation;
+        # there is no clean alternative version to pull instead, unlike
+        # wildlife-system-lsden below). Two independent 35-image seeded by-eye
+        # draws (n=70/605, 11.6% - fox-representation-audit.md) found a raccoon
+        # burst, a coyote-like WhatsApp clip, one confirmed coyote sharing a bare-
+        # 16-hex filename convention with two rejected contaminated sources, and
+        # five inconclusive/empty mountain-scree frames - all excluded by event via
+        # _is_mgr_fox_excluded_event() (stem-prefix match, so every augmented copy
+        # of a bad source frame is caught, not just whichever copy a sample
+        # happened to land on). This is real camera-trap/video Fox footage - the
+        # single largest and most valuable real source in this corpus for the
+        # night/IR gap both prior Fox passes flagged - and the floor from an
+        # 11.6%-sampled audit, not a certification of the rest.
+        "expect_images": 1501,
+        "page_boxes": 608,
+        "rename": {"fox": "Fox"},
+        "drop": set(),
+        "exclude_mgr_fox_events": True,
+    },
+    {
+        "label": "Fox",
+        "workspace": "kawaharalabo",
+        "project": "far-infrared-rays-animals",
+        "version": 5,
+        "slug": "kawaharalabo-far-infrared-rays-animals-v5",
+        "license": "CC BY 4.0",
+        # Real thermal/IR camera-trap footage, Tokyo University of Agriculture
+        # research forest (visible in-frame branding: "JVCKENWOOD" camera overlay,
+        # Japanese-language site/species caption reading "Honshu fox" - visually
+        # spot-checked today, 3 frames including one deep-night 03:42 capture).
+        # This is a 14-class multi-species export (Boar/Bird/Rabbit/Badger/Cow/
+        # Fox/Deer/Cat/Sheep/Duck/Chicken/Dog/Marten/Palm-civet/Flying-squirrel/
+        # Raccoon/rat/Unknown across the full project; version 5 itself carries 11
+        # of those) - only Fox-annotated images are kept, everything else dropped.
+        # unreliable_zero_box is required here: this export carries a real
+        # "Unknown" garbage category (754 project-wide instances) alongside the
+        # named species, so a frame left with zero boxes after dropping the other
+        # 10 categories cannot be trusted as a confirmed empty background - it
+        # might be an Unknown-mislabeled animal - and is skipped entirely rather
+        # than uploaded as Background. Version 5's own augmentation field is {}
+        # (grayscale + resize preprocessing only, not export-multiplying
+        # augmentation) - re-confirmed live today. The 13 Sept pass used a partial
+        # 113-image cut of this same source for reasons not recoverable from the
+        # (unrecovered) original entry; this pass uses the complete 463-image real
+        # Fox pull instead, directly answering "source more Fox data". expect_images
+        # is the v5 export's total raw image count (5569, all 11 species) not the
+        # Fox-only count - the reconciliation formula never counts dropped_class
+        # (annotation-level, since one image can carry several dropped-species boxes)
+        # so expect_images must equal records + unreliable_zero_box (463 + 5106) to
+        # balance; page_boxes stays the Fox-specific project-level box count.
+        "expect_images": 5569,
+        "page_boxes": 679,
+        "rename": {},
+        "drop": {
+            "Boar", "Bird", "Rabbit", "Badger", "Cow", "Deer", "Cat", "Sheep",
+            "Duck", "Chicken", "Dog", "Marten", "Palm-civet", "Flying-squirrel",
+            "Raccoon", "rat", "Unknown",
+        },
+        "unreliable_zero_box": True,
+    },
+    {
+        "label": "Fox",
+        "slug": "board-captures-fox-encounter1",
+        "license": "N/A (own capture)",
+        "local_root": os.path.join(_ROOT, "ml", "datasets", "vision", "raw", "board-captures-fox-encounter1", "images"),
+        # The real 11 Sept field encounter - the only ground truth this project has
+        # for how its own deployed camera actually sees a real fox. 13 frames,
+        # fx1_burst_ prefixed so group_key() keeps this one clip in its own
+        # group(s) rather than merging with anything else. Real boxes (not
+        # zero-box background) - drawn against the actual encounter frames.
+        "expect_images": 13,
+        "page_boxes": 13,
+        "rename": {},
+        "drop": set(),
+    },
+    {
+        "label": "Fox",
+        "workspace": "project-d4kos",
+        "project": "animal_redfox",
+        "version": 1,
+        "slug": "animal_redfox-v1",
+        "license": "CC BY 4.0",
+        # New this pass. No export-time augmentation (confirmed live today).
+        # 18-image seeded by-eye sample (n=18/235, 7.7%) found this is NOT a clean
+        # drop-in source, unlike its metadata-only first impression: ~28-39%
+        # (5-7/18) carried real contamination - two watermarked-stock-photo cases
+        # (iStock composite, tiled 123RF watermark), one branded news-broadcast
+        # screengrab ("YTN NEWS" overlay), one multi-panel editorial photo
+        # collage, one likely off-species canid (atypical build/ear-shape for
+        # Vulpes vulpes), one likely captive/zoo-enclosure setting, and one plain
+        # white-background studio headshot that reads as stock photography even
+        # without a visible watermark. The 7 flagged images are excluded by exact
+        # filename below; the remaining ~217 images are NOT independently
+        # certified clean beyond this 7.7% sample - a floor, not a guarantee, same
+        # discipline as every other by-eye-audited source in this project.
+        "expect_images": 235,
+        "page_boxes": 258,
+        "rename": {"redfox": "Fox"},
+        "drop": {"\\"},
+        "exclude_filenames": ANIMAL_REDFOX_VISUALLY_CONTAMINATED_FILENAMES,
+    },
+    {
+        "label": "Fox",
+        "workspace": "project-one-wildlife-monitoring-system",
+        "project": "project-one-wildlife-system-lsden",
+        "version": 1,
+        "slug": "wildlife-system-lsden-v1",
+        "license": "CC BY 4.0",
+        # New this pass - and a live methodology correction along the way. The
+        # first pull was version 5 (2,806 project images -> 2,865 exported), whose
+        # "Fox: 243" class count looked usable from metadata alone; a by-eye
+        # sample of the downloaded images showed obvious rotate/flip/black-square-
+        # cutout artifacts, and checking all 5 versions' own augmentation field via
+        # the Roboflow API confirmed only version 1 carries augmentation: {} - v2-5
+        # all bake in rotate(15deg)/ninety-rotate/flip/cutout. Version 1 was
+        # re-pulled and gives 136 real distinct Fox images (93 train/26 valid/17
+        # test in Roboflow's own split, discarded here in favor of this project's
+        # own group-aware split like every other source). 24-image seeded by-eye
+        # sample (n=24/136, 17.6%, >=1 per split) found zero contamination: every
+        # sampled image is a genuine Bushnell-branded IR trail-camera photo (one
+        # daytime color exception) of a fox-shaped canid, timestamps spanning
+        # 2012-2016 at what looks like one recurring farm/rural property (metal
+        # gate, barn interior, tractor recur across samples) - real night/IR
+        # camera-trap Fox data, exactly the domain gap both 13 Sept Fox passes
+        # flagged as unaddressed. Caveat: likely low location/scene diversity
+        # despite the multi-year span, since the same setting recurs. 22-class
+        # multi-species export (Animals/Badger/Bird/Boar/Cat/Ceetah/Chicken/Cow/
+        # Deer/Dog/Duck/Elephant/Fox/Geese/Giraf/Goosling/Lion/Mouse/Rabbit/Rhino/
+        # Sheep/Zebra) - the stray "Animals" catch-all plus the zoo-grade species
+        # list (Lion/Zebra/Rhino/Giraf) makes this a garbage-classmap risk exactly
+        # like kawaharalabo above, so unreliable_zero_box applies here too: a
+        # frame left with zero boxes after dropping the other 21 categories is
+        # skipped rather than certified Background. expect_images is the v1
+        # export's total raw image count (2865, matching the same 2865 figure
+        # independently observed for the discarded v5 pull above) not the
+        # Fox-only count, for the same reconciliation-formula reason as
+        # kawaharalabo (dropped_class is annotation-level and never counted by
+        # the gap check, so expect_images must equal records + unreliable_zero_box,
+        # 136 + 2729, to balance); page_boxes stays the Fox-specific box count.
+        "expect_images": 2865,
+        "page_boxes": 139,
+        "rename": {},
+        "drop": {
+            "Animals", "Badger", "Bird", "Boar", "Cat", "Ceetah", "Chicken",
+            "Cow", "Deer", "Dog", "Duck", "Elephant", "Geese", "Giraf",
+            "Goosling", "Lion", "Mouse", "Rabbit", "Rhino", "Sheep", "Zebra",
+        },
+        "unreliable_zero_box": True,
+    },
+    {
+        "label": "Fox",
+        "workspace": "kuba-kulik-4wi43",
+        "project": "fox-xdf1l",
+        "version": 1,
+        "slug": "fox-xdf1l-v1",
+        "license": "CC BY 4.0",
+        # 4th Fox source (15 Sept 2026), sourced deliberately for a different
+        # character than the last three passes: three straight rounds of adding
+        # real/night-IR-heavy Fox data drove recall down while raising precision
+        # (see ml/vision/README.md, 15 Sept entry), so this pass was weighted
+        # toward daytime/easier-domain imagery to counterbalance rather than
+        # compound the corpus's bias toward its hardest examples - and by-eye
+        # audit confirms this source is exactly that: forest, urban/paved,
+        # snow, dense foliage, spotlight-lit night, one legitimate adult+kit
+        # pair, one Chernobyl-zone real IR camera-trap pair (excluded below on
+        # watermark grounds, not species grounds - see below).
+        #
+        # Category quirk: Roboflow exported this project's multi-line
+        # description text as four bogus leaf "classes" alongside a root "fox"
+        # category that carries zero annotations directly (id 0, supercategory
+        # "none" - the real annotations all sit on ids 1-4, whose names are
+        # literally the project description text, e.g. "Roboflow is an
+        # end-to-end computer vision platform that helps you"). All four map to
+        # Fox below; there is only ever one real species in this source.
+        #
+        # By-eye audit (stratified sample, not exhaustive - a floor, not a
+        # guarantee): two filename-stem families correlate strongly with
+        # contamination and are excluded wholesale via
+        # _is_fox_xdf1l_excluded_event() rather than by individual filename -
+        # 32-char lowercase-hex stems (8/114 sampled, 1 bad, ~12.5%) and 10-14
+        # char uppercase-alphanumeric "capsid" stems (9/259 sampled, 5 bad,
+        # ~55%: three duplicate copies of one "Marco Tosi - 2007"-watermarked
+        # photo under different Pinterest-style IDs, two carrying a
+        # "www.chornobyl.in.ua" watermark banner on otherwise genuine IR-night
+        # Chernobyl-zone footage - excluded on watermark grounds alone per this
+        # project's standing watermarked-stock rejection convention,
+        # independent of the underlying photo's authenticity). All normally-
+        # named stems sampled (frame-number, red-fox163_, Flickr numeric-ID+_z,
+        # pexels-photo-*, download-*, images-*, Screenshot-*) came back clean
+        # across ~20 samples.
+        #
+        # Annotation completeness: a meaningful fraction of this export (432 of
+        # 1,395 raw images) carries no fox bounding box at all - not a curated
+        # negative set, just an incomplete labeling pass on this project's own
+        # Roboflow account - so unreliable_zero_box applies exactly as it does
+        # for kawaharalabo/wildlife-system-lsden above: an unboxed frame here
+        # cannot be certified as confirmed-empty Background, so it is skipped
+        # rather than repurposed. expect_images is the raw v1 export's total
+        # image count actually present after download (train 976 + valid 267 +
+        # test 152 = 1395) - not the Roboflow project page's own metadata
+        # figure of 1669, which was not reconciled against a second
+        # independent source and is treated as referring to something upstream
+        # of this specific version's generation (e.g. the project's total raw
+        # upload pool before this version was generated) rather than the
+        # frozen v1 export this pipeline actually downloads and uploads; same
+        # "trust the real downloaded export over the page number" discipline as
+        # every other source here. expect_images must equal records +
+        # fox_xdf1l_excluded_event + unreliable_zero_box (599 + 373 + 423) to
+        # balance; page_boxes is the Fox box count surviving on the 599 kept
+        # images (643, since a handful of images carry more than one fox box).
+        "expect_images": 1395,
+        "page_boxes": 643,
+        "rename": {
+            "-": "Fox",
+            "- collaborate with your team on computer vision projects": "Fox",
+            "Roboflow is an end-to-end computer vision platform that helps you": "Fox",
+            "fox - v3 2025-05-04 4-43pm": "Fox",
+        },
+        "drop": set(),
+        "exclude_fox_xdf1l_events": True,
+        "unreliable_zero_box": True,
     },
 ]
 
@@ -925,7 +1370,7 @@ def sample_by_group(records, target, label, live_categories=None, seed=SPLIT_SEE
         live_member = next((r for r in members if r.get("_sha256") in live_categories), None)
         if live_member is not None:
             return live_member
-        return sorted(members, key=lambda r: r["name"])[0]
+        return min(members, key=lambda r: r["name"])
 
     locked_keys = sorted(
         key for key, members in groups.items()
@@ -974,7 +1419,7 @@ def cap_named_group(records, group_name, cap, label, seed=SPLIT_SEED):
     Built for elephant-detection-cxnt1-v2's "frame" clip (984 images, a
     single continuous dashcam sequence - the viral RAJAMURUGAN "elephant
     reaching into a stopped truck" video, baked-in "U TURN" overlay text) per
-    the user's 28 Aug decision on the frame-clip audit finding: keep it as
+    the 28 Aug decision on the frame-clip audit finding: keep it as
     legitimate training data (it is a real elephant, not a species/broadcast
     defect the filters above exist to catch) but cut its ~39% share of the
     whole source down from duplication to a handful of representative frames,
@@ -1239,6 +1684,8 @@ def parse_coco(root, ds):
         "tv_broadcast": 0,
         "generic_named_scrape": 0,
         "unreliable_zero_box": 0,
+        "mgr_fox_excluded_event": 0,
+        "fox_xdf1l_excluded_event": 0,
     }
     background = 0
     for dirpath, _dirnames, filenames in os.walk(root):
@@ -1291,6 +1738,12 @@ def parse_coco(root, ds):
                 continue
             if ds.get("exclude_generic_named_scrape") and _is_generic_named_scrape(source_name):
                 drops["generic_named_scrape"] += 1
+                continue
+            if ds.get("exclude_mgr_fox_events") and _is_mgr_fox_excluded_event(img["file_name"]):
+                drops["mgr_fox_excluded_event"] += 1
+                continue
+            if ds.get("exclude_fox_xdf1l_events") and _is_fox_xdf1l_excluded_event(img["file_name"]):
+                drops["fox_xdf1l_excluded_event"] += 1
                 continue
             if img["file_name"] in ds.get("exclude_filenames", ()):
                 drops["visually_contaminated"] += 1
@@ -1914,6 +2367,8 @@ def main():
                     + drops["tv_broadcast"]
                     + drops["generic_named_scrape"]
                     + drops["unreliable_zero_box"]
+                    + drops["mgr_fox_excluded_event"]
+                    + drops["fox_xdf1l_excluded_event"]
                 ),
             )
             print("    local source: no page count to cross-check, expect_images set to parsed count")
@@ -1936,6 +2391,8 @@ def main():
             - drops["tv_broadcast"]
             - drops["generic_named_scrape"]
             - drops["unreliable_zero_box"]
+            - drops["mgr_fox_excluded_event"]
+            - drops["fox_xdf1l_excluded_event"]
         )
         if gap:
             print(f"    UNEXPLAINED GAP: {gap} images unaccounted for - do not trust these counts")
@@ -2061,10 +2518,19 @@ def main():
         row["duplicates"] = len(duplicates)
         report_rows.append(row)
 
-    if args.limit:
+    # Same reason in both arms, and the same compound guard this file already
+    # uses at the reconciliation step below: the ledger is a committed
+    # artifact, so only a full real run may rewrite it. --dry-run is
+    # documented as "do everything except upload", which a reader takes to
+    # mean nothing in the working tree moves - and the split it computes is
+    # taken against whatever live_categories the project happens to hold at
+    # that moment, so previewing a change could silently restate the frozen
+    # split that every published vision metric is reported against.
+    if args.limit or args.dry_run:
+        why = f"--limit {args.limit}" if args.limit else "--dry-run"
         print(
-            f"\n--limit {args.limit}: NOT writing {MANIFEST} - a limited run's manifest "
-            f"doesn't reflect the real dataset and must never overwrite the committed one"
+            f"\n{why}: NOT writing {MANIFEST} - this run doesn't reflect the real "
+            f"dataset and must never overwrite the committed one"
         )
     else:
         write_manifest(manifest)
