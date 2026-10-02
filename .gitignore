@@ -79,6 +79,22 @@ device/mpu/bench/camera_check/*.lnk
 device/mpu/bench/realclip_eval_20260929/frames/
 device/mpu/bench/realclip_eval_20260929/live_hits/
 
+# --- KiCad (hardware/pcb/) ---
+# Track the schematic sources, the project files and the ERC reports; ignore
+# everything a tool regenerates or that belongs to one person's install.
+# .kicad_prl is per-user window/panel state and conflicts on every open.
+# _root_uuid*.txt is scratch written by the generator script. The zoom PNGs are
+# review screenshots of regions of a schematic that is itself tracked - reading
+# the .kicad_sch gives the same information and does not go stale when the
+# schematic changes. The .svg is a second plot of the same sheet as the .pdf.
+hardware/pcb/*.kicad_prl
+hardware/pcb/_root_uuid*.txt
+hardware/pcb/led_ir_full.png
+hardware/pcb/led_ir_zoom*.png
+hardware/pcb/geophone-frontend.svg
+hardware/pcb/*-backups/
+hardware/pcb/*.kicad_sch-bak
+
 # --- MPU runtime state (bandit experience DB + deterrent-event captures) ---
 device/mpu/data/
 
