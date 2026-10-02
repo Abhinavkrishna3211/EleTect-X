@@ -226,8 +226,8 @@ CAD, which is not fixed):
   them** and confirm the 6A fuse still clears the project's own 1.25x safety convention at a
   depleted pack — if not, it's a cheap fuse-rating bump, not a redesign, but it must be checked,
   not assumed.
-- **Firmware work needed before this is real** (next VS Code/Sonnet session, one-at-a-time Bridge
-  discipline as always): the current 2-wing build uses **D3** (`LED_WING_LEFT_PIN`, moved off D5 on
+- **Firmware work needed before this is real** (one-at-a-time Bridge discipline as always): the
+  current 2-wing build uses **D3** (`LED_WING_LEFT_PIN`, moved off D5 on
   31 Aug — D5 is USB D−) and **D6** (`LED_WING_RIGHT_PIN`). A 4-channel expansion would need two
   more clean GPIOs — **D3 is no longer available**, so pick from D9 (PB8) and one JTAG-shared pin
   (D2/PB3 SWO or D8/PB4 NJTRST) after verifying it's free — then extend `led_channel` in `led.h`

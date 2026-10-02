@@ -197,6 +197,26 @@ stakes either way), PG7/PG9 glands (additional stock), LR7843 module.
    listen path. You already have 2-3 INMP441 units and it's marked optional in the original BOM for a
    reason — one sensor doing the job cleanly beats two doing it redundantly (CONTEXT.md §7, "reject
    gimmicks"). Dropped — removed from §8 above, no purchase needed.
+
+   > **Correction, 2026-09-30.** The drop stands as a purchasing decision, but the reasoning above is
+   > wrong and later ADRs contradict it, so it should not be cited as justification.
+   >
+   > The two mics were **not** redundant.
+   > [ADR 0006](../../docs/decisions/0006-acoustic-gunshot-gate-and-classifier-split.md) establishes
+   > that the MAX9814's role was a binary always-on wake comparator running at STOP-mode power — a
+   > different function from the corroboration/classification job the INMP441 does, and one the
+   > INMP441 cannot perform because I2S capture does not run in STOP mode. "One sensor doing the job"
+   > assumed a single job; there were two.
+   >
+   > The premise has since failed outright.
+   > [ADR 0028](../../docs/decisions/0028-acoustic-capture-moves-to-the-mpu-usb-microphone.md)
+   > (accepted 2026-09-29) found the INMP441 path unbuildable on the UNO Q — the prebuilt loader's
+   > devicetree never clocks SAI1, so the peripheral the surviving sensor needed is unreachable from a
+   > sketch. Acoustic capture moved to the MPU as a USB microphone. The MCU therefore ended up with
+   > **neither** mic, which is the outcome this flag was reasoning its way *out* of.
+   >
+   > Re-buying the MAX9814 is deferred, not rejected; it remains the only design that delivers
+   > always-on gunshot detection. Tracked in `docs/KNOWN_GAPS.md`.
 3. **IRLZ44N quantity is tight (5-7 in hand vs. ~6-7 needed), not comfortably spare.** Two ways to close
    the gap without a new order: use the **LR7843 module** you already have for one of the load-switch
    positions (camera or IR rail — it's a pre-built screw-terminal switch module, which is a better fit

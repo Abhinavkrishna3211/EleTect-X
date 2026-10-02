@@ -8,7 +8,7 @@
 
 # Main enclosure — first-pass CAD block-out and a real tray-footprint finding
 
-Generated 15/16 Aug (overnight, no hardware/user presence needed) from
+Built 15/16 Aug from
 `hardware/cad/enclosure-design-concept.md`'s own written dimensions and its "Suggested Fusion 360
 modeling order." This is a geometric starting point built with CadQuery (parametric CAD-by-code,
 exports real STEP files Fusion 360 opens natively) — not a finished design, not fit-checked against

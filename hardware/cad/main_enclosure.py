@@ -69,8 +69,10 @@ TRAY_PARTS = [
         80.0,
         40.0,
         10.0,
-        "EST - sized generously to also carry the geophone signal-conditioning ICs the doc "
-        "doesn't list as separate tray items",
+        (
+            "EST - sized generously to also carry the geophone signal-conditioning ICs "
+            "the doc doesn't list as separate tray items"
+        ),
     ),
 ]
 

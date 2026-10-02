@@ -1,7 +1,7 @@
 # Node enclosure — design concept for Fusion 360
 
-A starting concept to model from, not a finished drawing. Diagrammed in chat alongside this doc (front
-view + side cutaway) — this file is the buildable spec behind that picture. Update it as real dimensions
+A starting concept to model from, not a finished drawing. The front view and side cutaway are described
+dimensionally below; this file is the buildable spec, not the picture. Update it as real dimensions
 come in (measure the actual Ahuja SUH-15 once you have it — don't trust the datasheet blindly).
 
 **First-pass CAD block-out exists now (16 Aug) — `hardware/cad/main_enclosure_shell.step` and
@@ -492,8 +492,8 @@ rather than leaving that case silently unconsidered.
 
 ## On the photorealistic render
 
-No Gemini or other image-generation tool is connected in this session — I checked the connector registry
-and nothing matched. Two real options once you're further along: Fusion 360's own Render workspace can
-produce an accurate photoreal shot directly from the actual model (geometrically correct, not an AI guess
-at proportions), or you can connect an image-gen MCP yourself later via connector settings if you want a
-quick concept render before modeling is done. The diagram in chat is the accurate stand-in for now.
+Render from the model, not from a concept sketch. Fusion 360's own Render workspace produces a
+photoreal shot directly off the actual geometry, so proportions and clearances in the picture are the
+ones that will be machined. Until the model exists, the dimensioned front view and side cutaway below
+are the accurate stand-in — an approximate render of an unbuilt enclosure is worse than no render,
+because it gets quoted back as if it were measured.

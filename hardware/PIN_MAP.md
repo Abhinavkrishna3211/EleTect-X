@@ -83,14 +83,26 @@ RX so the deselected line idles high.
 Qwiic connector I2C4 (PD12/PD13) is also free, reserved per `config.h`'s own comment for a future
 BME280/MPU-6050.
 
-**INMP441 acoustic mic is not in this table, and its reference pins are already taken.**
-It belongs on *this* MCU, not the MPU — ADR 0006 puts it on the STM32 deliberately, event-gated,
-"precisely so the always-on cost lands on the µA-budget reflex layer instead of keeping the MPU
-continuously awake", and ADR 0009 (which supersedes 0006) keeps it MCU-side. No pin assignment
-for it exists in `config.h` yet, so do not infer wiring from this document.
+**INMP441 acoustic mic is not in this table, and as of ADR 0028 it is not going into it.**
+
+[ADR 0028](../docs/decisions/0028-acoustic-capture-moves-to-the-mpu-usb-microphone.md) (accepted
+2026-09-29) moved acoustic capture off this MCU entirely, to a **USB microphone on the MPU**. No
+STM32 pin assignment is needed, and none should be added on the strength of the analysis below.
+
+The reason is worth stating precisely, because it is not the one this section used to give. The
+obstacle was never pin contention. The UNO Q runs a **prebuilt loader whose devicetree is fixed
+before the sketch exists**, and that devicetree has no `sai1_a` node — so SAI1 is never clocked, and
+a peripheral that is never clocked cannot be reached by relocating it to different pins.
+[ADR 0006](../docs/decisions/0006-acoustic-gunshot-gate-and-classifier-split.md)'s finding that
+SAI1 is TrustZone-locked only for the devicetree path, not for raw register access, was **correct**
+and is retained — it simply is not the binding constraint.
+
+The pin analysis is kept below because it stays accurate for the deferred always-on path, which
+would use an **analog** mic on an ADC channel rather than I2S, and therefore needs none of these
+three pins.
 
 The public STM32U585 reference implementation ADR 0006 reviewed drives SAI1_A over GPIO AF13 on
-**PB9, PB10 and PC1**. All three are spoken for in this design:
+**PB9, PB10 and PC1**:
 
 | Reference pin | Already used for | Status here |
 |---|---|---|
@@ -98,10 +110,8 @@ The public STM32U585 reference implementation ADR 0006 reviewed drives SAI1_A ov
 | PB10 | nothing (D21) | free — the geophone is on A4/A5, not D20/D21 |
 | PC1 | I2C3/`Wire2` SDA (A4) on the geophone front-end | routed on `hardware/pcb/geophone-frontend.kicad_sch` |
 
-So adding the mic is not a matter of soldering to the reference pinout. Either SAI1_A gets
-relocated to a free alternate-function mapping — **no SAI AF table for this package exists in the
-repo yet, so whether that is even possible is an open question** — or the geophone I2C moves. PB9
-and PB10 cost nothing today; PC1 is the live geophone bus and costs a PCB revision.
+Two of the three were free all along; only PC1 would have cost a PCB revision. That is a smaller
+obstacle than this section once implied, and it was never the one that mattered.
 
 ## Power rails (not MCU GPIO, included for completeness)
 
