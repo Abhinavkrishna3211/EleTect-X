@@ -368,9 +368,31 @@ PROTOCOL_DURATION_MS_MAX = 65535
 # confirms it, gain still changes nothing audible in practice. What ADR 0015
 # does change is that loudness is no longer the only horn escalation axis:
 # the track_id column below makes *what* the horn plays a tier axis too.
-TIER_1_GAIN_FRACTION = 0.25
-TIER_2_GAIN_FRACTION = 0.45
-TIER_3_GAIN_FRACTION = 1.0
+# Standing horn column, ADR 0037, which supersedes the 0.25 / 0.45 / 1.0
+# ramp ADR 0014 named. These numbers first went in on 2026-09-10 as a power
+# mitigation: run #1's dawn false-positive storm re-fired deterrence on a
+# blind camera, and the peak actuator draw sagged the shared battery hard
+# enough to reset the USB link, which killed the camera and sustained the
+# loop. That fault is fixed in hardware - the UNO Q runs off VIN now and the
+# LED rail has its own buck - so the original expiry condition is met and
+# the old ramp could have come back. It is kept low by decision instead.
+#
+# The reason it is kept is ADR 0016's household-proximity argument, which
+# applies at every tier and not only at the top: this unit sits near homes,
+# HORN_GAIN_MAX_PCT is a hearing-safety cap for people and livestock rather
+# than an output target, and the conservative side of a bystander-harm limit
+# is the correct side to sit on for a deployment a forest division operates.
+# Every tier lands well under the MCU clamp, so the tiers stay distinct by
+# track_id and by the LED column, not by loudness.
+#
+# One measurement would reopen this. The horn amp is wired straight to the
+# battery bus that also feeds UNO Q VIN, so a tier-3 fire still loads the
+# same bus the brown-out was on; the 7-24V VIN range should absorb the dip,
+# but that is an inference from the topology and nobody has put a scope on
+# the bus under a fire since the rework.
+TIER_1_GAIN_FRACTION = 0.20
+TIER_2_GAIN_FRACTION = 0.28
+TIER_3_GAIN_FRACTION = 0.35
 
 # ---------------------------------------------------------------------------
 # Horn content library (ADR 0016) - which sound category each tier plays
@@ -444,7 +466,7 @@ TIER_DURATION_MS = PROTOCOL_DURATION_MS_MAX
 # LED gain per tier, as fractions of the protocol range (ADR 0014, revised
 # by ADR 0014 E.3).
 #
-# Every tier fires the light at full output. The deterrence value of the
+# Every tier fires the light at the same output. The deterrence value of the
 # strobe is in the flashing itself, not in a graded brightness ramp, and a
 # dimmed strobe on an unconfirmed-but-real detection just wastes the one
 # unambiguous signal the device has - by the time seismic/acoustic fusion
@@ -456,13 +478,25 @@ TIER_DURATION_MS = PROTOCOL_DURATION_MS_MAX
 # a full-volume horn on every trigger near homes is not defensible; the
 # light has no equivalent bystander-harm ceiling.
 #
-# All three map through gain_to_duty() to full PWM duty on the wing MOSFET.
-# LED_GAIN_MAX_PCT (device/mcu/src/config.h) is 100.0f, so the request is
-# exactly the clamp, not over it - tests/test_cognition_config.py checks
-# that equality holds on both sides.
-LED_TIER_1_GAIN_FRACTION = 1.0
-LED_TIER_2_GAIN_FRACTION = 1.0
-LED_TIER_3_GAIN_FRACTION = 1.0
+# Standing at 0.85 on all three tiers, ADR 0037, which amends E.3's "every
+# tier at LED_GAIN_MAX_PCT". Like the horn column, this began on 2026-09-10
+# as the LED half of the run #1 power mitigation, and the shared-buck fault
+# it was mitigating is fixed - the LED rail has its own buck now. It is kept
+# by decision: 15% off peak wing-MOSFET current is cheap margin on the
+# as-wired parallel string, and nothing measured distinguishes 85% from 100%
+# at foliage range, where the 31 Aug camera-diff sweep already found
+# brightness sitting below the threshold that matters.
+#
+# E.3's actual argument survives intact, because it was never about the
+# number. E.3 retired *brightness as an escalation axis*; all three tiers are
+# still equal here, so there is no graded ramp and no dimmed low rung.
+# LED_GAIN_MAX_PCT (device/mcu/src/config.h) is 100.0f and the request now
+# sits deliberately under it rather than exactly on it, so the cross-boundary
+# drift check in tests/test_cognition_config.py asserts "at or under the
+# clamp, equal across tiers" instead of equality.
+LED_TIER_1_GAIN_FRACTION = 0.85
+LED_TIER_2_GAIN_FRACTION = 0.85
+LED_TIER_3_GAIN_FRACTION = 0.85
 
 # No tier fires IR, because IR is not a deterrent. The illuminator lets the
 # camera see at night; it does not push an animal anywhere, and the two
@@ -482,20 +516,21 @@ LED_TIER_3_GAIN_FRACTION = 1.0
 # IR_MIN_INTERVAL_MS duty gate. See services/config.py's IR_WATCH_* block.
 #
 # LED signature per tier (ADR 0014, revised by ADR 0014 E.2 for real
-# dual-wing, then E.3 for max-gain-always). Gain is full on every tier;
+# dual-wing, then E.3 to retire the brightness axis, then ADR 0037 for the
+# value it settles at). Gain is equal on every tier;
 # escalation runs on wing count, pattern character, and - top rung only -
 # strobe rate. It does NOT run on brightness, and past Tier 2 it does not
 # run on anything DFO testimony validates: practitioner input backs strobe
 # as a technique, not any specific two-light phase relationship or the 7-vs
 # -11 Hz choice (ADR 0014 E.3 "Honest bound"):
 #
-#   Tier 1 - fast strobe (pattern_id 2), single wing (channel 0), full gain,
+#   Tier 1 - fast strobe (pattern_id 2), single wing (channel 0), equal gain,
 #     LED_FAST_STROBE_HZ. One wing, quietest horn - the mildest response
 #     is "one bright strobe," not "a dim one."
-#   Tier 2 - sweep (pattern_id 4), BOTH wings (channel 2), full gain,
+#   Tier 2 - sweep (pattern_id 4), BOTH wings (channel 2), equal gain,
 #     LED_FAST_STROBE_HZ. First real dual-wing: the two wings antiphase at
 #     the base rate, adding an apparent-movement cue and doubling emitters.
-#   Tier 3 - BOTH wings (channel 2), full gain, LED_STROBE_FAST_HZ, rotating
+#   Tier 3 - BOTH wings (channel 2), equal gain, LED_STROBE_FAST_HZ, rotating
 #     each fire between pulse-both-sync (pattern_id 5, doubled synchronized
 #     strobe at the faster rate) and flicker-both-independent (pattern_id 6,
 #     two independently-seeded erratic sources - the unpredictability lever,

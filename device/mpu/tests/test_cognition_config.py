@@ -41,19 +41,6 @@ TIER_FLOOR_OVERRIDE = pytest.mark.xfail(
     strict=True,
 )
 
-# Horn and LED gain. Committed code fires every tier at full gain. A rig on
-# a soft supply may pin the columns lower to buy sag headroom - the 10 Sept
-# run #1 mitigation did, at horn 0.20/0.28/0.35 and LED 0.85. That is a
-# power decision, separate from the ladder, so it gets its own marker.
-_GAIN_OVERRIDDEN = (
-    config.TIER_3_GAIN_FRACTION != 1.0 or config.LED_TIER_1_GAIN_FRACTION != 1.0
-)
-GAIN_OVERRIDE = pytest.mark.xfail(
-    _GAIN_OVERRIDDEN,
-    reason="suspended by the 10 Sept horn/LED gain reductions in cognition/config.py",
-    strict=True,
-)
-
 MCU_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "mcu" / "src" / "config.h"
 
 
@@ -307,17 +294,28 @@ def test_every_requested_duration_fits_in_the_wire_uint16():
             assert 0 <= duration <= config.PROTOCOL_DURATION_MS_MAX
 
 
-@GAIN_OVERRIDE
-def test_the_top_tier_requests_the_protocol_maximum():
-    """Tier 3 must stay exactly the pre-bandit behaviour.
+def test_the_top_tier_is_the_strongest_rung():
+    """Tier 3 must stay the hardest response the ladder can give.
 
     The ladder was added to make quieter responses possible, not to weaken
-    the loudest one. If tier 3 ever asks for less than the protocol max,
-    this change has silently reduced the device's strongest deterrence.
+    the loudest one. ADR 0037 moved the gain column off the protocol ceiling
+    for bystander-safety reasons, so the invariant is no longer "tier 3 asks
+    for the protocol max". What still has to hold is that no lower tier asks
+    for more than tier 3 on either actuator - that would invert the ladder -
+    and that duration still runs to the protocol max, leaving
+    the MCU clamp the single authority on how long a fire lasts.
     """
     top = config.DETERRENCE_TIERS[Tier.TIER_3]
-    assert top.horn_gain_pct == config.PROTOCOL_GAIN_PCT_MAX
-    assert top.led_gain_pct == config.PROTOCOL_GAIN_PCT_MAX
+    for tier in Tier:
+        action = config.DETERRENCE_TIERS[tier]
+        assert action.horn_gain_pct <= top.horn_gain_pct, (
+            f"{tier.name} asks for more horn gain than TIER_3 - the ladder "
+            f"is inverted."
+        )
+        assert action.led_gain_pct <= top.led_gain_pct, (
+            f"{tier.name} asks for more LED gain than TIER_3 - the ladder "
+            f"is inverted."
+        )
     assert top.horn_duration_ms == config.PROTOCOL_DURATION_MS_MAX
     assert top.led_duration_ms == config.PROTOCOL_DURATION_MS_MAX
 
@@ -441,44 +439,39 @@ def test_each_tier_has_a_distinct_led_signature():
     assert len(set(signatures)) == len(signatures)
 
 
-@GAIN_OVERRIDE
-def test_every_led_tier_fires_at_full_gain():
-    """ADR 0014 E.3: the light is at full output on every tier, no ramp.
+def test_every_led_tier_fires_at_the_same_gain():
+    """ADR 0014 E.3: brightness is not an escalation axis, so there is no ramp.
 
     Escalation is carried by wing count, pattern, and top-rung strobe rate -
-    not brightness. A tier that requested less than full gain would be a
-    regression to the pre-E.3 graded ramp.
+    not brightness. E.3's rule is that the tiers are equal; ADR 0037 settles
+    what they are equal at. A tier that differed from the others would be a
+    regression to the pre-E.3 graded ramp whatever the value.
     """
     gains = [config.DETERRENCE_TIERS[tier].led_gain_pct for tier in Tier]
-    assert gains == [config.PROTOCOL_GAIN_PCT_MAX] * len(gains), (
-        f"LED gains {gains} - E.3 requires every tier at "
-        f"PROTOCOL_GAIN_PCT_MAX ({config.PROTOCOL_GAIN_PCT_MAX})."
+    assert len(set(gains)) == 1, (
+        f"LED gains {gains} - E.3 requires every tier at the same gain, "
+        f"because brightness is not an escalation axis."
     )
 
 
-@GAIN_OVERRIDE
-def test_every_led_tier_requests_exactly_the_mcu_led_clamp():
+def test_no_led_tier_requests_more_than_the_mcu_led_clamp():
     """The drift check cognition/config.py's LED gain-fraction comment defers here.
 
-    ADR 0014 E.3 fires every tier at full gain, so each request must equal
-    LED_GAIN_MAX_PCT exactly - not exceed it (the MCU would clamp, hiding a
-    config error) and not fall under it (that would be a covert brightness
-    ramp). If the firmware cap ever moves, this fails and the intent gets
-    re-stated on both sides of the boundary.
-
-    Suspended while the 2026-09-10 field-trial LED override is active, for
-    the same reason and by the same mechanism as
-    test_every_led_tier_fires_at_full_gain above - the override holds every
-    tier at 0.85 to buy sag headroom on the shared LED buck. The mark is
-    condition-gated and strict, so restoring LED_TIER_1_GAIN_FRACTION to 1.0
-    re-arms this check automatically rather than leaving it silently off.
+    ADR 0037 holds every tier at 85% of the protocol range rather than on
+    LED_GAIN_MAX_PCT itself, so this is no longer an equality check. What
+    still has to hold is that no request exceeds the firmware cap: the MCU
+    would clamp it, and a config error hidden behind firmware that silently
+    did the right thing is exactly what this boundary check exists to catch.
+    The number is read out of config.h rather than hardcoded here, so if the
+    firmware cap ever moves this fails and the intent gets re-stated on both
+    sides of the boundary.
     """
     led_gain_max_pct = _read_mcu_define("LED_GAIN_MAX_PCT")
     for tier in Tier:
         gain = config.DETERRENCE_TIERS[tier].led_gain_pct
-        assert gain == led_gain_max_pct, (
-            f"{tier.name} requests {gain}% LED gain; ADR 0014 E.3 requires "
-            f"exactly LED_GAIN_MAX_PCT ({led_gain_max_pct}%)."
+        assert gain <= led_gain_max_pct, (
+            f"{tier.name} requests {gain}% LED gain, over the firmware's "
+            f"LED_GAIN_MAX_PCT ({led_gain_max_pct}%) - the MCU would clamp it."
         )
 
 

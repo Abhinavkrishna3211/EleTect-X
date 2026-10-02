@@ -277,6 +277,11 @@ for a dimmed deterrence flash** — a partially-lit strobe aimed at a forest edg
 as "less threatening, saving headroom," it just reads as a weaker light. Every deterrence tier now
 fires the LED at `LED_GAIN_MAX_PCT` (100%). This supersedes the per-tier gain language in E.2.
 
+> **Superseded in part by ADR 0037 (2 Oct 2026).** The rule E.3 established — that the tiers do
+> not differ in brightness, because a dimmed strobe is a weaker light and not a gentler warning —
+> still stands and is what the test suite asserts. The *value* does not: every tier now fires at
+> 85% rather than 100%. See ADR 0037 for why that 15% is kept.
+
 **What now carries escalation, with the headroom argument E.2 made still intact:**
 - **Wing count** — Tier 1 one wing, Tiers 2-3 both wings. Doubling the number of active light sources is
   the lever with real (if modest) evidentiary support in this ADR — Adams et al.'s multi-unit barrier
@@ -311,6 +316,11 @@ carries the rest of the escalation.
 (`HORN_TIER_1/2/3_GAIN_FRACTION` = 0.25 / 0.45 / 1.0) because `HORN_GAIN_MAX_PCT` is a hearing-safety
 cap for people and livestock near the unit (ADR 0016) — a real physical-harm limit. The LED has no such
 limit at its own max, so "always max" is safe for the light and not for the horn.
+
+> **Superseded by ADR 0037 (2 Oct 2026).** The hearing-safety reasoning above is exactly what
+> ADR 0037 extends: it applies at every tier, not only at the top, so the ramp is now
+> 0.20 / 0.28 / 0.35 and the top rung no longer reaches the protocol maximum. Tiers are
+> distinguished by `track_id` and the LED column, not by loudness.
 
 **IR is reclassified out of the deterrence ladder — as a follow-up, not in this amendment.** IR is a
 940nm camera illuminator for night detection range, not a deterrence actuator; it emits nothing an

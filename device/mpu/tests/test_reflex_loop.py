@@ -73,19 +73,6 @@ TIER_FLOOR_OVERRIDE = pytest.mark.xfail(
     strict=True,
 )
 
-# Horn and LED gain. Committed code fires every tier at full gain. A rig on
-# a soft supply may pin the columns lower to buy sag headroom - the 10 Sept
-# run #1 mitigation did, at horn 0.20/0.28/0.35 and LED 0.85. That is a
-# power decision, separate from the ladder, so it gets its own marker.
-_GAIN_OVERRIDDEN = (
-    cognition_config.TIER_3_GAIN_FRACTION != 1.0 or cognition_config.LED_TIER_1_GAIN_FRACTION != 1.0
-)
-GAIN_OVERRIDE = pytest.mark.xfail(
-    _GAIN_OVERRIDDEN,
-    reason="suspended by the 10 Sept horn/LED gain reductions in cognition/config.py",
-    strict=True,
-)
-
 # The two Boar vision gates: the consecutive-poll streak and the
 # burst-majority requirement. Emptying either lets a fox - which this
 # 2-class model labels "Boar" - admit and confirm on a single poll, which
