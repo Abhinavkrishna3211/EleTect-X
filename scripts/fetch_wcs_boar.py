@@ -58,6 +58,7 @@ already gitignored.
 
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -177,7 +178,12 @@ def fetch_images(selected, out_dir, boxes_by_image, box_label):
     next_ann_id = 1
 
     for i, img in enumerate(selected, 1):
-        safe_name = img["id"].replace("/", "_")
+        # The id comes from the remote index, so it chooses a path here and -
+        # on a decode failure below - an os.remove() target. A whitelist, not a
+        # separator blacklist: "/" alone leaves "..\\..\\x" intact, and this repo
+        # is developed on Windows, where that traverses. With every separator
+        # gone ".." can only ever be a filename, never a path component.
+        safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", str(img["id"]))
         dest = os.path.join(out_dir, f"{safe_name}.jpg")
         if not os.path.exists(dest):
             url = IMAGE_BASE + img["file_name"]
