@@ -1,0 +1,40 @@
+# EleTect X - lint configuration for the off-device Python: ml/ and scripts/.
+#
+# device/mpu carries its own pyproject.toml with a stricter ruleset, because
+# that code runs unattended in a forest and its docstrings are the contract
+# a future engineer reads. Ruff resolves config per file by walking upward,
+# so this file governs everything except device/mpu, which finds its own
+# first.
+#
+# Why this file exists at all: CI ran `ruff check device/mpu ml scripts`
+# from the repo root with no root config, so ml/ and scripts/ were linted
+# with ruff's defaults - a much narrower set than either the authors or the
+# device config assumed. The tell was fifteen `# noqa: BLE001` and
+# `# noqa: E402` directives that ruff then reported as *unused*, because
+# neither rule was enabled to be suppressed. The `|| true` on that CI step
+# hid the resulting failure, so the only Python gate in the repo had been
+# red and invisible. Enabling the rules those directives were written for
+# makes them meaningful again and makes the step able to fail.
+
+line-length = 100
+target-version = "py310"
+
+[lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # import sorting
+    "B",   # bugbear - real bugs, not style
+    "UP",  # pyupgrade
+    "RUF", # ruff's own, incl. RUF100 for stale noqa
+    "BLE", # blind except - what the existing noqa directives suppress
+]
+# These are data-pipeline and bench scripts, not the device control path.
+# The device's "every public function gets a one-line contract" rule (D) and
+# its naming rule (N) are deliberately not imposed here: a one-off dataset
+# fetcher does not earn the same ceremony as reflex_loop.py, and pretending
+# otherwise produces noqa noise rather than better scripts.
+#
+# E501 is off because these files carry long literal URLs, dataset ids and
+# API query strings that cannot be wrapped without being made wrong.
+ignore = ["E501"]
