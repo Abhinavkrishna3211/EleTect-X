@@ -2,12 +2,12 @@
 
 Single source of every Bridge timeout, retry policy, and filesystem path the
 cognition layer depends on (ENGINEERING_CONVENTIONS.md 2), mirroring the
-shape of device/mcu/include/config.h: one rationale comment per constant, no
+shape of device/mcu/src/config.h: one rationale comment per constant, no
 magic numbers inline in logic files.
 
 Two things this file deliberately does NOT hold:
 - Actuator burst caps, cooldowns and gain ceilings. Those are enforced
-  on-MCU (device/mcu/include/config.h) and the MPU only ever sees the
+  on-MCU (device/mcu/src/config.h) and the MPU only ever sees the
   clamped ack, never a raw limit to duplicate here
   (device/mpu/bridge/schema.md).
 - Fusion weights, bandit hyperparameters, and risk thresholds. Those live in
@@ -50,7 +50,18 @@ logger = logging.getLogger(__name__)
 # (uint8) field - the DFPlayer content index (AT+PLAYNUM) for this tier's
 # sound category, so the horn escalates on *what* it plays, not only how
 # loud. A real new wire field, so it bumps the version.
-SCHEMA_VERSION = 4
+#
+# 4 -> 128 on 2026-09-09: no wire-shape change, value change only. The
+# on-device MsgPack library (0.4.2, Arduino_RPClite's Unpacker.h) mis-detects
+# positive-fixint-encoded values (0-127) as the wrong type for a uint8_t
+# parameter - schema_version was always sent in that range, so every
+# actuator RPC call failed at deserialization regardless of everything else
+# being correct (bench-verified: value 200 unpacked fine, 0 and 1 did not).
+# 128 stays a valid uint8_t but forces the explicit uint8 msgpack format,
+# which unpacks correctly on this library version. Mirrors
+# device/mcu/src/config.h's BRIDGE_SCHEMA_VERSION; both sides must bump
+# together.
+SCHEMA_VERSION = 128
 
 # ---------------------------------------------------------------------------
 # Node site attributes (set at commissioning, not sensed)

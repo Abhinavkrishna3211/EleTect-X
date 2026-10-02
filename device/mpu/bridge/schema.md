@@ -2,7 +2,20 @@
 
 Source of truth for the MCU↔MPU function boundary (`ENGINEERING_CONVENTIONS.md` §6). Both sides are
 hand-written against this table, not against each other's code. Every payload carries `schema_version:
-uint8 = 4` as its first field; bump on any breaking field change, never reuse a version number.
+uint8 = 128` as its first field; bump on any breaking field change, never reuse a version number.
+
+**The wire value is 128, not 4.** The schema is *semantically* at version 4 — the version-history
+entries below number 1..4 and that numbering continues — but the byte actually sent is `128`. That is
+not a fifth revision; it is version 4 carried in a value that survives the wire. The on-device MsgPack
+library (0.4.2, vendored in `Arduino_RPClite`) mis-decodes any unsigned integer small enough to encode
+as MessagePack *positive fixint* (0-127, one byte), rejecting the call with `MALFORMED_CALL_ERR`
+despite the value being correct; 128 is the first value that forces the explicit `uint8` (`0xCC`)
+format, which decodes correctly. Bench-verified 2026-09-09 by holding every other field fixed and
+varying only this one. Both sides carry it: `device/mcu/src/config.h`'s `BRIDGE_SCHEMA_VERSION` and
+`device/mpu/services/config.py`'s `SCHEMA_VERSION`, which must move together. The same bug affects
+every other small unsigned field on the boundary, and those could *not* be renumbered this way because
+their values are meaningful — see `device/mpu/bridge/wire_compat.py`, which patches the encoder
+instead. A future schema 5 would be sent as `129`.
 
 **Version history**
 - `1` — initial boundary.
