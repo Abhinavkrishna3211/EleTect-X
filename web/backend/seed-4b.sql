@@ -35,16 +35,16 @@ on conflict (id) do update
 with t as (select now() - interval '15 hours' as base)
 insert into events (node_id, ts, species, confidence, direction_deg, action, outcome, priority, media_url, corridor)
 select * from (
-  select 'S7-12', (select base from t) + interval '0 min',  'elephant', 0.82, 45, null,            null,        'high', 'seed4b',
+  select 'S7-12', (select base from t) + interval '0 min',  'elephant', 0.82, 45, null,            null,        'normal', 'seed4b',
          '{"activation":"CA-2231","seq":0,"role":"detect","heading_deg":45,"note":"Ground vibration caught the herd first; pre-armed the neighbours"}'::jsonb
   union all
-  select 'S7-06', (select base from t) + interval '4 min',  'elephant', 0.91, 44, 'Strobe + horn', 'retreated', 'high', 'seed4b',
+  select 'S7-06', (select base from t) + interval '4 min',  'elephant', 0.91, 44, 'Strobe + horn', 'retreated', 'normal', 'seed4b',
          '{"activation":"CA-2231","seq":1,"role":"deter","heading_deg":44,"note":"Low-frequency horn and strobe on the village side; herd turned"}'::jsonb
   union all
-  select 'S7-07', (select base from t) + interval '9 min',  'elephant', 0.88, 41, 'Blue strobe',   'retreated', 'high', 'seed4b',
+  select 'S7-07', (select base from t) + interval '9 min',  'elephant', 0.88, 41, 'Blue strobe',   'retreated', 'normal', 'seed4b',
          '{"activation":"CA-2231","seq":2,"role":"deter","heading_deg":41,"note":"Blue strobe pulsed to hold the western flank"}'::jsonb
   union all
-  select 'S7-05', (select base from t) + interval '13 min', 'elephant', 0.85, 39, null,            null,        'high', 'seed4b',
+  select 'S7-05', (select base from t) + interval '13 min', 'elephant', 0.85, 39, null,            null,        'normal', 'seed4b',
          '{"activation":"CA-2231","seq":3,"role":"escort","heading_deg":39,"note":"Kept quiet; escape lane held open toward the ridge gap"}'::jsonb
   union all
   select 'S7-04', (select base from t) + interval '18 min', 'elephant', 0.80, 36, null,            null,        'normal', 'seed4b',
@@ -53,6 +53,23 @@ select * from (
   select 'S7-09', (select base from t) + interval '22 min', 'elephant', 0.87, 34, null,            'retreated', 'normal', 'seed4b',
          '{"activation":"CA-2231","seq":5,"role":"detect","heading_deg":34,"note":"Confirmed the herd clearing back into the forest"}'::jsonb
 ) as s;
+
+-- Raise the four CA-2231 rows the narrative needs as urgent back to 'high',
+-- as an UPDATE rather than in the INSERT above.
+--
+-- The events->send-alert Database Webhook fires on INSERT only (README step 6)
+-- and send-alert pages on priority 'high' or 'critical'. An elephant row
+-- inserted at 'high' therefore reaches every officer and every opted-in
+-- resident within 3 km - and the S7-* coordinates in this file are real
+-- Kothamangalam forest-edge positions, not invented ones. Refreshing demo data
+-- is not a reason to put a fake elephant on a villager's phone at 2 a.m.
+--
+-- Inserting at 'normal' and raising afterwards gives the dashboard the same
+-- four urgent rows with no fan-out. Do not fold this back into the INSERT.
+update events set priority = 'high'
+ where media_url = 'seed4b'
+   and corridor->>'activation' = 'CA-2231'
+   and (corridor->>'seq')::int <= 3;
 
 -- A second, smaller activation (CA-2188, boar, a few days earlier) so the Corridor
 -- view's activation selector has more than one entry.
