@@ -3,7 +3,7 @@
 Single source of every value the log-odds fusion formula
 (`L = L_prior + sum(a_i * w_i * (l_i - l0_i))`, CONTEXT.md 4) and the
 contextual-bandit deterrence policy need, mirroring the shape of
-device/mcu/include/config.h and services/config.py: one rationale comment per
+device/mcu/src/config.h and services/config.py: one rationale comment per
 constant, no magic numbers inline in fusion.py or bandit.py
 (ENGINEERING_CONVENTIONS.md 2).
 

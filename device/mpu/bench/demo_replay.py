@@ -1,4 +1,4 @@
-"""Host-only replay of both reflex-loop entry points, for the Robu bench demo.
+"""Host-only replay of both reflex-loop entry points, for bench work.
 
 No hardware attached, no Bridge, no camera. Two passes, and the difference
 between them is load-bearing -- do not read the second as if it carried the
@@ -129,7 +129,7 @@ REPLAY_EVENTS: tuple[StompEvent, ...] = (
     StompEvent(12, 4.20, True, 0.982),
 )
 
-# device/mcu/include/config.h, validated against real hardware -- see
+# device/mcu/src/config.h, validated against real hardware -- see
 # docs/KNOWN_GAPS.md's "STA_SAMPLES, STA_LTA_TRIGGER_RATIO" entry. Mirrored
 # here (not imported -- this is Python, config.h is C++) purely so the
 # narrative below can name the real gate value.

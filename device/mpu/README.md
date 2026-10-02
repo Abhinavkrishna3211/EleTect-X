@@ -51,7 +51,7 @@ cognition/
   experience.py  SQLite experience store (triggers/attempts/action values), the only I/O here
   config.py      fusion weights + bandit hyperparameters and tier ladder — one rationale each
 services/
-  config.py      MPU-side tuning constants, one rationale each (mirrors device/mcu/include/config.h)
+  config.py      MPU-side tuning constants, one rationale each (mirrors device/mcu/src/config.h)
 comms/           LoRa uplink (future build call)
 models/          on-device vision model export, gitignored (*.tflite)
 tests/           host-only contract + config tests, never synced to the board
@@ -223,7 +223,7 @@ classifier runs on the MCU yet, so there is nothing real to replay. The vision-g
 run either — the bench has no camera and no actuators, so `start_vision_event` is a stub that
 records the call. What pass 2 demonstrates is the routing, and that part is the real function.
 
-Built for the Robu bench demo, where the actuators aren't wired to the board yet.
+Built for bench work on a board whose actuators are not wired up yet.
 
 ### Running the demo replay
 
