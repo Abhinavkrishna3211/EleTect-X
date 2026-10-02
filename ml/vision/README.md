@@ -28,30 +28,39 @@ substitute for it.**
 | Elephant (synthetic) | `pseudo-ir-elephant` | derived from the real sources above | 218 | 348 |
 | **Elephant total** | *(5 sources)* | | **4,094** | **6,204** |
 | Boar | `trackabox-4ejy9/wild-boar-a1flm/1` | CC BY 4.0 | 1,556 | 2,117 |
-| Boar | `boarwatch/wild-boar-deterrent-pzq5t/1` | CC BY 4.0 | 1,636 | 2,182 |
+| Boar | `boarwatch/wild-boar-deterrent-pzq5t/1` | CC BY 4.0 | 1,839 | 2,441 |
 | Boar | `roboflow-100/trail-camera/2` (relabelled) | CC BY 4.0 | 1,311 | 1,398 |
 | Boar | `wcs-sus-scrofa` | CDLA-Permissive-1.0 | 827 | 1,228 |
 | Boar | `pig-rinoz/wild-pig-at-night/1` (relabelled) | CC BY 4.0 | 64 | 125 |
 | Boar | `swg-eurasian-wild-pig` | CDLA-Permissive-2.0 | 1,800 | 2,373 |
 | Boar (synthetic) | `pseudo-ir-boar` | derived from the real sources above | 200 | 303 |
-| **Boar total** | *(7 sources)* | | **7,394** | **9,726** |
+| **Boar total** | *(7 sources)* | | **7,597** | **9,985** |
 | Background | `swg-empty` | CDLA-Permissive-2.0 | 2,398 | — |
 | Background | `board-captures-day1` | own capture | 26 | — |
 | Background | `board-captures-night1` | own capture | 207 | — |
 | **Background total** | *(3 sources)* | | **2,631** | — |
+| Fox | `deepnetworkdevelopment/fox-detection-7iqxq/2` | CC BY 4.0 | 99 | 102 |
+| Fox | `mgr-l8rhf/fox-sldyl/1` (relabelled) | CC BY 4.0 | 1,244 | 1,247 |
+| Fox | `kawaharalabo/far-infrared-rays-animals/5` (17 classes dropped) | CC BY 4.0 | 463 | 463 |
+| Fox | `kuba-kulik-4wi43/fox-xdf1l/1` (relabelled) | CC BY 4.0 | 599 | 643 |
+| Fox | `project-d4kos/animal_redfox/1` (relabelled) | CC BY 4.0 | 228 | 251 |
+| Fox | `project-one-wildlife-monitoring-system/project-one-wildlife-system-lsden/1` (21 classes dropped) | CC BY 4.0 | 136 | 139 |
+| Fox | `board-captures-fox-encounter1` | own capture | 13 | 13 |
+| **Fox total** | *(7 sources)* | | **2,782** | **2,858** |
+| **Corpus total** | *(22 sources)* | | **17,104** | **19,047** |
 
-**Corrected 4 Sept 2026** — only 64 of the 7,394 Boar images are explicitly *named* as real night/IR
+**Corrected 4 Sept 2026** — only 64 of the 7,597 Boar images are explicitly *named* as real night/IR
 camera-trap imagery (`pig-rinoz/wild-pig-at-night`), but that undercounts the true figure:
 `trail-camera-v2` (1,311 images) is documented in its own `DATASETS` entry as "day + IR-night," and a
 14-image visual sample found 57% were real night/IR trigger frames — extrapolating that rate across
-the source gives a corrected estimate of roughly 814 real night/IR images, ~11% of 7,394, not 0.87%.
+the source gives a corrected estimate of roughly 814 real night/IR images, ~11% of 7,597, not 0.87%.
 **Quantified, 4 Sept 2026 (Boar-gap close-out session, Step 4.1)** — the two sources above that were
 only "unquantified" are now counted. A seeded 40-image visual sample of each
 (`scripts/audit_night_ir_sample.py`) found `swg-eurasian-wild-pig` **60% night/IR** (24/40; the
 species subdirectory it resolves to on disk holds 2,350 images, not the 1,800 recorded in the
 manifest — flagged, not reconciled) and `wcs-sus-scrofa` **22.5% night/IR** (9/40 of 828). So 11%
 was indeed a floor: folding both sources' measured proportions in, the real night/IR share of the
-7,394-image Boar corpus is well above the original ~11% estimate. The same pass sampled Elephant's
+7,597-image Boar corpus is well above the original ~11% estimate. The same pass sampled Elephant's
 largest source, `asian-elephants-dataset-v1` (2,358 images), previously described only as containing
 "a meaningful fraction" of uncredited real IR content — measured at **72.5% night/IR** (29/40),
 meaning Elephant is not the better-covered class for night/IR that this document previously assumed;
@@ -164,10 +173,43 @@ sample" discipline `ml/seismic/README.md` uses.
 
 | Class | Groups | Images in multi-image groups | Training | Testing |
 |---|---|---|---|---|
-| Elephant | 2,260 | 1,107 (34%) | 2,559 | 721 (22.0%) |
-| Boar — trackabox | 1,273 | 631 (33%) | 1,483 | 418 (22.0%) |
-| Boar — BoarWatch top-up | 1,379 | 0 (0%) | 1,076 | 303 (22.0%) |
-| **Boar total** | **2,652** | **631 (19%)** | **2,559** | **721 (22.0%)** |
+| Elephant | 2,227 | 2,606 (64%) | 3,034 | 1,060 (25.9%) |
+| Boar | 6,519 | 1,127 (15%) | 5,861 | 1,736 (22.9%) |
+| Background | 2,407 | 229 (9%) | 2,060 | 571 (21.7%) |
+| Fox | 990 | 1,920 (69%) | 2,219 | 563 (20.2%) |
+| **Total** | **12,143** | **5,882 (34%)** | **13,174** | **3,930 (23.0%)** |
+
+**Corrected 2 Oct 2026** — the previous version of this table was written when the corpus was two
+classes and about 6,500 images, and it had drifted badly: it reported Elephant at 2,559 training /
+721 testing against the manifest's 3,034 / 1,060, and carried no Background or Fox rows at all. It
+is now read straight out of `ml/vision/dataset_manifest.json`. The per-source breakdown it used to
+carry is gone because the manifest does not keep one — `split_by_group()` is called once per
+`DATASETS` entry but only the merged per-class filename lists survive into the manifest, so a
+per-source split row cannot be reproduced from the committed artifact and would have to be
+retyped from a run log. Held-out fractions now vary between 20.2% and 25.9% rather than sitting at
+a uniform 22.0%: whole groups are assigned, a group is indivisible, and Elephant's and Fox's
+groups are much larger on average, so the 20% target overshoots further for them.
+
+**Known limitation, measured 2 Oct 2026 — synthetic pseudo-IR images are split independently of
+the real frames they were derived from.** `make_pseudo_ir_vision.py` writes each output as
+`pseudoir_<n>_<original filename>`, and `split_by_group()` runs once per `DATASETS` entry, so
+`pseudo-ir-elephant` is split with no knowledge of where its source frames landed in the real
+Elephant sources' split. `_original_filename()` does strip that prefix, but only for the
+contamination filters — the grouping call gets the raw prefixed name, which is its own group key.
+
+Measured against the committed manifest: of the 418 synthetic images, 181 still have their real
+source frame present in the corpus; 65 of those pairs straddle the train/test boundary; and in 35
+cases the real frame is held out while its transformed twin is in training. That is 1.25% of the
+2,796 Elephant+Boar test images. The transform is a weighted grayscale, a gamma curve and a radial
+vignette — geometry and boxes are copied verbatim — so each pair is a near-duplicate, not an
+independent sample.
+
+The effect on the reported scores is bounded by that 1.25% and does not invalidate them, but it is
+leakage and it is the wrong default: synthetic augmentation belongs in training only. The fix
+belongs in the uploader rather than the generator — force every `synthetic: True` record to
+`training`, and drop any whose source frame is held out. It is not applied yet because the split is
+deliberately append-only and these samples are already live in the Edge Impulse project, so
+applying it means re-categorising data that is already uploaded.
 
 The BoarWatch top-up's own split is effectively per-image random, not group-protected: every
 sampled group already contributes exactly one image (that is the point of the group-aware
