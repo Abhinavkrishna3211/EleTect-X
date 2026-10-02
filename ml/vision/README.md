@@ -483,8 +483,8 @@ Boar's gain and Elephant's small give-back mostly cancel once reweighted by the 
 data measurably helped Boar without hurting Elephant much, which validates path (b) was worth
 doing — but it was not the single fix that closes the gap to 90%. The plan's remaining path, (a)
 step 6's heavier/custom architecture (BYOM or ONNX custom learning block), is the only untried lever
-left; it is a genuine platform change, not a further single-variable retrain, and should go back to
-the user as a decision point before starting.
+left; it is a genuine platform change, not a further single-variable retrain, and should be raised
+as a decision point before starting.
 
 ## 27 Aug — 3a species verification: Elephant class is contaminated with African bush elephant
 
@@ -568,7 +568,7 @@ filter itself being implemented and proven correct locally.
 
 ## 27 Aug — train/test category drift from two dataset-composition changes, and how it was fixed
 
-Two changes to the candidate pool this session — the local SHA1 content-dedup fix (71 Boar + 2
+Two changes to the candidate pool in this pass — the local SHA1 content-dedup fix (71 Boar + 2
 Background byte-identical duplicates dropped) and the species filter above (33 Elephant images
 dropped) — each shrank the pool that `split_by_group`'s seeded random shuffle draws from. Because
 the shuffle order is deterministic but keyed off the *current* set of group keys, removing images
@@ -1005,7 +1005,7 @@ Two separate causes, both benign:
   this-run's-own-freshly-parsed-count, but `actual` is the project's cumulative total across every
   upload run in the session.** The reconciliation guard was written under the Phase 1 assumption of a
   single full upload into an empty project (1097972 was empty at the start of this pass — see Phase 0
-  above); it was never updated for the reality that this session ran several separate, smaller upload
+  above); it was never updated for the reality of several separate, smaller upload
   passes into the same project (the original full re-upload, the SWG top-up, this WCS-specific run).
   Each run recomputes `expected` from only its own parse of the `DATASETS` list, so a run that adds one
   small new source will always show a mismatch against the project's true cumulative total unless it
@@ -1082,7 +1082,7 @@ contaminated source flagged in the 27 Aug species audit above) was written and i
 non-interactive launch attempt was declined by the local tooling's own safety gate — a bulk DELETE
 against 2,397 samples on paid Enterprise infrastructure is the kind of hard-to-reverse action that
 correctly needs a human to actually press go, not something to route around. It has not been run.
-**Every Elephant-class number in this file up to and including tonight's runs, including the
+**Every Elephant-class number in this file up to and including the runs above, including the
 `retrain_bg_expanded` run below if present, was measured with this contamination still present.**
 Running the cleanup script by hand and doing one more clean retrain is the next concrete step once a
 human is back at the keyboard.
@@ -1267,7 +1267,7 @@ board's current software image:**
   Confirms and sharpens the plan's original BETA caveat — it isn't just an early-access label in Studio,
   the runtime support genuinely isn't present yet on this hardware/software combination. Left
   unresolved: installing it would need a proprietary Qualcomm package this pass has no lead on, and
-  root access this session's SSH login doesn't have (`sudo` prompts for a password not available here).
+  root access the SSH login doesn't have (`sudo` prompts for a password not available here).
 - **Practical consequence for the deployment decision**: no CPU-vs-GPU latency comparison is possible
   this pass. The CPU number alone (~30 FPS) is already well above any plausible requirement for a
   camera-trap-style trigger-on-motion pipeline, so this does not block a deployment decision — it just
@@ -1306,7 +1306,7 @@ a confirmed hardware/software gap, not by a permissions limitation this pass sim
 `edge-impulse-linux-runner`'s normal camera path needs `gst-launch-1.0`
 (`gstreamer1.0-tools`). The board has every gstreamer *library* package installed
 (`gstreamer1.0-plugins-good`, `-base`, `-libcamera`) but not the CLI-tools package that ships the
-binary itself, and again `sudo` needs a password this session doesn't have. Worked around with
+binary itself, and again `sudo` needs a password this login doesn't have. Worked around with
 `--fake-camera <file>`, which reuses the same decode→resize→infer path minus the V4L2 grab step —
 the latency number above is real inference time, not a live-capture artifact, but it does mean no live
 day/IR-night true-negative frames were captured this pass (that half of Phase 5 needs either the
@@ -1409,7 +1409,7 @@ decomposed in full before any live action:
   an overwrite rather than a merge, the earlier run's ~550 Boar and ~628 Background images — real,
   already uploaded, still live in project 1097972 right now — dropped out of local
   `_annotations.coco.json` and `dataset_manifest.json` tracking entirely. They were never bad data;
-  they simply became invisible to the pipeline's own bookkeeping. **Decision (with the user): leave
+  they simply became invisible to the pipeline's own bookkeeping. **Decision: leave
   them live, do not delete and do not attempt to merge them back into tracking this pass.** Deleting
   would discard real working data for the exact class (Boar) that is this project's accuracy
   bottleneck, for no quality reason — unlike `thai-elephant-dataset-v6`, there is no audit finding
@@ -1579,7 +1579,7 @@ Per an explicit user decision: the live confidence threshold on the deployed lea
 "min_score", "value": 0.05}`), confirmed applied (`{"success": true}`).
 
 **This is a test-capture-only value for the upcoming field trial, not the production default.**
-Rationale, stated by the user directly: during this field test, ranger alerts are not being sent from
+Rationale: during this field test, ranger alerts are not being sent from
 vision detections, so the elevated false-positive rate this threshold produces (24.5% of genuinely
 empty scenes fire per the sweep table above) costs nothing operationally — the system is only
 recording what it sees for later review. Missing a real elephant, by contrast, has a real cost even in
@@ -1668,7 +1668,7 @@ forward explicitly rather than dropped.
 
 ## 28 Aug — data-quality re-verification: a TV-broadcast overlay finding, and a real gap in the African-elephant filter, both currently live in the corpus the deployed model was trained on
 
-Triggered by a training sample the user spotted directly in Studio's Data Acquisition view —
+Triggered by a training sample spotted directly in Studio's Data Acquisition view —
 `0003-127-...jpg`, a Thai TV news broadcast screen-capture (channel bug, live stock ticker, anchor
 picture-in-picture) with an Elephant box drawn on the animal visible inside the broadcast footage —
 with the explicit instruction to re-verify labeling correctness and dataset quality generally, not
@@ -1728,7 +1728,7 @@ forest-camera-trap negatives compared to the real SWG/board-captured negatives a
 The `WhatsApp-Image-*` clips sampled alongside these do carry real Elephant boxes and read as genuine
 user-submitted sighting photos — a different, apparently-clean category, not further audited this pass.
 
-**What was not done, stated plainly.** The user asked to verify bounding boxes in every single image
+**What was not done, stated plainly.** The brief was to verify bounding boxes in every single image
 in the training corpus. That was not done, and is not achievable by hand in the time remaining before
 2 Sept — the corpus is 6,560+ images across four sources; a full manual pass is the same order of
 effort as the per-image Boar relabel that was already assessed and declined for the same reason
@@ -1749,7 +1749,7 @@ numpy's newer, stricter default), not anything caller-side to fix. **Both of Edg
 automated data-quality tools are dead ends on this project right now** — one gated to staff, the other
 broken — so the one-frame-per-clip manual sampling above is the only method that actually works today.
 
-**No remediation implemented yet.** This entry is the honest verification the user asked for, not a
+**No remediation implemented yet.** This entry is the honest verification that was asked for, not a
 fix. Two concrete, cheap options for the remaining findings, neither yet executed: (a) extend
 `AFRICAN_ELEPHANT_FILENAME_MARKERS` with the broader stock-photo-genre pattern and re-run the
 existing filter (catches the confirmed gap mechanically); (b) add a `TV_BROADCAST_CLIP_PREFIXES`
@@ -1762,10 +1762,10 @@ could be called complete. Both would require a retrain to take effect, and the c
 
 ## 28 Aug — data-quality remediation: both fixes implemented, a leak into the synthetic pipeline caught along the way, 581 contaminated samples deleted from the live project
 
-Follow-up to the entry above. The user's explicit call, given both findings: fix both now and retrain,
+Follow-up to the entry above. The explicit call, given both findings: fix both now and retrain,
 rather than defer either — contaminated data actively hurts real-world recall regardless of what it
 does to the held-out number, so a smaller clean corpus beats a larger contaminated one. Deferred: the
-~30 smaller unsampled clips, per the user's explicit instruction not to block this fix on auditing them
+~30 smaller unsampled clips, under an explicit instruction not to block this fix on auditing them
 first; that stays a follow-up pass.
 
 **Fix 1 — `AFRICAN_ELEPHANT_VISUALLY_CONFIRMED_FILENAMES`.** All 15 "safari stock photo genre" images
@@ -1897,7 +1897,7 @@ does) rather than trusting the persisted duplicates ledger's per-label history a
 
 ## 28 Aug — data-quality re-verification, third pass: a wholesale non-field-photography batch in elephant-detection-cxnt1-v2, wider than the broadcast-filter gap it was found through
 
-Sharpened priority from the user: Elephant is now the primary target, urgently, with an explicit bar
+Sharpened priority: Elephant is now the primary target, urgently, with an explicit bar
 (recall >92%, including at night) and a direct instruction to re-audit the existing corpus's annotation
 quality rather than only add new sources. Two candidate Roboflow IR/night datasets were vetted first —
 `elephant-thermal` (misleadingly named: real sampled images are ordinary daylight color photos of a
@@ -1966,7 +1966,7 @@ permission classifier as a live external-service delete, correctly) before it ru
 
 **Net effect on the real Elephant corpus once this lands**: elephant-detection-cxnt1-v2 drops from
 2,683 to 2,519 real boxed+background images; combined real Elephant total (all sources, pre-synthetic)
-drops from 5,235 to 5,071. Boar is unaffected by this pass — the user's stated priority this round is
+drops from 5,235 to 5,071. Boar is unaffected by this pass — the stated priority this round is
 Elephant, urgently, with Boar explicitly lower-priority/best-effort.
 
 <!-- LIVE_SYNC_PLACEHOLDER -->
@@ -2036,12 +2036,12 @@ the 67-filename curated list — most of the first-pass 56 were apparently alrea
 session not explicitly logged here, so this is the real live delta from the 11 new filenames plus a
 couple of pseudo-IR derivatives.
 
-**Frame-clip subsampling — the user's standing 28 Aug decision, implemented this pass.** The 984-image
+**Frame-clip subsampling — the standing 28 Aug decision, implemented this pass.** The 984-image
 "frame" clip in elephant-detection-cxnt1-v2 (frame4338-frame5791, ~39% of the whole source, one
 continuous dashcam sequence confirmed by an evenly-spread 10-frame contact sheet across the whole
 numeric range — the viral RAJAMURUGAN "elephant reaching into a stopped truck" video, baked-in "U TURN"
 overlay text) is a real elephant, not a species/broadcast defect, but its scale is duplication rather
-than diversity. Per the user's explicit choice ("subsample to ~8-10 frames"), a new `cap_named_group()`
+than diversity. Per the explicit choice to "subsample to ~8-10 frames", a new `cap_named_group()`
 function in `scripts/edge_impulse_upload_vision.py` cuts one named group down to a target count, evenly
 spread by embedded frame number (not a random draw) so the frames kept actually span the scene's
 distinct beats — approach, reach, retreat — rather than risking a random draw clustering within one beat.
@@ -2061,8 +2061,8 @@ sampling before the cap existed).
 **Net effect on the real Elephant corpus, now that all three live deletes have landed**: elephant-detection-cxnt1-v2
 dropped further (278 more species-contaminated, 974 more frame-clip duplicates); Boar gained real filter
 coverage (broadcast-clip and second-pass visual contamination) without any new source data. All three
-live-delete scripts were run for real by the user (this environment's own permission classifier blocks
-live external-service deletes from being run directly) — 802 + 13 + 1,008 samples deleted, project
+live-delete scripts were run for real by hand (the automation environment's permission classifier
+blocks live external-service deletes from being run directly) — 802 + 13 + 1,008 samples deleted, project
 1097972 went from 12,794 to 10,971 remote samples. See `HANDOVER.md`'s "28 Aug (later still #4)"
 checkpoint for the exact per-script counts.
 
@@ -2231,7 +2231,7 @@ pass a residential window) - valuable for the true-negative gap, not a substitut
 Elephant-positive IR data.
 
 **29 Aug — `board-captures-night1`: real IR background frames from the deployed camera, four capture
-sessions through the user's own window (device not yet field-mounted).** New `DATASETS` entry, same
+sessions through a house window (the device was not yet field-mounted).** New `DATASETS` entry, same
 "N/A (own capture)" bookkeeping as `board-captures-day1`, zero-box `Background` label. 207 images total
 across four physically distinct framings, each kept in its own `split_by_group` group(s) via a
 session-prefixed filename (`s1_`/`s2_`/`s3_`/`s4_`) so `group_key()`'s trailing-number collapse cannot
@@ -2246,7 +2246,7 @@ merge or straddle them:
   one).
 - `s3_` (41 images) - same clean framing as `s2_`, room light off this time. Numeric check: mean/std
   pixel stats (121.3 / 33.5) came back close to `s1_`'s (124 / 30.2) - room light was not doing
-  meaningful work in this scene either way, told to the user plainly rather than assuming the lights-off
+  meaningful work in this scene either way, reported plainly rather than assuming the lights-off
   take was categorically better.
 - `s4_` (119 images) - continuous hand-panned burst, 201 raw frames captured while the camera was slowly
   panned. No `cv2` available in the local environment, so filtered with a pure-numpy Laplacian-variance
@@ -2399,7 +2399,7 @@ entries). `--dry-run` confirms exact: `wild-boar-a1flm-v1` drops rose from 13 to
 the *previously-known* filenames were already asymmetric 13/10 - the arithmetic is per-source, not a
 global 17-way split). No unexplained gap, reconciliation exit code 0.
 
-**Live-side correction, same discipline as every finding this session**: checked all 40 current entries
+**Live-side correction, same discipline as every finding in this pass**: checked all 40 current entries
 against the live project by sha256 content hash. The 23 from the two earlier passes were already fully
 remediated live (per the 28 Aug `cleanup_boar_visual_contamination_vision.py` run recorded in
 `HANDOVER.md`) - correctly, none of them turned up live again. Of the 17 new entries (39 distinct content
@@ -2532,8 +2532,8 @@ threshold on the tested grid, on either class. Elephant is closer (worst gap 3.2
 threshold) than Boar (worst gap 8.3 pts). This is not a threshold-selection problem — no operating
 point on this curve reaches the target — so closing the remaining gap needs either more/better
 training data (particularly for Boar, which trails Elephant at every threshold), a different
-architecture or larger model size than `nano`, or a relaxation of the bar with an explicit tradeoff
-decision from the user. None of those is decided here; the number is reported plainly, per this file's
+architecture or larger model size than `nano`, or a relaxation of the bar as a deliberate,
+explicit tradeoff. None of those is decided here; the number is reported plainly, per this file's
 standing discipline, rather than smoothed over or threshold-tuned to look like a pass.
 
 ## 29 Aug — on-device CPU benchmark of the retrained model, real hardware, functional correctness confirmed
@@ -2793,7 +2793,7 @@ exported and benchmarked below.
 
 ### Deployed-artifact provenance record (4 Sep 2026, before the Boar-gap close-out session)
 
-Recorded once, before any further training was started this session, so a candidate replacement
+Recorded once, before any further training was started in this round, so a candidate replacement
 can be proven better rather than assumed. `device/mpu/models/vision/` is gitignored
 (`.gitignore` — model binaries not versioned in-repo), so this table is the only durable record of
 which exact bytes are the live checkpoint:
@@ -2804,7 +2804,7 @@ which exact bytes are the live checkpoint:
 | `etx_gpu_final_0830.eim` (30,928,096 bytes) | `64f01e67edbab168999ede5b5e30a6ca7f01a10f8569159728c0ef4035c08635` | Yes — `/home/arduino/etx_gpu_final_0830.eim` matches this hash exactly |
 
 Both files were additionally copied off-repo (outside the working tree) as a local safety-net
-backup before touching anything this session.
+backup before anything here was touched.
 
 A fresh Edge Impulse project version snapshot was also taken (job `53449631`, description
 `pre-boar-gap-closeout-safety-snapshot-20260904`, now version 3 in the project's version list).
@@ -2813,7 +2813,7 @@ corpus has not drifted since the deployed checkpoint was trained; the 121 orphan
 flagged earlier in this file were never folded in, but nothing else changed either. This directly
 answers the corpus-drift question the baseline rerun below was partly designed to catch.
 
-One correction to how "restore" was assumed to work going into this session: the live OpenAPI spec
+One correction to how "restore" was assumed to work going in: the live OpenAPI spec
 (`/api/{projectId}/jobs/restore`) states a version restore "can only [be] applied to a project
 **without data**, and will overwrite your impulse and all settings." A version snapshot is not a
 one-click undo on a live project with data present — restoring would first require emptying the
@@ -2840,7 +2840,7 @@ inference, not pipeline overhead): **136–146 ms, mean ≈138 ms.** End-to-end 
 resize/JPEG-encode/snapshot/classify: ~170 ms/frame → **≈5.7 FPS measured**, comfortably inside the
 `VISION_INFERENCE_TIMEOUT_S = 2.0 s` budget `device/mpu/services/config.py` already assumes for
 this client. **This is ~3.9× faster than Studio's own estimate for this checkpoint** (536 ms int8,
-confirmed live on the Studio "Training output" page by the user's own screenshots this session) —
+confirmed live on the Studio "Training output" page at the time) —
 Studio's latency estimate for `arduino-unoq` is real but conservative relative to what the actual
 board delivers for this model. **Zero of the 123 frames produced a bounding box** (`boundingBoxes
 ... []` on every single classify event) — the live out-the-window scene during this run had no
@@ -2888,7 +2888,7 @@ live, correctly-thresholded inference endpoint immediately rather than needing a
 
 That file previously stated the trained detector "is not exported or wired into anything on this
 board" and that `cognition/fusion.py`'s `VISION` modality "stays permanently unpopulated." Both are
-wrong as of this session (and were already wrong before it — `HttpVisionDetector` and its wiring
+wrong as of this entry (and were already wrong before it — `HttpVisionDetector` and its wiring
 into `main.py` predate this window, confirmed via `git log`/grep, not newly built here). See the
 `docs/KNOWN_GAPS.md` update alongside this entry.
 
@@ -3028,7 +3028,7 @@ appending corrections rather than editing history; treat its "0/123" line as sup
 below wherever the two disagree.
 
 **Setup.** Camera pointed at outdoor trees/foliage (no Elephant or Boar present — camera was not
-aimed at the road/clearing this session), IR illuminator on throughout per the deployed default. Run
+aimed at the road/clearing for this run), IR illuminator on throughout per the deployed default. Run
 via `edge-impulse-linux-runner --model-file etx_cpu_final_0830.eim --profiling --silent` (current
 deployed CPU checkpoint, `no_attn_relu`/`medium`, threshold 0.05), authenticated via the board's
 already-cached Edge Impulse login (no API key passed). Split into 13 sequential foreground chunks
@@ -3152,7 +3152,7 @@ with the frame-level number. Elephant stayed at 0% false positives through every
 `device/mpu/services/config.py`'s `VISION_SPECIES_BURST_MAJORITY_LABELS`/
 `VISION_SPECIES_CONSECUTIVE_POLLS` and the replay script committed alongside it.
 
-Next step (2) — true-negative training data from this exact scene — was **not done this session**;
+Next step (2) — true-negative training data from this exact scene — was **not done in this pass**;
 Workstream 2 (a Boar representation audit and sourcing plan) is docs-only per plan and deliberately
 deferred past the 5 Sept ship date, so the underlying model weights remain untouched. This section's
 numbers describe a consumption-layer fix, not a retrain — the model itself is exactly as accurate (or
@@ -3239,7 +3239,7 @@ from the job log: `..., 'spatial-augmentation': 'low', 'color-space-augmentation
 Job chain: features 53453936 (1.4 min) → training 53453976 (71.8 min — notably faster than the
 baseline rerun's 92.5 min, same architecture and data volume) → held-out test at the threshold left
 over from the prior sweep (0.5) → full 5-point threshold sweep, jobs 53455779…53456254 (4.1–4.8 min
-each), all `successful=True`. Same test split size as every other 4 Sept run this session
+each), all `successful=True`. Same test split size as every other 4 Sept run
 (1,503/844/974).
 
 **Full sweep, this trial:**
@@ -3262,7 +3262,7 @@ plan stated for this lever (colour augmentation should target the RGB→IR domai
 did not hold in practice — a plausible read is that `medium` colour-space augmentation perturbs the
 model away from the still-mostly-daylight-RGB majority of the training corpus faster than it helps
 it generalize toward the minority IR/night content, at this corpus's current night/IR proportion
-(this session's own audit put Boar's real floor at whatever `trail-camera-v2` and the two
+(this file's own audit put Boar's real floor at whatever `trail-camera-v2` and the two
 newly-quantified sources sum to — still well under half the corpus). Untried in the other direction:
 a lighter nudge (no intermediate step exists between `low` and `medium` on this ladder) or pairing
 colour augmentation with more real IR data first, rather than alone against a still-daylight-majority
@@ -3310,7 +3310,7 @@ exactly the adaptation the IR domain needs. Same config as the baseline rerun ot
 `freeze-backbone` changed to `true` (customParameters confirmed from the job log: `...,
 'freeze-backbone': 'true', 'architecture-type': 'no_attn_relu', 'spatial-augmentation': 'low',
 'color-space-augmentation': 'low', ...`). Job chain: features 53457988 (0.3 min) → training
-53457993 (**50.2 min — the fastest training run this session**, consistent with fewer trainable
+53457993 (**50.2 min — the fastest training run in this series**, consistent with fewer trainable
 parameters) → held-out test at the threshold left over from Trial 3's sweep (0.5) → full 5-point
 threshold sweep, jobs 53459000…53459452 (4.1–4.8 min each), all `successful=True`. Same test split
 size as every other 4 Sept run (1,503/844/974).
@@ -3327,7 +3327,7 @@ size as every other 4 Sept run (1,503/844/974).
 
 **At threshold 0.05, against the deployed checkpoint's 0.852 / 0.906 / 0.166: Boar recall −12.1 pt
 (0.731), Elephant recall −10.6 pt (0.800), background FP rate +5.3 pt and worse (0.219).** This is
-the only trial this session to regress **all three numbers simultaneously** — the other two traded
+the only trial in this series to regress **all three numbers simultaneously** — the other two traded
 some recall for a lower FP rate; this one loses on every axis. Precision at threshold 0.05 also
 collapsed to 0.660/0.665 (versus 0.890+ on the two prior trials and 0.875 deployed), a much larger
 effect than either augmentation trial produced. **Trial 4 fails, decisively, and is not adopted.**

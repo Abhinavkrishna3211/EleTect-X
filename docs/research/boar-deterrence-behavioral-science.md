@@ -47,7 +47,8 @@ result — Section 3 is what turns part of that inference into a measured number
 
 ## 3. Direct evidence: Amur tiger call playback tested against real wild boar
 
-**Well-established, boar-specific, and specifically about tiger calls — found and read this session,
+**Well-established, boar-specific, and specifically about tiger calls — found and read for this
+document,
 correcting an earlier assumption that this source was inaccessible.** Ani (2025) 15(7):1017,
 "Comparing Durations of Different Countermeasure Efficacies Against Wild Boar (*Sus scrofa*) in
 Cornfields of Hunchun, Jilin Province, China" (2016–2021 field seasons). Hunchun is a key Amur tiger

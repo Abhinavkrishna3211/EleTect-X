@@ -5,7 +5,7 @@ Snapshot taken **28 Jul 2026**. Update this file directly as orders land — don
 old BOM markers did.
 
 Legend: **H** = in hand · **O (date)** = ordered, expected that date · **T** = to order · **L** = to order,
-local store only (not worth an online search, per prior sourcing attempts this session)
+local store only (not worth an online search, per prior sourcing attempts)
 
 ---
 
@@ -21,7 +21,7 @@ local store only (not worth an online search, per prior sourcing attempts this s
 | INA333 | **H** | — |
 | ADS1115 | **H** | Confirmed needed — bench ADC stand-in for the geophone front-end per the build schedule. |
 | SM-24 geophone | **H** | — |
-| USB hub | **H** | Bridges the IMX462's USB-A UVC connector to the UNO Q's single USB-C port for bench validation (build call 3's camera check). Not part of the final field enclosure — a compact USB-C-to-USB-A pigtail is the likely permanent fit once the camera path is proven. |
+| USB hub | **H** | Bridges the IMX462's USB-A UVC connector to the UNO Q's single USB-C port for bench validation (the camera check). Not part of the final field enclosure — a compact USB-C-to-USB-A pigtail is the likely permanent fit once the camera path is proven. |
 | Arducam IMX462 | **H** | No stand-in needed — real camera already in hand. |
 
 ## 2. Camera + IR
@@ -223,7 +223,7 @@ stakes either way), PG7/PG9 glands (additional stock), LR7843 module.
    for the "no PCB fab" constraint than hand-wiring another bare IRLZ44N with gate/pulldown resistors
    anyway), or add a couple more IRLZ44N to whatever's next Robu order to restore real spare margin.
 4. **Battery purchase resolves two BOM lines at once** — buying a pack with integrated BMS (as already
-   recommended earlier this session) means §6's "Separate BMS" line disappears entirely; don't shop for
+   recommended earlier in this file) means §6's "Separate BMS" line disappears entirely; don't shop for
    it separately.
 
 ## Priority order for what's still unordered

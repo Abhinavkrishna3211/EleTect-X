@@ -2,7 +2,7 @@
 
 Companion to `elephant-deterrence-behavioral-science.md` (sensory / habituation evidence base) and
 to `elephant-deterrence-behavioral-science.md §7` (behavioural synthesis → strategy). This file
-answers one narrower question the project owner asked directly: **at what times of day and year do
+answers one narrower question asked directly of this project: **at what times of day and year do
 elephants approach, so the device can be tuned around that.**
 
 Same evidentiary discipline as the sibling doc: every claim is tagged with how good the evidence is

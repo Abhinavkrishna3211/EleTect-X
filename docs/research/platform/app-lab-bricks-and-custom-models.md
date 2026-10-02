@@ -689,8 +689,8 @@ arduino-app-cli system update --yes             # non-interactive
 
 This is how 0.11.0 to 0.13.0 would happen. `--only-arduino` limits the blast radius
 to Arduino packages rather than the whole Debian system, which is the flag to use if
-the upgrade in section 9 is ever approved. It needs root, so the user runs it
-interactively.
+the upgrade in section 9 is ever approved. It needs root, so an operator runs
+it interactively.
 
 ### `app clean-cache` would destroy the golden compose
 
@@ -902,7 +902,7 @@ Settings exposes **Remote access (SSH)** as a toggle, **enabled by default**, us
 desktop login. For a box mounted unattended in a forest on a shared uplink, that is one
 shared password on an internet-reachable service, and it is worth deciding deliberately
 rather than inheriting the default. Not changed here — it would lock us out of our own
-remote access path, so it needs the user's decision first.
+remote access path, so it needs a deliberate decision first.
 
 ### Field Wi-Fi limits
 

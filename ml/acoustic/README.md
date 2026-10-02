@@ -104,7 +104,7 @@ did lift both above chance on one dataset configuration (`boar_call` to 18.4%,
 (`elephant_call` −16.5 points, `gunshot` −10.5 points) — see the `autoClassWeights` section
 below for the full trade-off.
 
-Per the project owner's explicit, pre-agreed fallback ("if boar and predator are working
+Per the explicit, pre-agreed fallback ("if boar and predator are working
 very low, drop it after all possible fixes are explored"), both classes are **dropped from
 the wire scheme entirely** — not folded into `ambient`, since `ambient` means background/
 silence, not a mislabeled animal call, and folding would corrupt that class's meaning. The
@@ -792,7 +792,7 @@ rather than in isolation:
   (circular saws, table saws, angle grinders) that shares spectral characteristics with a
   chainsaw's engine drone but is acoustically distinct enough to confuse the model rather than
   reinforce it. This has not been verified by manually auditing the "power saw" clips — that
-  audit is flagged as follow-up work below, not done as part of this session, to avoid further
+  audit is flagged as follow-up work below, not done as part of this pass, to avoid further
   blind retrain cycles.
 
 **No further retrain was attempted after Variant B.** Two real, honestly-reported configurations
@@ -807,7 +807,7 @@ at the cost of `elephant_call` and `chainsaw`; Variant B (weights on) favors `gu
 `ambient` and a further-regressed `chainsaw`. Given that `elephant_call` is the one acoustic
 class this model feeds into the bandit/deterrence decision (see the class-scheme section above),
 **Variant B (`autoClassWeights: True`) was left as the trained state of project 1109511** after
-this session — this is a judgment call about which failure mode matters more for the deployment,
+here — this is a judgment call about which failure mode matters more for the deployment,
 not a claim that Variant B is a better model in the aggregate; the total accuracy figures above
 show it is not.
 
@@ -1110,8 +1110,8 @@ Same widened data, `--skip-impulse` (identical DSP features), retrain-only compa
 | `ambient` | 63.4% | 55.4% | −8.0 |
 | `elephant_call` | 50.6% | 50.6% | 0.0 |
 
-Weights ON costs both of this session's target classes (chainsaw, vehicle) real recall for a
-small gunshot gain — the wrong trade for the work this session was doing. **Reconfirmed:
+Weights ON costs both of this pass's target classes (chainsaw, vehicle) real recall for a
+small gunshot gain — the wrong trade for the work it was doing. **Reconfirmed:
 `autoClassWeights: False`.** The production model in 1109511 was retrained a final time with
 weights off after this experiment, so the numbers in the Result section above (and the live
 model in the project) reflect weights-off, not the experiment.
@@ -1371,7 +1371,7 @@ QRB2210 are unmeasured, and no `.eim` exists.
     classifier where `ambient` is itself one of the trained classes rather than a generic
     background state. If a calibrated operating point is wanted, it would need to be run
     manually in the Edge Impulse Studio UI against project 1109511 and the result transcribed
-    here by hand — not attempted as part of this session's work.
+    here by hand — not attempted as part of this pass.
 13. **Run-to-run variance on an identical dataset and configuration is now directly measured,
     not just inferred.** Caveat 6 above documents swings between *different* retrains (new
     data, different `autoClassWeights` setting). The four runs in the current "Result — after

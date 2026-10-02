@@ -47,7 +47,7 @@ only in the host build's dependency graph, not as a runtime abstraction the boar
 pays for.
 
 ## Alternatives considered
-- **Drop PlatformIO, use `west build` for local compile checks:** rejected for this build call —
+- **Drop PlatformIO, use `west build` for local compile checks:** rejected here —
   real Zephyr module/App-Lab-sketch structural questions are still open
   (`DEVICE_DEVELOPMENT_WORKFLOW.md` §4), and standing up a full `west` workspace to test two pure
   functions is disproportionate. Revisit if/when the sketch-vs-Zephyr-module question resolves in

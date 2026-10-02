@@ -92,13 +92,13 @@ Pro-Range IFR 32650 12.8V 6000mAh 4S1P LiFePO4 pack has arrived
    mainly by the BMS's own trip threshold and the battery's internal resistance, not by anything
    you've wired. Getting the ₹100-150 fuse+switch before this pack goes anywhere near the actuator
    bus is a stronger recommendation now than it was with a bench supply — if a local store is
-   reachable before you wire further, that's the highest-leverage five minutes available tonight.
+   reachable before you wire further, that's the highest-leverage five minutes in this bring-up.
    If it genuinely isn't reachable in time: keep every connection brief and supervised, verify each
    new branch with the multimeter before power-on, disconnect the battery between stages rather
    than leaving it hot while you wire the next one, and never leave it connected unattended.
-4. **Charging setup (XL4015 set to 14.2V CC/CV) is a separate task from tonight's bring-up** — the
+4. **Charging setup (XL4015 set to 14.2V CC/CV) is a separate task from this bring-up** — the
    pack should already carry enough charge to bench-test the actuators directly off it; don't wire
-   up the solar/charge path tonight unless you specifically want to. Keep that XL4015 distinct from
+   up the solar/charge path now unless you specifically want to. Keep that XL4015 distinct from
    the two load-side XL4015 bucks (LED, IR) — three total XL4015 modules in this system, easy to
    mix up.
 

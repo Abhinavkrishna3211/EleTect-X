@@ -34,7 +34,7 @@ against the real tile DOM structure; this was a detection-script bug, not a
 realtime-feature bug. The script was discarded rather than fixed, since a direct
 manual check is stronger evidence anyway.
 
-Manual verification (run by the project owner, screen-observed, not scripted):
+Manual verification (run by hand, screen-observed, not scripted):
 logged in as `officer@eletect.in`, ran
 
 ```sql

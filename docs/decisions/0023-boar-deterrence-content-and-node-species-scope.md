@@ -141,7 +141,7 @@ this standard in only one direction — citing Widén for the category and stayi
 species mismatch — would be exactly the failure the bee-exclusion reasoning two paragraphs up exists to
 avoid.
 
-**The light-vs-sound comparison, found and read this session — not the gap the brief expected.** A
+**The light-vs-sound comparison, found and read for this ADR — not the gap the brief expected.** A
 direct boar-specific comparison exists and was located and read: Ani (2025) 15(7):1017, "Comparing
 Durations of Different Countermeasure Efficacies Against Wild Boar (*Sus scrofa*) in Cornfields of
 Hunchun, Jilin Province, China" (2016–2021, PMC11987724). It is also, independently, the second

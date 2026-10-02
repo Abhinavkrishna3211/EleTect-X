@@ -129,7 +129,7 @@ field-deployment number exists" — narrower and defensible, not a downgrade of 
 
 ## 3.1 Real crop-raid duration — direct evidence the current encounter-window constant was set without
 
-Added 1 Sept, prompted by the user asking how long the device's deterrence response should stay
+Added 1 Sept, prompted by the question of how long the device's deterrence response should stay
 "active" once an elephant is detected — a real gap this device's own cognition layer already has a
 constant for, just not one informed by field duration data until now.
 

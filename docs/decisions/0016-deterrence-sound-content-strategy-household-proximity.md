@@ -138,13 +138,13 @@ none.
 
 ### D. On the 30 YouTube links supplied — a real licensing caution, not a blanket rejection
 
-The user supplied ~30 candidate YouTube videos across all four categories (tiger roar, bee swarm, air
+Around 30 candidate YouTube videos were collected across all four categories (tiger roar, bee swarm, air
 horn/siren, firecracker). These were **not individually vetted for reuse rights in this pass** —
 licensing checks on the small number attempted were blocked by YouTube rate-limiting the fetch tool
-mid-session, and this session does not download or extract audio from video platforms regardless (that
+mid-pass, and this project does not download or extract audio from video platforms regardless (that
 would mean redistributing someone else's copyrighted upload inside a manufactured, publicly-documented
 conservation device without a license — a real legal exposure, not a formality, and squarely out of
-scope for what this session should do even if it were technically possible).
+scope even if it were technically possible).
 
 **What to do with the list, concretely:**
 
@@ -173,9 +173,9 @@ scope for what this session should do even if it were technically possible).
   habituation literature (Montgomery et al. 2021, Adams et al. 2020) values genuine novelty, and a
   persistent animal at the top tier of a non-household node is exactly the situation where an unproven
   but different stimulus is worth trying — the honest move is to gate and caveat these categories, not
-  discard real deterrence tools the user specifically asked to plan for.
+  discard real deterrence tools this device is specifically meant to plan for.
 - **Use YouTube audio directly via a ripping tool.** Rejected outright — a real copyright/licensing
-  exposure for a manufactured, publicly-documented device; not something this session will do or
+  exposure for a manufactured, publicly-documented device; not something this project will do or
   recommend as a shortcut.
 
 ## Consequences
@@ -193,8 +193,8 @@ scope for what this session should do even if it were technically possible).
   ADR 0015's already-pending draft code.
 - Within-category rotation is real for predator growl only (two tracks); bee, air horn/siren, and
   firecracker each have exactly one sourced track — flagged, not silently short.
-- The YouTube shortlist remains unvetted for licensing; nothing on it should be used without the user (or
-  whoever owns that decision) personally checking reuse rights or pursuing an original recording instead.
+- The YouTube shortlist remains unvetted for licensing; nothing on it should be used without whoever
+  owns that decision personally checking reuse rights or pursuing an original recording instead.
 - Firecracker-recording and siren-recording efficacy are both unproven as *played-back audio* specifically
   — this ADR's Tier-3-for-non-household design leans on their anti-habituation novelty value and real-
   world analogy, not on direct evidence, and says so rather than overclaiming.

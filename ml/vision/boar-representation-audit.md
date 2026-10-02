@@ -92,7 +92,7 @@ or README prose. The manifest's 1,800/827 figures were not re-investigated as pa
 may reflect an EI-project-side filter (dedup, a prior exclusion pass) rather than an error in either
 number, but that reconciliation is out of scope here — flagged as a follow-up, not resolved. Both
 proportions come from `scripts/audit_night_ir_sample.py`, a sibling of `audit_boar_sample.py` written
-this session: seeded sample (`random.Random`, not corpus order), rendered as boxed/unboxed contact
+this pass: seeded sample (`random.Random`, not corpus order), rendered as boxed/unboxed contact
 sheets under `ml/datasets/vision/raw/_audit_tmp/`, each image opened and judged by eye — same
 discipline as trail-camera-v2's original 14-image sample, not an automated grayscale-pixel heuristic.
 "Night/IR" here means the visual bucket that matters for this project's actual domain gap (RGB-daylight
@@ -276,8 +276,8 @@ rather than discarding the source outright). And given the scale finding in (1),
 licence question makes SA-FARI a small supplement worth pursuing alongside continued sourcing, not a
 substitute for it.
 
-**NC question answered, 4 Sept — by the project owner, not a legal conclusion this document derives.**
-The project owner has determined CC-BY-NC 4.0 is compatible with this project's distribution and
+**NC question answered, 4 Sept — a project decision, not a legal conclusion this document derives.**
+The project has determined CC-BY-NC 4.0 is compatible with its own distribution and
 funding model for the shipped device, clearing SA-FARI-derived data/weights past the point this
 document flagged above. That determination is recorded here as an attributed decision, not as this
 audit's own legal reasoning — the caveats above about NC's "commercial advantage" language remain
@@ -355,7 +355,7 @@ source with an equivalent tell should be rejected the same way, not waved throug
 is more acute.
 
 **Sourcing pass beyond SA-FARI, 4 Sept — best-effort, one real new lead, two dead ends confirmed
-already-tapped.** Requested explicitly this session: look for more real IR/night data for both
+already-tapped.** Requested explicitly for this pass: look for more real IR/night data for both
 Elephant and Boar, not only SA-FARI. This was a search-and-triage pass, not a six-point verification —
 none of what follows has cleared the checklist SA-FARI went through above; it is candidate-status only.
 
@@ -409,7 +409,7 @@ inert for YOLO-Pro, an org model that reads its own `spatial-augmentation`/`colo
 customParameters instead — both were sitting at `low` (the weakest setting) in every run this
 engagement, never varied, which is the actual untried lever. And the "would need a new flag" framing
 for freeze-backbone is now done: `--freeze-backbone`, `--spatial-augmentation`, and
-`--color-space-augmentation` were added to `scripts/edge_impulse_train_vision.py` this session,
+`--color-space-augmentation` were added to `scripts/edge_impulse_train_vision.py` in this pass,
 threaded into `select_model()`'s YOLO-Pro branch and validated against the model's own live
 `customParameters` (not a hardcoded tuple), so a renamed level fails loudly rather than training
 silently on an unintended value.

@@ -279,7 +279,7 @@ MOSFET plus a power-budget revision against ADR 0012's 10-day autonomy — a con
 emitter is a large always-on load, and this part is specified as a capture flash, not area
 lighting. It is not a tuning parameter that can be turned up.
 
-`config.h` line 433 comments the emitter as **940 nm**; the rig notes for this session recorded the
+`config.h` line 433 comments the emitter as **940 nm**; the rig notes for this soak recorded the
 external emitter as **850 nm** (the camera's *onboard* emitters are 940 nm). This wants confirming
 against the actual part — it matters for range (see below) — and is logged as a doc/hardware
 discrepancy to resolve, not settled here.
@@ -439,7 +439,7 @@ it cuts the IR luma benefit to +5–7 % and is the sole source of the spurious B
 (firmware/MPU), and the moving-target detection check from Finding 3 still stands; the exact
 setpoint (anywhere ≈ 224–320) does not need pinning down before the trial.
 
-## Open items carried out of this session
+## Open items carried out of this soak
 
 - IR benefit under the deployed **auto-exposure** configuration — now measured (Finding 4): only
   +5–7 % luma, and it is the dominant false-positive source. The real follow-up is a **night

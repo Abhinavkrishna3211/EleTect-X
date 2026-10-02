@@ -81,7 +81,7 @@ without the same bench check.
 
 ### Cooldown — 20 s / 30 s is too coarse for an active encounter
 
-The project owner has green-lit reducing the cooldowns. The behavioural reason to: §7.3 #4 —
+Reducing the cooldowns is green-lit. The behavioural reason to: §7.3 #4 —
 **dishabituation.** A returning trigger 20–40 s into an encounter is an opportunity to present a
 *varied* stimulus while the animal is still reacting; a long fixed cooldown makes the device sit
 mute through exactly that window. But a naive global reduction trades directly against thermal and
@@ -175,5 +175,5 @@ blackout than 10 s (they must not — that would be a regression).
   This proposal reduces the blocking window as a stopgap; it does not remove it.
 - **Horn content** (bee-buzz / predator-growl / conspecific alarm) — ADR 0016 follow-up, tracked
   in the behavioural doc §7.7 #5.
-- **Any change tonight.** Every value here needs the bench pass and a reflash with the owner
-  present.
+- **Any change before the bench pass.** Every value here needs that pass and a reflash with an
+  operator present.

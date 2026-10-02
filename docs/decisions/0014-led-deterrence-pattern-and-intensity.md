@@ -7,8 +7,8 @@
 
 `CONTEXT.md` 3 freezes "irregular strobe" as the visual-deterrence design and `CONTEXT.md` 4 freezes
 "contextual-bandit deterrence (never-repeat, stop-on-retreat)" as the policy layer above fusion. Neither
-has ever been fully implemented on the LED side, and until tonight (31 Aug - 1 Sept build call) the gap
-was not fully mapped. It now is:
+has ever been fully implemented on the LED side, and until this ADR (31 Aug - 1 Sept) the gap was
+not fully mapped. It now is:
 
 1. **`led.cpp`'s `drive_led()` fires a single steady on/hold/off burst.** No flicker, no pattern, no
    timing variation exists in firmware today — confirmed by the 31 Aug camera-diff sweep, where every
@@ -122,7 +122,7 @@ recorded elephant approaches. A second real citation, newly found this pass — 
 (via [conservationevidence.com](https://www.conservationevidence.com/actions/2496)): spotlights aimed at
 elephants' eyes moderately reduced crop damage probability, **but combining the spotlight with noise
 reduced its effectiveness relative to the spotlight alone** — a real caution for this device's own
-escalation ladder, which already stacks LED + horn at higher tiers; not something to change tonight, but
+escalation ladder, which already stacks LED + horn at higher tiers; not something this ADR changes, but
 worth a line in this ADR's Consequences so it isn't invisible.
 
 **Honest gap, stated plainly rather than papered over**: neither of these citations, nor a targeted
@@ -140,12 +140,12 @@ pattern — so "vary pattern/timing/wing unpredictably" is well-grounded; "fast 
 no citation for, and should not be written into public/DFO materials as a proven mechanism, same
 discipline as this ADR's existing habituation-claim caution above.
 
-**Update, same day — real practitioner testimony changes the strobe-specific gap above.** The user
-reports DFO (the Kothamangalam forest department this trial is fielded with) told them directly that
-fast strobe lights are useful for elephant deterrence, and that DFO staff already carry strobe-capable
+**Update, same day — real practitioner testimony changes the strobe-specific gap above.** DFO (the
+Kothamangalam forest department this trial is fielded with) reported directly that fast strobe
+lights are useful for elephant deterrence, and that DFO staff already carry strobe-capable
 emergency lights/torches specifically for this purpose when entering the forest. **Recorded honestly as
 what it is**: verbal field-practitioner testimony from the actual partnering forest department, dated
-1 Sept 2026, relayed via the project owner — not a controlled study, no measured effectiveness number
+1 Sept 2026, relayed second-hand — not a controlled study, no measured effectiveness number
 attached to it (DFO's own torches are an operational field heuristic, not something they've published a
 trial on either, same evidentiary category as the Assam spotlight practice above). But it is real,
 directly relevant, and more locally specific than either paper-based citation above: it comes from the
@@ -162,12 +162,12 @@ not `PATTERN_SLOW_PULSE`,** since strobe now has real, locally-relevant field ba
 never had. Escalation still comes from wing-count and gain, not from swapping to an unvalidated pattern
 family, which is a better-grounded design than the original table below.
 
-**"Max brightness" is already in use, not something being held back.** Tonight's real hardware pass
+**"Max brightness" is already in use, not something being held back.** The real hardware pass
 (7-fire verification, `HANDOVER.md`) confirmed Tier 3 already fires `RANDOM_FLICKER` at `LED_GAIN_MAX_PCT`
 = 100% gain on one wing. There is no unused brightness headroom on a single LED channel today — going
 brighter per-channel means pulsed overdrive above the stars' continuous rating, which this ADR's
 Alternatives section already declined to adopt for lack of a real datasheet pulsed-current figure, and
-that conclusion is unchanged by tonight's findings. **The actual lever still on the table is using the
+that conclusion is unchanged by the findings here. **The actual lever still on the table is using the
 second wing at the same time as the first — real additional light output, not a brightness trick.**
 
 **Two designs, genuinely different in cost and risk — both real, only one is a same-day option:**
@@ -175,7 +175,7 @@ second wing at the same time as the first — real additional light output, not 
 1. **Sequential both-wing tiers, MPU-orchestrated, no MCU/firmware change, no reflash.** Every tier fires
    *both* wings instead of one — `reflex_loop.py` issues two `drive_led` calls back to back (left then
    right, or an alternating repeated pair for a "sweep" feel), exactly the mechanism Decision C above
-   already established works (31 Aug's `seq_LR`/`seq_RL` conditions). Bound by tonight's own measured
+   already established works (31 Aug's `seq_LR`/`seq_RL` conditions). Bound by the measurements here
    per-call overhead (13-35ms) and the fact `drive_led` blocks per call — this is genuinely sequential,
    not simultaneous, and should be described that way, not oversold as "both wings flash together." Real
    Python change in `cognition/config.py`/`reflex_loop.py`, host-testable, zero new hardware risk.
@@ -189,7 +189,7 @@ second wing at the same time as the first — real additional light output, not 
 
 **Decision: build option 2 — real, firmware-level, simultaneous dual-wing.** User's explicit call, made
 with the timeline deliberately set aside: design for actual field effectiveness in a forest deployment,
-not for what fits in tonight's reflash window. Sequential (option 1) is a real fallback if bring-up runs
+not for what fits in the next reflash window. Sequential (option 1) is a real fallback if bring-up runs
 out of time, but it is not the target design — a second, real reason beyond perceptual effect: **two
 sequential single-wing calls of duration D block the MCU for ~2D total (double the geophone/LoRa-
 starvation window `KNOWN_GAPS.md` already flags), while one dual-wing call of duration D blocks for D**
@@ -271,8 +271,8 @@ implemented in this planning session, per the project's own session-continuity p
 ### E.3 Amendment, 1 Sept (later same day) — max intensity on every tier; escalate on pattern, wings, and rate, never on brightness
 
 E.2 above still had Tier 1 at "moderate gain" and Tier 2 at "higher gain," carrying part of the
-escalation on the intensity axis this ADR was originally built around. The project owner, after the
-hardware bring-up in `HANDOVER.md`, made an explicit field call to drop that: **there is no field use
+escalation on the intensity axis this ADR was originally built around. After the hardware bring-up,
+an explicit field call was made to drop that: **there is no field use
 for a dimmed deterrence flash** — a partially-lit strobe aimed at a forest edge at night does not read
 as "less threatening, saving headroom," it just reads as a weaker light. Every deterrence tier now
 fires the LED at `LED_GAIN_MAX_PCT` (100%). This supersedes the per-tier gain language in E.2.

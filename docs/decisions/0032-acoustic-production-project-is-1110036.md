@@ -73,8 +73,8 @@ the offline harness uses. The gap is the model, not the partition.
   `metadata.source: edgeimpulse` validator's hard `ei-model-type: float32` requirement makes it
   binding for the registered-model path regardless of what 0030 eventually concludes.
 - **The production project is named `ETX-Test`.** This is a live footgun: the name invites someone
-  to reset, clear or delete it, and the user has previously (and correctly, at the time) approved
-  overwriting it as a throwaway. That approval no longer applies. Renaming it in Studio is the
+  to reset, clear or delete it, and overwriting it as a throwaway was previously approved —
+  correctly, at the time. That approval no longer applies. Renaming it in Studio is the
   cheap fix and should be done.
 - **The custom DSP block makes this project unbuildable for a device target in Studio**, which is
   why the `.eim` on the board was compiled locally from the C++ library export. That constraint

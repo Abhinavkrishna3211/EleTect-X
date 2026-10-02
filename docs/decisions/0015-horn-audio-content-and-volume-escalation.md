@@ -11,10 +11,10 @@ finding precisely, because both ADRs now depend on it: **today's 3-tier escalati
 output between tiers.** `docs/KNOWN_GAPS.md` (~line 62) and `cognition/config.py`'s own comment on
 `TIER_1_GAIN_FRACTION`/`TIER_2_GAIN_FRACTION`/`TIER_3_GAIN_FRACTION` both say it plainly: "`gain_pct`
 reaches the MCU and changes nothing audible... the DFPlayer always plays at its stored default level."
-Separately, and never addressed anywhere in this repo before tonight: **the horn only has one axis at
+Separately, and never addressed anywhere in this repo before this ADR: **the horn only has one axis at
 all — loudness. It has no content axis.** Every tier, every trigger, every night of a 10-day unattended
 field trial plays whatever single track sits at the DFPlayer's default index. `docs/research/
-elephant-deterrence-behavioral-science.md` §2 (written earlier tonight) is direct on why that's a real
+elephant-deterrence-behavioral-science.md` §2 (written the same day) is direct on why that's a real
 gap, not a nice-to-have: King, Douglas-Hamilton & Vollrath (2007, *Current Biology*) found disturbed-bee
 playback drove a significant majority of 18 elephant family groups to flee, and Thuppil & Coss (2016,
 *Oryx*) found tiger-growl playback deterred 90-100% of raid attempts in the field (leopard/lion
@@ -47,11 +47,13 @@ already fully claimed by the Grove LoRa-E5** (`LORA_UART_RX_PIN`/`LORA_UART_TX_P
 DFR0768 UART link cannot reuse that pair without contending with LoRa. This ADR's design routes around
 that constraint rather than ignoring it — see Decision A.
 
-**`hardware/WIRING_GUIDE.md` is referenced throughout this repo (`PIN_MAP.md`, ADR 0014, `KNOWN_GAPS.md`)
-but is not present in this session's working copy of the tree.** The pin-level wiring content this ADR
-would normally add as its own numbered section lives in this document's Decision section instead —
-**whoever has the canonical file needs to merge it in**, flagged here so it isn't silently lost the way
-0014's own doc almost was (see the "Also landed tonight" note at the end of this ADR).
+**When this ADR was written, `hardware/WIRING_GUIDE.md` was referenced throughout the repo
+(`PIN_MAP.md`, ADR 0014, `KNOWN_GAPS.md`) but was absent from the working copy**, so the pin-level
+wiring content this ADR would normally add as its own numbered section was written into the
+Decision section below instead, flagged for merging so it would not be silently lost the way 0014's
+own doc almost was. **Resolved:** the file is in the tree and its §3 is this horn wiring. The
+Decision section's copy is kept as the record of what was decided here; `WIRING_GUIDE.md` is the
+canonical one to wire from.
 
 ### Update, real datasheets reviewed: one correction, two confirmations
 
@@ -61,8 +63,8 @@ the wrong sibling chip. Kept here unedited, as the honest record of what happene
 quietly rewritten — the real board's own photo and its own DFRobot-hosted protocol page (further down)
 settle it: **`AT+PLAYNUM` was correct in the original draft all along.**
 
-The user supplied the actual DFPlayer-family datasheet/schematic and the official Arduino UNO Q full
-pinout. Reviewing both against this ADR's draft surfaced one real bug and closed out two of the open
+The actual DFPlayer-family datasheet/schematic and the official Arduino UNO Q full pinout were both
+obtained. Reviewing them against this ADR's draft surfaced one real bug and closed out two of the open
 questions:
 
 **Correction — the file-select command is `AT+PLAYFILE`, not `AT+PLAYNUM` as this draft originally had
@@ -95,14 +97,14 @@ user's own product photos show has no onboard amp and instead breaks out raw `DA
 built on the same DF1101S chip, so the **AT-command protocol content above is treated as authoritative
 for DFR0768 too** (chip-level firmware, not breakout-specific) — but the **physical pin breakout differs
 between the two boards**, and only the DFR0768-specific pinout (12 pads: `VIN GND RX TX DACR DACL L+ L-
-R+ R- PLAY KEY`, per the user's own product photo) should be used for wiring, not DFR0745's `J1`/`J2`
+R+ R- PLAY KEY`, per the module's own product photo) should be used for wiring, not DFR0745's `J1`/`J2`
 header layout.
 
 **That same DFR0745 schematic page 6 has real, useful data for Decision A's fallback path, with a real
 correction to how this ADR described it**: the datasheet's ADKEY table (10 keys, K1–K10, each a distinct
 resistance in series on a single analog pin wired to the chip's `PB4`) is genuine and detailed — but
-**DFR0768's own physical breakout does not expose an `ADKEY` pad at all**, per the user's product photo
-pinout table (12 pads listed: `VIN, GND, RX, TX, DACR, DACL, L+, L-, R+, R-, PLAY, KEY` — no `ADKEY`
+**DFR0768's own physical breakout does not expose an `ADKEY` pad at all**, per the module's
+product-photo pinout table (12 pads listed: `VIN, GND, RX, TX, DACR, DACL, L+, L-, R+, R-, PLAY, KEY` — no `ADKEY`
 row). DFR0768 instead exposes two separate discrete pads, `KEY` and `PLAY`, each presumably a single
 direct-to-chip-pin button (not a resistance-ladder multi-key input). This ADR's fallback (originally
 "the ADKEY/`KEY`-pin GPIO-pulse pattern... for coarse relative volume-up/down") **overstated what the
@@ -128,8 +130,8 @@ exists — which raises the stakes on the still-open "does this Zephyr-based Ard
 `SoftwareSerial`" question (unchanged, still unverified, still the single most important thing to check
 first at bring-up).
 
-**Purchase-source confirmation (2026-09-01, later same session):** the user provided the actual retail
-listing this unit was bought from —
+**Purchase-source confirmation (2026-09-01, later the same day):** the actual retail listing this unit
+was bought from —
 [robu.in: "DFRobot Fermion DFPlayer Pro — A Mini MP3 Player with On-board 128MB Storage (Breakout)"]
 (https://robu.in/product/dfrobot-fermion-dfplayer-pro-a-mini-mp3-player-with-on-board-128mb-storage-breakout/).
 The listing itself carries no pinout/protocol detail (checked directly — just the product name and the
@@ -140,19 +142,19 @@ confirmation — from the actual purchase record, not just the product photos �
 DFR0768 proper. **The chip-level claim in that paragraph ("AT-command protocol from the DF1101S datasheet
 applies to DFR0768 too") is now retracted — see immediately below.**
 
-**Second correction (2026-09-01, same session, closes out the first one): `AT+PLAYNUM` was right all
-along — the chip on the user's actual board is DF1201S, not DF1101S, and DF1201S's own protocol page
-documents `AT+PLAYNUM` as a real, distinct command.** The user photographed their physical board directly
+**Second correction (2026-09-01, same day, closes out the first one): `AT+PLAYNUM` was right all
+along — the chip on the actual board is DF1201S, not DF1101S, and DF1201S's own protocol page
+documents `AT+PLAYNUM` as a real, distinct command.** The physical board was photographed directly
 (both a labeled pinout photo and a close-up of the chip package itself, ic marking legible: **`DF1201S`**
 — not `DF1101S`). That single photographed part number is what finally resolves the product-identity
-question this ADR has been circling since the first correction: the datasheet PDF the user uploaded
-earlier was titled "DF1101S Datasheet" and packaged a `DFR0745`-coded schematic — genuinely the wrong
+question this ADR has been circling since the first correction: the datasheet PDF supplied earlier
+was titled "DF1101S Datasheet" and packaged a `DFR0745`-coded schematic — genuinely the wrong
 chip family, not just the wrong breakout board, contrary to what the first correction assumed ("both
 boards are built on the same DF1101S chip" — that premise was itself false).
 
 Fetched directly from DFRobot's own DFR0768 protocol reference page
 ([wiki.dfrobot.com/dfr0768/docs/20422](https://wiki.dfrobot.com/dfr0768/docs/20422) — already linked in
-this ADR's Context section since the first draft, tonight is the first time its command list was checked
+this ADR's Context section since the first draft, this is the first time its command list was checked
 against the DF1101S PDF's), the two commands are real, distinct, and not interchangeable:
 
 | Command | Syntax | Parameter | What it does |
@@ -164,8 +166,8 @@ This project's `drive_horn(track_id: uint8)` wire field is a numeric index by de
 `cognition.config.HORN_CONTENT_LIBRARY` maps small integers to content) — that is `AT+PLAYNUM`'s exact
 parameter shape, not `AT+PLAYFILE`'s path-string shape. The original draft code's `AT+PLAYNUM=%u\r\n` was
 correct for this design from the start; the sed-based "fix" earlier in this ADR was a real regression,
-caught only because the user went one step further and photographed the actual chip marking rather than
-trusting the uploaded PDF's cover page. **Every `AT+PLAYFILE` occurrence introduced by the first
+caught only by going one step further and photographing the actual chip marking rather than trusting
+the uploaded PDF's cover page. **Every `AT+PLAYFILE` occurrence introduced by the first
 correction, below and in Decisions E/F, Alternatives, and Consequences, is reverted back to
 `AT+PLAYNUM` in this pass** — with the change now anchored to the correct board's own documentation, not
 a mismatched-product PDF.
@@ -174,10 +176,10 @@ One consequence carries forward, not resolved: the DFR0768 protocol page **does 
 `AT+PLAYNUM` autoplays or only cues the file pending a separate `AT+PLAY=PP` (confirmed by direct
 re-check of that page's text) — so the "autoplay confirmed" claim the first correction made is *also*
 retracted. This reopens `docs/KNOWN_GAPS.md`'s autoplay entry as UNVERIFIED, exactly as it was in the
-original draft before tonight's PDF-driven detour.
+original draft before this PDF-driven detour.
 
-**Third confirmation, strongest yet — the user photographed their own physical unit's top and bottom
-silkscreen directly.** The back of the board prints **`DFR0768`** and **`DFPlayer PRO V1.0`** in plain
+**Third confirmation, strongest yet — the physical unit's top and bottom silkscreen were photographed
+directly.** The back of the board prints **`DFR0768`** and **`DFPlayer PRO V1.0`** in plain
 text, next to the DFRobot logo — first-party confirmation straight off the actual PCB, superseding every
 inference made so far from product photos, the retail listing, or any datasheet. Product identity is now
 settled beyond doubt: this is a DFR0768 DFPlayer PRO, hardware revision V1.0.
@@ -276,7 +278,7 @@ here is wasted if the fallback is needed.
 ### A.1 Full signal chain, consolidated — UNO Q ↔ DFR0768 ↔ TPA3116D2 ↔ SUH-15
 
 Every pin below is now confirmed against a real, vendor-published source (official UNO Q pinout, the
-DF1101S/DFR0768-family datasheet, and the user's own product photos/pages for the amp and horn) rather
+DF1101S/DFR0768-family datasheet, and the product photos/pages for the amp and horn) rather
 than inferred — collected here in one table since it was previously scattered across `PIN_MAP.md`,
 Decision A, and ADR 0003/0011.
 
@@ -344,7 +346,7 @@ ceiling, so this table silently goes stale-and-loud if either side's constants m
 
 ### D. Real, license-checked audio content — the actual "anti-habituation, horn half" of this ADR
 
-Three tracks, sourced and license-verified tonight, forming the initial content library (DFPlayer file
+Three tracks, sourced and license-verified for this ADR, forming the initial content library (DFPlayer file
 numbers assigned arbitrarily here — final numbering is whatever `scripts/sync-to-board.sh`'s audio-load
 step assigns when the files are actually copied onto the module's 128MB storage):
 
@@ -359,7 +361,7 @@ deliverable — carry "Tiger Roar by videog, CC-BY 4.0, freesound.org/s/149190" 
 'qubodup' Gabovitch, CC-BY 3.0, freesound.org/s/212764" into whatever credits/acknowledgments surface
 exists for this project (README, pitch deck, or a `docs/AUDIO_CREDITS.md` — not yet decided which, flag
 for whoever owns that surface). File 1 (CC0) needs none. These three are a **starting set**, chosen for
-being real, immediately verifiable, and license-clean tonight — not represented as an exhaustive or
+being real, immediately verifiable, and license-clean at the time of writing — not an exhaustive or
 final library. Each file is short (6–7s for the predator growls, well under `HORN_BURST_MAX_MS=3000ms`;
 the bee track is 2:40 and needs trimming to a representative clip before loading) and will need real
 trimming/normalization before going on the module, not used as downloaded.
@@ -376,10 +378,10 @@ something on the content axis too, not just volume:
 
 `cognition/bandit.py`'s `DeterrenceAction` gains a `horn_track_id: int` field (paralleling
 `led_pattern_id`); `cognition/config.py`'s `DETERRENCE_TIERS` sets it per the table above. This file's
-Python-side changes are included in this ADR's diff but **could not be run against a real test suite in
-this session** — `tests/test_cognition_config.py` (referenced by `cognition/config.py`'s own comments) is
-not present in this working tree; whoever has the full repo should run it before trusting this merges
-cleanly.
+Python-side changes are included in this ADR's diff but **could not be run against a real test suite
+when it was written** — `tests/test_cognition_config.py` (referenced by `cognition/config.py`'s own
+comments) was absent from that working copy. **Resolved:** the file is in the tree and the suite
+passes.
 
 **Rotation, not just fixed per-tier assignment — stated as an extension by analogy, not as literature-
 proven for audio:** `docs/research/elephant-deterrence-behavioral-science.md` §5 is explicit that
@@ -443,19 +445,19 @@ New test target `tests/test_horn_dfplayer/test_horn_dfplayer.cpp`, Unity known-a
 `test_footfall_features`'s convention (every failure names the input that tripped it): anchors the
 8/14/18 table from Decision C, boundary-checks the 0/30 clamp, and checks exact command-string output
 including the `\r\n` terminator (the protocol reference is explicit commands are rejected without it).
-**Run against real `pio test -e native` in this session — see Consequences for the actual result.**
+**Run against real `pio test -e native` — see Consequences for the actual result.**
 
 ## Alternatives considered
 
 - **Keep the ADKEY/`KEY`-pin GPIO-pulse pattern (mirroring K1), no UART at all.** This was the original
-  sketch before the LoRa-UART-conflict and DFR0768-datasheet facts surfaced tonight. Rejected as the
+  sketch before the LoRa-UART-conflict and DFR0768-datasheet facts surfaced. Rejected as the
   primary design: relative up/down button pulses drift out of sync with no way to query actual volume
   state (DFR0768's `AT+VOL=?` query has no button-mode equivalent), and there is no button-mode path to
   content/track selection at all, closing off Decision D entirely. Retained as the explicit fallback if
   the new UART link's `SoftwareSerial` dependency doesn't hold up (Decision A).
 - **PBTL amplifier bridging for more SPL headroom.** Out of scope here — ADR 0003 already rejected this
   on the grounds that BTL already clears the proven-effective SPL reference with margin and PBTL would
-  exceed the SUH-15's 23W rating. Nothing in tonight's research changes that call.
+  exceed the SUH-15's 23W rating. Nothing in the research here changes that call.
 - **Reuse D0/D1 (the LoRa UART) with time-division sharing.** Rejected: `PIN_MAP.md` already marks that
   pair "P — wired 18 Aug, not yet answering AT probes," meaning LoRa bring-up on that link is itself
   unfinished and unstable; adding a second protocol sharing the same physical pins during an already-
@@ -470,12 +472,12 @@ including the `\r\n` terminator (the protocol reference is explicit commands are
 
 + Closes the exact gap `docs/KNOWN_GAPS.md` names ("`gain_pct` ... never wired to a physical volume
   control") using the fix that same entry already named as the right one ("the DFPlayer serial-command
-  volume-set path (UART, not the GPIO trigger this session wired)").
+  volume-set path (UART, not the GPIO trigger wired at the time)").
 + Gives the horn a real content axis for the first time — the single highest-value, best-evidenced
-  deterrence lever this repo's research turned up tonight (Thuppil & Coss's 90-100% number) had no
+  deterrence lever this repo's research turned up (Thuppil & Coss's 90-100% number) had no
   implementation path before this ADR.
 + Together with ADR 0014, both deterrence actuators (LED, horn) now have genuinely distinct per-tier
-  output — the combined "anti-habituation system" this session was asked to plan is real hardware/
+  output — the combined "anti-habituation system" planned here is real hardware/
   firmware/policy work, not just a research citation.
 + No change to ADR 0003's amplifier/speaker hardware decision, no change to `rule_gate.cpp`'s safety
   authority — `gain_pct`/`duration_ms` clamping is unchanged, `track_id` is not a value `rule_gate_apply`
@@ -485,17 +487,17 @@ including the `\r\n` terminator (the protocol reference is explicit commands are
 - Two real open technical questions, both flagged UNVERIFIED rather than assumed, both need resolving
   during bring-up before this is trusted: whether this Zephyr-based Arduino Core supports the
   `SoftwareSerial`-style link this design assumes, and whether `AT+PLAYNUM` autoplays.
-- `hardware/WIRING_GUIDE.md`'s new §3 (D9/D10 pin assignment, UART wiring detail) exists only inside this
-  ADR in this session — needs merging into the canonical file by whoever has it; not done here because
-  the file isn't in this working tree.
+- `hardware/WIRING_GUIDE.md`'s new §3 (D9/D10 pin assignment, UART wiring detail) existed only inside
+  this ADR when it was written, pending a merge into the canonical file. **Resolved:** merged; that
+  file is the one to wire from.
 - Attribution obligations (files 2 and 3, CC-BY) are a real, tracked-here requirement on whatever
   public/DFO-facing materials ship with these tracks — not automatically satisfied by this ADR existing.
 - Content rotation *within* a tier (Decision D's "extension by analogy" point) is explicitly not built in
   this pass — only one track per tier exists today. Real follow-up, not silently deferred.
 - **Physical bring-up — wiring D9/D10, flashing this firmware, confirming the AT-command link against
-  the real module — is not done in this session and must not happen unattended**, per this project's
+  the real module — was not done when this ADR was written and must not happen unattended**, per this project's
   standing hard safety rule (`TRIAL_READINESS_PLAN.md`): reflash and any first physical fire of new
-  wiring/firmware wait for daylight with the user physically present, batched with the other pending
+  wiring/firmware wait for daylight with an operator physically present, batched with the other pending
   reflash items (D3 pin fix, LED pattern/intensity code) rather than as a separate flash cycle this close
   to the trial deadline.
 

@@ -128,7 +128,7 @@ in this document.
 - [SenseCAP M2: IN865 LoRa Gateway Setup with 4G Backhaul (DFRobot community)](https://community.dfrobot.com/makelog-313793.html)
 
 Not used / not directly applicable to this frozen architecture (ADR 0002 names ChirpStack, not
-these), but present in the URL list the user provided — noted here for completeness rather than
+these), but present in the source list this document was built from — noted here rather than
 silently dropped:
 - Connect M2 Multi-Platform Gateway to AWS IoT, to The Things Network — different LNS targets.
 - Grove Wio-E5 TTN Demo, Helium Demo, Helium tinyML Demo, SenseCAP Cloud Demo, SenseCAP+XIAO
@@ -139,4 +139,4 @@ silently dropped:
 - Grove LoRa-E5 product page, `Grove_LoRa_E5_New_Version` wiki page — both explicitly defer to
   the official AT Command Specification PDF for exact command syntax rather than listing it
   inline; that PDF is the same one already fetched and used for the `mac.cpp` AT-command fix
-  work in this session's earlier turn, so no new information here.
+  work, so no new information here.

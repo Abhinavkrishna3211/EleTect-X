@@ -13,8 +13,8 @@ in hand."
 
 That condition has now been met. Real enclosure concept work (`hardware/cad/enclosure-design-concept.md`)
 shows the SUH-15's 253×152×284mm footprint forces roughly a 300×220mm face and ~330mm depth — the horn
-alone dictates an enclosure larger than every other component combined. The project owner has raised
-wanting a genuinely compact, small, aesthetically refined product repeatedly across this build (most
+alone dictates an enclosure larger than every other component combined. A genuinely compact, small,
+aesthetically refined product has been asked for repeatedly across this build (most
 recently: the SUH-15 "destroyed" the compact design vision). This isn't a new preference surfacing once —
 it's the same concern recurring enough times that it should be treated as a real requirement, not noise.
 
@@ -29,7 +29,7 @@ roughly a 200–220mm-class form instead of a ~330mm-deep one.
 **On reversing the cost call specifically:** at the current single/few-node prototype and demo-
 submission stage, the ~₹6,000–7,500 premium over the SUH-15 is a small fraction of total system cost, and
 it buys a materially better product for presentation/build quality as well as the
-thing the project owner actually asked for. ADR 0003's cost-effectiveness-at-scale concern remains valid
+thing actually asked for. ADR 0003's cost-effectiveness-at-scale concern remains valid
 for a future 100+ unit production run and should be revisited then, not now — by then, bulk TOA pricing
 or a cheaper compact alternative may also exist. This is a scale-dependent call, not a permanent one.
 

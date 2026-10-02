@@ -5,10 +5,11 @@
 
 ## Amendment (same day) — decision overridden
 
-After reviewing the analysis below in full, the project owner decided to proceed with multi-species
+After the analysis below was reviewed in full, the project decision was to proceed with multi-species
 acoustic classification now, ahead of the September field build, accepting the risks this ADR
 identifies (production-code change to tested fusion logic close to a build date, live-trial risk,
-uncertain boar-audio availability). That is the project owner's call to make with the risk disclosed —
+uncertain boar-audio availability). That is a call the project is entitled to make with the risk
+disclosed —
 the analysis below stands as the record of what was weighed, not as a decision that binds against an
 informed override.
 
