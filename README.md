@@ -71,6 +71,14 @@ Each top-level module also has its own README with the detail specific to it —
 [`device/README.md`](device/README.md), [`web/README.md`](web/README.md),
 [`ml/README.md`](ml/README.md), [`hardware/README.md`](hardware/README.md).
 
+**Three paths cited throughout this repository are deliberately not tracked**, so a clone will not
+have them and nothing here depends on them: `CONTEXT.md` (the frozen architecture brief),
+`HANDOVER.md` (live build, procurement and deployment state) and `docs/KNOWN_GAPS.md` (the running
+defect and gap register). They carry operator-side state that changes daily and is specific to the
+deployment being run, not to the design. Where a comment or an ADR cites one, it is citing the
+operator's own copy; the committed answer to the same question is the ADR in
+[`docs/decisions/`](docs/decisions/) that the citation sits next to.
+
 ## Getting started
 
 ### Run the app on real hardware
