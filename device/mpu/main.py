@@ -35,6 +35,16 @@ actuator registrations (device/mcu/src/main.cpp). Do not uncomment more
 than one per test cycle; confirm the existing registrations still work
 after each addition before moving to the next.
 
+Note that `report_acoustic_event` now has no producer. ADR 0028 moved the
+microphone from the MCU to this side - the Arduino core for this board
+ships a prebuilt Zephyr loader with a fixed devicetree, so a sketch cannot
+add the SAI peripheral ADR 0009 assumed. Acoustic therefore originates
+here, on a polling daemon thread (see the ADR 0028 block below), and needs
+no `Bridge.provide()` at all, which keeps it clear of the
+one-registration-per-cycle hazard above entirely. `_on_acoustic_event`
+survives for the always-on MCU gunshot path ADR 0009 still specifies and
+docs/KNOWN_GAPS.md still tracks as unbuilt.
+
 `_on_seismic_batch` (ADR 0035) is the second function waiting behind that
 same gate, and it is further from running than `_on_acoustic_event` is:
 its producer, the MCU's `SEISMIC_CAPTURE_ENABLED`, is also 0, so neither
@@ -50,24 +60,35 @@ assumption either way.
 """
 
 import logging
+import threading
 import time
 
 from arduino.app_utils import Bridge
 
+from bridge import wire_compat
 from bridge.rpc import AcousticClass
 from cognition.experience import ExperienceStore
 from comms.lora_uplink import LoraUplink, direct_alert_event, event_from_footfall
-from perception.camera import Camera
+from perception.acoustic_detector import AcousticDetectionError, HttpAcousticClassifier
+from perception.camera import Camera, Frame
 from perception.detector import HttpVisionDetector
+from perception.microphone import Microphone, MicrophoneError, discover_capture_device
 from perception.night import frames_are_night
 from perception.seismic_dataset import SeismicDatasetWriter, clear_part_files
 from perception.seismic_stream import SeismicStream
 from perception.storage import clear_orphaned_scratch, save_burst
 from perception.video import EventVideoRecorder
-from services import config, reflex_loop
+from services import acoustic_watch, config, home_test, reflex_loop
 
 logging.basicConfig(level=getattr(logging, config.LOG_LEVEL))
 logger = logging.getLogger(__name__)
+
+if not wire_compat.install():
+    logger.warning(
+        "wire_compat.install() could not import msgpack - drive_led/drive_horn/"
+        "pulse_ir calls with small integer params (channel, pattern_id, "
+        "track_id) will keep hitting the fixint decode bug on the MCU side"
+    )
 
 logger.info(
     "eletect-x reflex loop starting, SAFE_MODE=%s (export ELETECT_SAFE_MODE=0 "
@@ -93,6 +114,21 @@ logger.info(
     config.EVENT_VIDEO_TARGET_LABELS,
     config.EXPERIENCE_DB_PATH,
 )
+# Third boot banner, same "must be visible in the boot log" reasoning as the
+# two above - this flag turns on always-on capture (ADR 0020 exists
+# specifically to forbid that in the field) plus the raised
+# HOME_TEST_FIRE_MIN_CONFIDENCE/HOME_TEST_FIRE_CONSECUTIVE_POLLS bar for
+# firing (services/config.py). ELETECT_HOME_TEST_MODE is independent of the
+# MCU's own HOME_TEST_MODE #define (device/mcu/src/config.h) - both default
+# off and both must be flipped for tonight's test to run as designed.
+if config.HOME_TEST_MODE:
+    logger.warning(
+        "*** HOME_TEST_MODE=1 *** backyard test build: always-on capture, "
+        "raised fire bar, NOT a field deployment build - see "
+        "services/home_test.py and services/config.py's HOME_TEST_* block"
+    )
+else:
+    logger.info("HOME_TEST_MODE=0 (export ELETECT_HOME_TEST_MODE=1 for the backyard test build)")
 
 
 def debug_stream_raw_seismic_sample(volts: float) -> None:
@@ -108,10 +144,27 @@ def debug_stream_raw_seismic_sample(volts: float) -> None:
     device/mpu/bridge/rpc.py's own convention: no return value - the MCU
     never waits on one.
 
+    Under HOME_TEST_MODE, this appends to HOME_TEST_SEISMIC_CSV_PATH instead
+    of printing - the geophone is unwired tonight so this produces nothing,
+    but the receive-side plumbing is correct and ready for whenever it is
+    wired again. Field/bench behaviour (the bare 6-decimal print
+    live_seismic_plot.py parses) is unchanged when the flag is off.
+
     Args:
         volts: Raw geophone reading in volts, as sent by geophone_cpp's
             Bridge.notify("debug_stream_raw_seismic_sample", volts) call.
     """
+    if config.HOME_TEST_MODE:
+        # mpu_wall_s is the same time.time() clock detections.jsonl's own
+        # wall_s uses (services/home_test.py) - scripts/join_seismic_
+        # detections.py joins the two logs on it, per the plan's "this also
+        # removes the clock-sync problem" note: one clock, no MCU-side
+        # millis() to reconcile. HOME_TEST_DIR already exists by the time
+        # this can fire - HomeTestSession.__init__ creates it before this
+        # process reaches its Bridge.provide() registrations below.
+        with open(config.HOME_TEST_SEISMIC_CSV_PATH, "a", encoding="utf-8") as fh:
+            fh.write(f"{time.monotonic():.6f},{time.time():.6f},{volts:.6f}\n")
+        return
     # flush=True: stdout is captured via `docker logs`, not a TTY, so Python
     # defaults to block-buffering here - without an explicit flush, samples
     # sit in the buffer and reach the log in delayed bursts instead of as
@@ -139,6 +192,57 @@ clear_orphaned_scratch()
 # and a capture must never be removed by dataset housekeeping.
 clear_part_files()
 
+# Bridge.call-backed actuator adapters, hoisted to module scope (rather than
+# built inline in _on_footfall_event, as before HOME_TEST_MODE) so the exact
+# same callables can go into _footfall_kwargs below and be reused verbatim
+# by services/home_test.py's deterrence thread - one definition of "how this
+# process drives the MCU", not two that could drift.
+def _drive_horn(sv: int, gain_pct: float, duration_ms: int, track_id: int) -> bool:
+    """Bridge.call adapter for drive_horn - see bridge/schema.md."""
+    return Bridge.call(
+        "drive_horn",
+        sv,
+        gain_pct,
+        duration_ms,
+        track_id,
+        timeout=config.BRIDGE_HORN_CALL_TIMEOUT_S,
+    )
+
+
+def _drive_led(
+    sv: int, channel: int, pattern_id: int, gain_pct: float, duration_ms: int
+) -> bool:
+    """Bridge.call adapter for drive_led - see bridge/schema.md."""
+    return Bridge.call(
+        "drive_led",
+        sv,
+        channel,
+        pattern_id,
+        gain_pct,
+        duration_ms,
+        timeout=config.BRIDGE_LED_CALL_TIMEOUT_S,
+    )
+
+
+def _pulse_ir(sv: int, duration_ms: int) -> bool:
+    """Bridge.call adapter for pulse_ir - see bridge/schema.md."""
+    return Bridge.call("pulse_ir", sv, duration_ms, timeout=config.BRIDGE_IR_CALL_TIMEOUT_S)
+
+
+# LoRa event uplink (ADR 0031). The Bridge call only puts the frame on the
+# MCU's radio queue, so it gets the IR call's short timeout; the worker
+# thread means even that wait never lands on a deterrence path.
+_lora_uplink = LoraUplink(
+    lambda *args: Bridge.call(*args, timeout=config.BRIDGE_IR_CALL_TIMEOUT_S),
+    config.SCHEMA_VERSION,
+)
+
+
+def _is_night(frames: list[Frame]) -> bool | None:
+    """NightDecideFn adapter - see perception/night.py."""
+    return frames_are_night([f.image for f in frames], config.NIGHT_SATURATION_THRESHOLD)
+
+
 # One camera per process, reused across events - not opened here. Both
 # constructors below do no I/O (perception/camera.py, perception/video.py),
 # so constructing at module scope is safe even before Bridge/hardware are
@@ -153,13 +257,30 @@ clear_part_files()
 # the frames its own recording pipeline is already producing. With the flag
 # off (the default, services/config.py) this is the plain Camera and
 # reflex_loop behaves exactly as it did before that ADR.
-if config.EVENT_VIDEO_ENABLED:
+#
+# HOME_TEST_MODE overrides both of the above: services/home_test.py's
+# HomeTestSession owns the one real Camera for the whole process (its
+# capture thread never stops running), and `_camera` here becomes a
+# SharedFrameCamera reading from that session's buffer instead of a second
+# handle on /dev/video0. This is what makes _on_footfall_event below safe to
+# leave registered under HOME_TEST_MODE even though the geophone is unwired
+# tonight - if it ever did fire, it would share the session's camera rather
+# than race it for the device. EVENT_VIDEO_ENABLED is not combined with
+# HOME_TEST_MODE - the ring/encounter pipeline is this mode's own equivalent
+# evidence path.
+if config.HOME_TEST_MODE:
+    if config.EVENT_VIDEO_ENABLED:
+        logger.warning(
+            "HOME_TEST_MODE and EVENT_VIDEO_ENABLED are both set - ignoring "
+            "EVENT_VIDEO_ENABLED. HOME_TEST_MODE's own ring/encounter capture "
+            "(services/home_test.py) owns the camera tonight."
+        )
+    _event_video: EventVideoRecorder | None = None
+elif config.EVENT_VIDEO_ENABLED:
     logger.info("event video enabled (ADR 0020) - camera frames served from the GStreamer pipeline")
-    _event_video: EventVideoRecorder | None = EventVideoRecorder()
-    _camera: reflex_loop.CameraProtocol = _event_video
+    _event_video = EventVideoRecorder()
 else:
     _event_video = None
-    _camera = Camera()
 
 # One HTTP vision-detector client per process, reused across events - same
 # module-scope-construction reasoning as _camera above.
@@ -172,8 +293,25 @@ else:
 # listening yet, detect_vision() raises DetectionError and reflex_loop
 # degrades VISION to unavailable, the same as a camera failure.
 _vision_detector = HttpVisionDetector(
-    config.VISION_INFERENCE_URL, config.VISION_INFERENCE_TIMEOUT_S
+    config.VISION_INFERENCE_URL,
+    config.VISION_INFERENCE_TIMEOUT_S,
+    config.VISION_MIN_CONFIDENCE_BY_LABEL,
 )
+
+# The MCU's ground-motion stream, reassembled from its batched notifies
+# (ADR 0035). Built unconditionally even though nothing feeds it yet: it is
+# ~30 kB of list and holds no handle on anything, and a buffer that only
+# exists once the Bridge registration below is uncommented is a buffer whose
+# first run happens on the one night it matters.
+_seismic_stream = SeismicStream()
+
+# Where the camera-labelled records land. Also unconditional, and for a
+# stronger reason than the buffer above: with no stream it still writes the
+# vision half of every watch - the boxes, the species, and whether the
+# camera could see at all - which is the labelled half and the half that
+# cannot be reconstructed afterwards. The waveform appears in those records
+# the moment report_seismic_batch is registered, with no other change.
+_seismic_dataset = SeismicDatasetWriter()
 
 # One experience store per process, held open across events and across the
 # MPU's suspend/resume cycles. Constructed at module scope for the same
@@ -184,13 +322,34 @@ _vision_detector = HttpVisionDetector(
 # would rescue.
 _experience = ExperienceStore()
 
-# LoRa event uplink (ADR 0031). The Bridge call only puts the frame on the
-# MCU's radio queue, so it gets the IR call's short timeout; the worker
-# thread means even that wait never lands on a deterrence path.
-_lora_uplink = LoraUplink(
-    lambda *args: Bridge.call(*args, timeout=config.BRIDGE_IR_CALL_TIMEOUT_S),
-    config.SCHEMA_VERSION,
-)
+# Every keyword handle_footfall_event needs except camera and
+# seismic_available - both _on_footfall_event below and, under
+# HOME_TEST_MODE, services/home_test.py's deterrence thread build their call
+# from this one dict, so the two paths cannot drift apart on which
+# actuators/detector/experience store they bind in.
+_footfall_kwargs = {
+    "drive_horn": _drive_horn,
+    "drive_led": _drive_led,
+    "pulse_ir": _pulse_ir,
+    "is_night": _is_night,
+    "detect_vision": _vision_detector,
+    "save_frames": save_burst,
+    "experience": _experience,
+    "event_video": _event_video,
+    "retreat_burst_frames": config.CAMERA_RETREAT_BURST_FRAMES,
+    "retreat_burst_interval_s": config.CAMERA_RETREAT_BURST_INTERVAL_S,
+    "seismic_stream": _seismic_stream,
+    "seismic_dataset": _seismic_dataset,
+}
+
+if config.HOME_TEST_MODE:
+    _home_test_session: home_test.HomeTestSession | None = home_test.HomeTestSession(
+        detect_vision=_vision_detector, footfall_kwargs=_footfall_kwargs
+    )
+    _camera: reflex_loop.CameraProtocol = home_test.SharedFrameCamera(_home_test_session)
+else:
+    _home_test_session = None
+    _camera = _event_video if _event_video is not None else Camera()
 
 
 def _run_footfall_event(
@@ -208,15 +367,15 @@ def _run_footfall_event(
     into two different sets.
 
     The real logic is reflex_loop.handle_footfall_event(), tested
-    independently in tests/test_reflex_loop.py. This function exists only
-    to bind the real Bridge.call-backed drive_horn/drive_led/pulse_ir, the
-    real camera, the real save_burst, and the real SQLite-backed
-    experience store in as the injected dependencies reflex_loop's
-    signature requires. `event_video` is None unless
-    config.EVENT_VIDEO_ENABLED is set, in which case it is the same object
-    as `camera` - see the construction block above. `extra` is whatever the
-    starting trigger adds on top of that, which today is the acoustic
-    path's acoustic_confidence/seismic_available pair.
+    independently in tests/test_reflex_loop.py. `_footfall_kwargs` binds
+    the real Bridge.call-backed drive_horn/drive_led/pulse_ir, the real
+    save_burst, and the real SQLite-backed experience store; `camera` is
+    `_camera` from the construction block above, which is either the
+    plain/event-video Camera (field) or a HomeTestSession's
+    SharedFrameCamera (HOME_TEST_MODE) - this function does not need to
+    know which. `extra` is whatever the starting trigger adds on top of
+    that, which today is the acoustic path's
+    acoustic_confidence/seismic_available pair.
 
     The finished outcome is handed to the LoRa uplink, which decides
     whether it is worth airtime and sends it off this thread.
@@ -226,36 +385,8 @@ def _run_footfall_event(
         probability,
         sta_lta_ratio,
         feature_vector,
-        drive_horn=lambda sv, gain_pct, duration_ms, track_id: Bridge.call(
-            "drive_horn",
-            sv,
-            gain_pct,
-            duration_ms,
-            track_id,
-            timeout=config.BRIDGE_HORN_CALL_TIMEOUT_S,
-        ),
-        drive_led=lambda sv, channel, pattern_id, gain_pct, duration_ms: Bridge.call(
-            "drive_led",
-            sv,
-            channel,
-            pattern_id,
-            gain_pct,
-            duration_ms,
-            timeout=config.BRIDGE_LED_CALL_TIMEOUT_S,
-        ),
-        pulse_ir=lambda sv, duration_ms: Bridge.call(
-            "pulse_ir", sv, duration_ms, timeout=config.BRIDGE_IR_CALL_TIMEOUT_S
-        ),
-        is_night=lambda frames: frames_are_night(
-            [f.image for f in frames], config.NIGHT_SATURATION_THRESHOLD
-        ),
         camera=_camera,
-        detect_vision=_vision_detector,
-        save_frames=save_burst,
-        experience=_experience,
-        event_video=_event_video,
-        seismic_stream=_seismic_stream,
-        seismic_dataset=_seismic_dataset,
+        **_footfall_kwargs,
         **extra,
     )
     if outcome is None:
@@ -286,22 +417,6 @@ def _on_footfall_event(
     has no return channel to put it on.
     """
     _run_footfall_event(schema_version, probability, sta_lta_ratio, feature_vector)
-
-
-# The MCU's ground-motion stream, reassembled from its batched notifies
-# (ADR 0035). Built unconditionally even though nothing feeds it yet: it is
-# ~30 kB of list and holds no handle on anything, and a buffer that only
-# exists once the registration below is uncommented is a buffer whose first
-# run happens on the one night it matters.
-_seismic_stream = SeismicStream()
-
-# Where the camera-labelled records land. Also unconditional, and for a
-# stronger reason than the buffer above: with no stream it still writes the
-# vision half of every watch - the boxes, the species, and whether the
-# camera could see at all - which is the labelled half and the half that
-# cannot be reconstructed afterwards. The waveform appears in those records
-# the moment report_seismic_batch is registered, with no other change.
-_seismic_dataset = SeismicDatasetWriter()
 
 
 def _on_seismic_batch(
@@ -408,8 +523,10 @@ def _send_lora_alert(
     silent UNCONFIRMED frame, which would read to an officer as a confirmed
     sighting of nothing.
 
-    Returns whether the event was queued on this side; the radio reports
-    delivery on its own.
+    Hoisted out of _on_acoustic_event because the MPU-side acoustic poll
+    below needs the same binding, and the two paths must not be able to
+    drift into calling different things. Returns whether the event was
+    queued on this side; the radio reports delivery on its own.
     """
     del schema_version  # the uplink sends config.SCHEMA_VERSION itself
     return _lora_uplink.submit(
@@ -419,8 +536,128 @@ def _send_lora_alert(
     )
 
 
-_lora_uplink.start()
+# ---------------------------------------------------------------------------
+# MPU-side acoustic poll (ADR 0028)
+# ---------------------------------------------------------------------------
+# The microphone is on this side of the board, not the MCU's, so nothing
+# calls report_acoustic_event any more - _on_acoustic_event above is kept
+# for the MCU-side always-on gunshot detector ADR 0009 still specifies and
+# docs/KNOWN_GAPS.md still tracks as unbuilt, not because anything sends it
+# today.
+#
+# Why a thread rather than the main loop below: a check blocks for the
+# capture plus roughly 4 s of inference per window, and it is not confirmed
+# whether App Lab's runtime dispatches Bridge.provide() callbacks on this
+# thread. If it does, blocking in the main loop would delay
+# report_footfall_event - and a deterrence path that arrives late because
+# the system was busy listening is worse than no acoustic modality at all.
+# A daemon thread keeps that question from mattering either way, and dies
+# with the process without needing a shutdown path this file has nowhere to
+# put.
 
+# Constructed at module scope because, like HttpVisionDetector, this does no
+# I/O in __init__ - only the per-call POSTs touch the network.
+_acoustic_classifier = HttpAcousticClassifier(
+    config.ACOUSTIC_INFERENCE_URL,
+    config.ACOUSTIC_INFERENCE_TIMEOUT_S,
+    window_hop_fraction=config.ACOUSTIC_WINDOW_HOP_FRACTION,
+    max_windows=config.ACOUSTIC_MAX_WINDOWS,
+)
+
+
+def _open_microphone() -> Microphone:
+    """Resolve the capture device and build a Microphone.
+
+    Not done at module scope: discovery shells out to `arecord -l`, which
+    is real I/O, and a USB microphone that is unplugged at boot must not
+    stop the whole app from starting - the seismic and vision paths do not
+    depend on it.
+
+    Returns:
+        A Microphone bound to the resolved ALSA device.
+
+    Raises:
+        MicrophoneError: If no USB capture device can be found.
+    """
+    device = config.ACOUSTIC_CAPTURE_DEVICE or discover_capture_device()
+    return Microphone(device, sample_rate=config.ACOUSTIC_SAMPLE_RATE_HZ)
+
+
+def _acoustic_poll_forever() -> None:
+    """Run an acoustic check every ACOUSTIC_POLL_INTERVAL_S, forever.
+
+    Re-resolves the microphone after any capture failure rather than
+    holding one Microphone for the life of the process. USB enumeration on
+    this board is not stable across a re-plug, and the field failure this
+    guards against - somebody reseating a connector during a site visit -
+    would otherwise leave the modality dead until the next reboot.
+
+    Never raises. An exception escaping here would kill the thread
+    silently and take acoustic down with no log line saying so, which is
+    exactly the "reports nothing rather than reports broken" failure the
+    health gate exists to prevent.
+    """
+    mic: Microphone | None = None
+    while True:
+        try:
+            if mic is None:
+                mic = _open_microphone()
+                logger.info("acoustic poll using capture device %s", mic.device)
+
+            capture_s = _acoustic_classifier.required_capture_s(
+                windows=config.ACOUSTIC_CAPTURE_WINDOWS
+            )
+            outcome = acoustic_watch.run_acoustic_check(
+                microphone=mic,
+                classify=_acoustic_classifier,
+                send_lora_alert=_send_lora_alert,
+                start_vision_event=_start_vision_event,
+                capture_s=capture_s,
+            )
+            if acoustic_watch.is_positive(outcome):
+                logger.info(
+                    "acoustic poll heard %s", outcome.outcome.class_label.value
+                )
+        except MicrophoneError as exc:
+            # Includes discovery failing outright. Drop the handle so the
+            # next pass re-resolves the card rather than retrying a device
+            # string that may no longer exist.
+            logger.warning("acoustic poll: microphone unavailable (%s)", exc)
+            mic = None
+        except AcousticDetectionError as exc:
+            # The runner is a separate process this file does not
+            # supervise (docs/KNOWN_GAPS.md). Not fatal, and not a reason
+            # to re-resolve the microphone.
+            logger.warning("acoustic poll: inference unavailable (%s)", exc)
+        except Exception:
+            logger.exception("acoustic poll: unexpected error, continuing")
+            mic = None
+
+        time.sleep(config.ACOUSTIC_POLL_INTERVAL_S)
+
+
+# Off by default. services/config.py's ACOUSTIC_ENABLED stays False until
+# bench/mic_check/mic_check.py has been run against the real BY-M1 and the
+# three health floors it prints have replaced the invented ones - an
+# uncalibrated silence floor cannot tell a dead LR44 from a quiet night,
+# and this is a deployment real forest officers depend on.
+if config.ACOUSTIC_ENABLED:
+    logger.info(
+        "acoustic poll enabled (ADR 0028) - every %.0fs against %s",
+        config.ACOUSTIC_POLL_INTERVAL_S,
+        config.ACOUSTIC_INFERENCE_URL,
+    )
+    threading.Thread(
+        target=_acoustic_poll_forever, name="acoustic-poll", daemon=True
+    ).start()
+else:
+    logger.info(
+        "acoustic poll disabled (services/config.py ACOUSTIC_ENABLED) - "
+        "run bench/mic_check/mic_check.py calibrate first"
+    )
+
+
+_lora_uplink.start()
 
 # NOT YET ENABLED - see module docstring's "Registration state" paragraph.
 # Uncomment ONE of these, flash, and confirm on real hardware (including
@@ -437,9 +674,25 @@ Bridge.provide("report_footfall_event", _on_footfall_event)
 # so the first thing to check afterwards is that batches are arriving at
 # all - not that they look right.
 
+if _home_test_session is not None:
+    # Starts the capture and inference daemon threads (services/home_test.py)
+    # - this call returns immediately, it does not block. Not wrapped in
+    # try/except: a camera that fails to open here is the one failure this
+    # whole test depends on not having, and it should surface as a crash
+    # with a real traceback in the boot log, not a swallowed warning that
+    # leaves the night silently unrecorded.
+    _home_test_session.start()
+
 # UNVERIFIED: whether App Lab's own runtime keeps this process alive after
 # registration, or whether the script itself must block. Blocking here is
 # the safe assumption either way - it is a no-op if the runtime already
 # keeps the process alive, and required if it doesn't.
 while True:
     time.sleep(1)
+    # Belt-and-suspenders alongside HomeTestSession._run_guarded's own hard
+    # exit on thread crash: if a daemon thread ever died without that guard
+    # catching it, this is what turns a silently-stalled session back into
+    # a crash the container restart policy can see and recover from.
+    if _home_test_session is not None and not _home_test_session.is_healthy():
+        logger.error("home_test: session unhealthy (a daemon thread died) - exiting")
+        raise SystemExit(1)
