@@ -230,7 +230,10 @@ create policy p_admin_all on profiles for all using (is_admin()) with check (is_
 -- could grant themselves admin via a direct PATCH request. SECURITY DEFINER
 -- functions (handle_new_user, any future admin-approval function) run as the
 -- function owner, not as `authenticated`, so they are unaffected by this revoke.
-revoke update on profiles from authenticated;
+-- Shipped to existing projects by migration 0008. It lived only in this file
+-- until then, which left every project maintained through migrations/ holding
+-- table-wide UPDATE on profiles - see 0008 for what that admitted.
+revoke update on profiles from authenticated, anon;
 grant update (full_name, phone, lat, lng, alerts_enabled) on profiles to authenticated;
 
 -- And no self-service INSERT or DELETE at all (migration 0007). The column
@@ -317,7 +320,14 @@ begin
   update public.officer_requests
     set status = 'approved', decided_by = auth.uid(), decided_at = now()
     where id = req_id;
-  update public.profiles set role = 'officer' where id = target_user;
+  -- Approval only ever moves someone up to officer. Without `and role <>
+  -- 'admin'`, an admin approving their own stale pending request - the one
+  -- handle_new_user() queued at signup, which the README's manual promotion
+  -- does not close - demotes themselves, and the project is left with no
+  -- admin and no application path back. Demotion belongs to admin_set_role(),
+  -- which has the self-check and the last-admin count. (Migration 0009.)
+  update public.profiles set role = 'officer'
+    where id = target_user and role <> 'admin';
 end; $$;
 -- Supabase grants EXECUTE on public-schema functions to anon+authenticated by
 -- default, so the grant below is not enough on its own: anon must be revoked
@@ -350,11 +360,28 @@ grant execute on function reject_officer_request(bigint) to authenticated;
 -- events' staff-only RLS so public/anon users can see the day+count aggregate
 -- on the Stay Safe page. The exposure is bounded by the view's own column
 -- list (day, count only) — no species, location, or node detail leaks through.
+--
+-- That bound is about columns, and columns were never the whole exposure: the
+-- existence and timing of a detection is itself the signal. Gunshot and
+-- chainsaw are excluded below (migration 0009) because eventPriority() routes
+-- both to 'high', anon can read this view with the key that ships in the
+-- frontend bundle, and someone who has just fired a shot could poll it and
+-- watch today's count move - learning within seconds that a node heard them
+-- and that officers were paged. That is exactly what message.ts and ADR 0031
+-- deny by never paging a village about a gunshot.
+--
+-- It is also the more honest aggregate: this feeds a resident-facing wildlife
+-- risk banner, and a gunshot is not a wildlife risk to a resident. Events with
+-- a null species stay counted - a detection the camera could not name is still
+-- a wildlife detection.
 -- Do not "fix" the Supabase Advisor's Security Definer View warning here by
 -- setting security_invoker = true; that would make public users see zero rows.
 create view public_area_risk with (security_invoker = false) as
   select date_trunc('day', ts) as day, count(*) as detections
-  from events where priority in ('high', 'critical') group by 1 order by 1 desc;
+  from events
+  where priority in ('high', 'critical')
+    and (species is null or species not in ('gunshot', 'chainsaw'))
+  group by 1 order by 1 desc;
 grant select on public_area_risk to authenticated, anon;
 
 -- ---------- Demo Mode (Phase 4c) ----------
