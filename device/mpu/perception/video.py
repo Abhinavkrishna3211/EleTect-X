@@ -150,6 +150,8 @@ def build_pipeline_description(
     height: int = config.EVENT_VIDEO_HEIGHT,
     framerate: int = config.EVENT_VIDEO_FRAMERATE,
     bitrate_bps: int = config.EVENT_VIDEO_BITRATE_BPS,
+    night_exposure_locked: bool = False,
+    night_exposure_value: int = config.NIGHT_LOCKED_EXPOSURE,
 ) -> str:
     """Build the gst-launch description for one event recording.
 
@@ -188,6 +190,16 @@ def build_pipeline_description(
       plugins-bad package as `jpegparse` above). See services/config.py's
       EVENT_VIDEO_SUFFIX for why the elementary stream is, if anything, a
       better fit for the truncation-resilience goal than Matroska was.
+    - `v4l2src`'s own `extra-controls` is present only when
+      `night_exposure_locked` is True - the same mechanism the encoder
+      uses below, applied to the camera element instead. There is no
+      live equivalent of perception.camera.Camera.lock_night_exposure():
+      this description is handed to `Gst.parse_launch` once, at open(),
+      so a control baked in here governs the *entire* recording it
+      starts - including whatever pre-alert watch segment this same
+      recorder already has open - not just an IR-lit evidence burst.
+      See EventVideoRecorder.lock_night_exposure()'s docstring for the
+      caller-visible consequence of that.
     - `extra-controls` sets two V4L2 controls, not one - `video_bitrate_mode`
       as well as `video_bitrate`. Enumerated this board's real encoder
       controls (raw ioctl against /dev/video4, "qcom-venus-encoder" -
@@ -212,12 +224,26 @@ def build_pipeline_description(
         height: Recording height requested from the camera.
         framerate: Frames per second requested from the camera.
         bitrate_bps: H.264 target bitrate handed to the encoder.
+        night_exposure_locked: If True, bake manual exposure into the
+            `v4l2src` element via extra-controls. Set by
+            EventVideoRecorder.lock_night_exposure() for the *next*
+            open() - see that method's docstring for why "next" and not
+            "this one".
+        night_exposure_value: UVC exposure_time_absolute to lock to when
+            night_exposure_locked is True. Same meaning and same default
+            as perception.camera.Camera.lock_night_exposure()'s `value`.
 
     Returns:
         A description string suitable for `Gst.parse_launch`.
     """
+    v4l2src_extra_controls = (
+        f' extra-controls="controls,auto_exposure=1,'
+        f'exposure_time_absolute={night_exposure_value}"'
+        if night_exposure_locked
+        else ""
+    )
     return (
-        f"v4l2src device={device} io-mode=2"
+        f"v4l2src device={device} io-mode=2{v4l2src_extra_controls}"
         f" ! image/jpeg,width={width},height={height},framerate={framerate}/1"
         f" ! jpegdec"
         f" ! tee name={_TEE_NAME}"
@@ -460,6 +486,10 @@ class EventVideoRecorder:
         self._pipeline: PipelineHandle | None = None
         self._scratch_path: Path | None = None
         self._recorded_path: Path | None = None
+        # Set by lock_night_exposure(), consumed by the *next* open() - see
+        # that method's docstring for why this can only ever be "next".
+        self._night_exposure_locked = False
+        self._night_exposure_value = config.NIGHT_LOCKED_EXPOSURE
 
     @property
     def recording(self) -> bool:
@@ -507,6 +537,8 @@ class EventVideoRecorder:
             height=self._height,
             framerate=self._framerate,
             bitrate_bps=self._bitrate_bps,
+            night_exposure_locked=self._night_exposure_locked,
+            night_exposure_value=self._night_exposure_value,
         )
         self._scratch_path = scratch_path
         self._pipeline = self._pipeline_factory(description, APPSINK_NAME, self._stop_timeout_s)
@@ -586,7 +618,7 @@ class EventVideoRecorder:
         return frames
 
     def lock_night_exposure(self, value: int = config.NIGHT_LOCKED_EXPOSURE) -> bool:
-        """Not implemented on this path. Satisfies CameraProtocol; always returns False.
+        """Arm manual exposure for this recorder for its *next* open(). Coarser than Camera.
 
         perception.camera.Camera.lock_night_exposure (Finding 4,
         docs/qa/night-ir-led-characterisation.md) works because
@@ -594,46 +626,97 @@ class EventVideoRecorder:
         later cap.set() can still reach. This class has no equivalent
         handle: build_pipeline_description() bakes `v4l2src device=...`
         into a `Gst.parse_launch` string that is torn down and rebuilt
-        fresh on every open()/close() pair, so a manual-exposure write
-        would have to happen one of two ways, and neither is done:
+        fresh on every open()/close() pair, so there is no already-PLAYING
+        control to write to right now. Two paths could still get exposure
+        locked, and only one is done here:
 
         - Bake it into the pipeline description via v4l2src's own
           `extra-controls` property (the same mechanism this module
-          already uses on v4l2h264enc for bitrate mode, see
-          build_pipeline_description's docstring) - but that fixes the
-          exposure for the *whole* recording, including the pre-alert
-          watch segment this same recorder serves, not just the IR-lit
-          evidence burst Finding 4 is actually about. Whether that
-          trade-off is acceptable is unmeasured.
+          already uses on v4l2h264enc for bitrate mode - see
+          build_pipeline_description's docstring). This is what this
+          method now does: it does not touch the running pipeline at all,
+          it only records the request for the next open() this recorder
+          instance runs.
         - Reach the already-PLAYING v4l2src element's property live
           (GstElement.set_property mid-stream) - structurally possible,
           completely unverified on this pipeline or this hardware, and
           exactly the class of live-camera-state change this module's own
           docstring already declines to do without a human present (see
-          the module docstring's frame-rate-throttle finding).
+          the module docstring's frame-rate-throttle finding). Still not
+          done, for the same reason.
 
-        Either path needs its own hardware verification this session did
-        not do. This path is also inert today: EVENT_VIDEO_ENABLED
-        defaults False (services/config.py), so nothing calls open() on
-        this class in production yet. Tracked in docs/KNOWN_GAPS.md rather
-        than guessed at here.
+        Two consequences follow directly from picking the build-time path,
+        and both matter more than they look:
+
+        - **This call cannot affect the recording already in progress.**
+          The reflex loop's actual call site
+          (services/reflex_loop.py's vision-watch illumination block)
+          calls this after the camera/recorder object is already open,
+          expecting perception.camera.Camera's semantics - take effect
+          now, on the file already being written. On this class it
+          instead only takes effect on the next open(), governing
+          whatever recording that call starts end to end. That is a
+          smaller gap than it was: the lock is now taken at the top of
+          the watch rather than just before an evidence burst, so the
+          segment it fails to cover is the part of the recording that
+          preceded the watch entirely. Whether that whole-recording trade-off is
+          acceptable is unmeasured; tracked in docs/KNOWN_GAPS.md rather
+          than decided here.
+        - **There is no restore.** Unlike perception.camera.Camera, this
+          class has no restore_auto_exposure() - deliberately: there is no
+          live handle to restore either, so "restore" can only ever mean
+          "the next open() without this flag set", and nothing here ever
+          clears the flag once accepted. On a long-lived recorder instance
+          reused across many events (main.py's actual usage pattern), one
+          night-time lock stays armed into every later open() - daytime
+          ones included - until the process restarts. Do not treat a True
+          return as "handled" the way Camera's read-back-verified True is;
+          it only means "the next recording will start manual". Tracked in
+          docs/KNOWN_GAPS.md alongside the trade-off above.
+
+        Deliberately does not reuse perception.night.ExposureAutoLock: that
+        policy's contract is a live lock/restore pair driven by periodic
+        re-evaluation, and this class can only ever act at the next
+        open() - there is nothing to call restore() on mid-recording.
+        Forcing the shared controller onto a class that cannot honour its
+        contract would misrepresent what this path can actually do.
+
+        This path is also inert today: EVENT_VIDEO_ENABLED defaults False
+        (services/config.py), so nothing calls open() on this class in
+        production yet.
+
+        Args:
+            value: UVC exposure_time_absolute to request on the next
+                open(). Same meaning as Camera.lock_night_exposure()'s
+                argument of the same name.
 
         Returns:
-            Always False. Never raises. The reflex loop already treats
-            False as "continue on whatever exposure mode the camera
-            already had" - see CameraProtocol.lock_night_exposure's
-            contract - so this is a correct, if unhelpful, answer.
+            True if the request was accepted for the next open() (i.e.
+            NIGHT_EXPOSURE_LOCK_ENABLED is on) - not a read-back, since
+            there is nothing running yet to read back from. False if the
+            kill switch is off, in which case any previously armed request
+            is also cleared. Never raises.
 
         Raises:
             CameraError: If called before open() or after close(), same
                 as every other method on this class.
         """
         self._require_open()
+        if not config.NIGHT_EXPOSURE_LOCK_ENABLED:
+            logger.info(
+                "event video: night exposure lock disabled "
+                "(NIGHT_EXPOSURE_LOCK_ENABLED=False) - clearing any armed request"
+            )
+            self._night_exposure_locked = False
+            return False
+        self._night_exposure_locked = True
+        self._night_exposure_value = value
         logger.info(
-            "event video: night exposure lock not implemented for the GStreamer path - "
-            "continuing on whatever exposure mode the camera already had"
+            "event video: manual exposure (%d) armed for this recorder's next open() - "
+            "the recording already in progress, if any, is unaffected",
+            value,
         )
-        return False
+        return True
 
     def close(self) -> None:
         """Stop recording and finish the file. Idempotent.

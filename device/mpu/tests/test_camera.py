@@ -461,6 +461,69 @@ def test_lock_night_exposure_returns_false_when_disabled_via_config(monkeypatch)
     assert factory.capture.set_calls == calls_before
 
 
+def _tone_writes(capture):
+    """The contrast/brightness/gamma writes (cv2 ids 11/10/22) in call order."""
+    return [(p, v) for p, v in capture.set_calls if p in (10, 11, 22)]
+
+
+def test_open_puts_the_day_tone_back():
+    """open() writes the day tone, so a night tone left on the device never leaks into daytime."""
+    factory = _factory(frames=[])
+    camera = Camera(warmup_frames=0, capture_factory=factory)
+
+    camera.open()
+
+    assert _tone_writes(factory.capture) == [(11, 32), (10, 0), (22, 100)]
+
+
+def test_lock_night_exposure_applies_the_night_tone():
+    """A lock that takes also lifts the IR black floor with the night tone."""
+    factory = _factory(frames=[])
+    camera = Camera(warmup_frames=0, capture_factory=factory)
+    camera.open()
+    factory.capture.set_calls.clear()
+
+    assert camera.lock_night_exposure(256) is True
+
+    assert _tone_writes(factory.capture) == [(11, 48), (10, -16), (22, 72)]
+
+
+def test_lock_night_exposure_leaves_the_tone_alone_when_the_lock_fails():
+    """No night tone on a lock that did not stick - tone follows the exposure state."""
+    factory = _factory(frames=[], ignore_exposure_writes=True)
+    camera = Camera(warmup_frames=0, capture_factory=factory)
+    camera.open()
+    factory.capture.set_calls.clear()
+
+    assert camera.lock_night_exposure(256) is False
+
+    assert _tone_writes(factory.capture) == []
+
+
+def test_restore_auto_exposure_puts_the_day_tone_back():
+    """Leaving night mode restores the camera's default tone."""
+    factory = _factory(frames=[])
+    camera = Camera(warmup_frames=0, capture_factory=factory)
+    camera.open()
+    camera.lock_night_exposure(256)
+    factory.capture.set_calls.clear()
+
+    assert camera.restore_auto_exposure() is True
+
+    assert _tone_writes(factory.capture) == [(11, 32), (10, 0), (22, 100)]
+
+
+def test_a_rejected_tone_write_does_not_fail_the_lock():
+    """A device that refuses a tone control still locks exposure - tone is cosmetic."""
+    factory = _factory(frames=[(True, "ok")], raise_on_set={22: RuntimeError("no gamma")})
+    camera = Camera(warmup_frames=0, capture_factory=factory)
+    camera.open()  # must not raise either
+
+    assert camera.lock_night_exposure(256) is True
+    assert (11, 48) in factory.capture.set_calls
+    assert (10, -16) in factory.capture.set_calls
+
+
 def test_lock_night_exposure_before_open_raises():
     """Locking before open() raises CameraError, same contract as every other method."""
     camera = Camera(capture_factory=_factory(frames=[]))

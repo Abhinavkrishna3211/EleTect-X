@@ -71,6 +71,23 @@ _UVC_EXPOSURE_MODE_MANUAL = 1
 # cycles without needing to be re-asserted there.
 _BACKLIGHT_COMPENSATION_MAX = 2
 
+# Night tone. Under the IR flood this camera's night frames sit on a raised
+# black floor: 1st-percentile luma ~75/255 and a luma std of ~34 on every
+# night since 23 Sept, which reads as a grey haze. Measured live 29 Sept
+# against the backyard plantation with exposure locked at 256:
+# backlight_compensation 0/1/2 changes nothing at night (identical frames),
+# contrast 48 + brightness -16 + gamma 72 drops the floor to ~13 and raises
+# std to ~49 with 0.08% of pixels at >=250. Harder settings (contrast 56,
+# brightness -24, gamma 72) crush the shadows to 0. The tone is applied with
+# the night exposure lock and put back to the camera's own defaults on
+# restore and at every open(), because like the exposure mode these controls
+# live on the device and would otherwise carry into the next daytime.
+_CAP_PROP_BRIGHTNESS = 10
+_CAP_PROP_CONTRAST = 11
+_CAP_PROP_GAMMA = 22
+_DAY_TONE = {_CAP_PROP_CONTRAST: 32, _CAP_PROP_BRIGHTNESS: 0, _CAP_PROP_GAMMA: 100}
+_NIGHT_TONE = {_CAP_PROP_CONTRAST: 48, _CAP_PROP_BRIGHTNESS: -16, _CAP_PROP_GAMMA: 72}
+
 
 class CameraError(RuntimeError):
     """Raised when the camera device cannot be opened, or used after close().
@@ -372,6 +389,27 @@ class Camera:
                 self._device,
                 exc,
             )
+        self._apply_tone(capture, _DAY_TONE, "day")
+
+    def _apply_tone(self, capture: _CaptureHandle, tone: dict[int, int], name: str) -> None:
+        """Best-effort write of a contrast/brightness/gamma set; never raises.
+
+        Tone only changes how the frame looks, so a control the device
+        rejects is logged and skipped rather than failing the exposure
+        change it rides along with.
+        """
+        for prop_id, value in tone.items():
+            try:
+                capture.set(prop_id, value)
+            except Exception as exc:  # noqa: BLE001 - a tone write must never block capture
+                logger.warning(
+                    "camera %s: could not apply %s tone (prop %d=%d): %s",
+                    self._device,
+                    name,
+                    prop_id,
+                    value,
+                    exc,
+                )
 
     def _consume_warmup_frames(self, capture: _CaptureHandle) -> str:
         """Grab and discard `warmup_frames` frames; release and return an error on failure.
@@ -504,6 +542,7 @@ class Camera:
             logger.warning("camera %s: night exposure lock raised: %s", self._device, exc)
             return False
         if mode_ok and exposure_ok:
+            self._apply_tone(capture, _NIGHT_TONE, "night")
             logger.info("camera %s: night exposure locked at %d", self._device, value)
             return True
         logger.warning(
@@ -558,6 +597,7 @@ class Camera:
         except Exception as exc:  # noqa: BLE001 - a camera control failure must not block capture
             logger.warning("camera %s: auto-exposure restore raised: %s", self._device, exc)
             return False
+        self._apply_tone(capture, _DAY_TONE, "day")
         if mode_ok:
             logger.info("camera %s: auto-exposure restored", self._device)
             return True

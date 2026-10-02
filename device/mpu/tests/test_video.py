@@ -26,6 +26,7 @@ import pytest
 from perception.camera import CameraError
 from perception.storage import CaptureEventTag
 from perception.video import APPSINK_NAME, EventVideoRecorder, build_pipeline_description
+from services import config
 
 TAG = CaptureEventTag(
     event_timestamp_s=1725000000.5,
@@ -355,25 +356,47 @@ def test_burst_rejects_impossible_arguments(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# lock_night_exposure() - CameraProtocol contract, not yet implemented here
+# lock_night_exposure() - CameraProtocol contract, build-time arming for the next open()
 # ---------------------------------------------------------------------------
 
 
-def test_lock_night_exposure_returns_false(tmp_path):
-    """Unimplemented on the GStreamer path - see the method's own docstring for why.
+def test_lock_night_exposure_arms_the_next_open(tmp_path, monkeypatch):
+    """Accepted requests answer True and arm the *next* open(), not the running pipeline.
 
-    Must still satisfy CameraProtocol (reflex_loop calls it unconditionally
-    on any night+IR event) rather than raise AttributeError, and must
-    answer False - the same "continue on whatever exposure mode the camera
-    already had" signal perception.camera.Camera.lock_night_exposure gives
-    on a real failure - never True, which would claim a lock that did not
-    happen.
+    This path was unimplemented until 2026-09-23 and this test asserted a
+    flat False. It is now implemented via v4l2src's build-time
+    `extra-controls`, so True is the correct answer - but it means
+    something weaker than perception.camera.Camera's True, which is
+    read-back-verified against a live handle. Here it only means "the
+    request was recorded and the next open() will start manual"; there is
+    nothing running to read back from. The method's own docstring carries
+    the full consequence list.
     """
+    monkeypatch.setattr(config, "NIGHT_EXPOSURE_LOCK_ENABLED", True)
     recorder = _recorder(tmp_path, _FakeFactory(), warmup_frames=0)
     recorder.open()
 
+    assert recorder.lock_night_exposure() is True
+    assert recorder.lock_night_exposure(256) is True  # accepts the same signature as Camera's
+
+
+def test_lock_night_exposure_returns_false_when_the_kill_switch_is_off(tmp_path, monkeypatch):
+    """NIGHT_EXPOSURE_LOCK_ENABLED=False must answer False and disarm, not silently arm.
+
+    False is the same "continue on whatever exposure mode the camera
+    already had" signal Camera.lock_night_exposure gives on a real
+    failure. The disarm half matters because nothing else on this class
+    ever clears the flag: without it, one lock taken before the switch was
+    turned off would stay armed into every later open().
+    """
+    monkeypatch.setattr(config, "NIGHT_EXPOSURE_LOCK_ENABLED", True)
+    recorder = _recorder(tmp_path, _FakeFactory(), warmup_frames=0)
+    recorder.open()
+    assert recorder.lock_night_exposure() is True
+
+    monkeypatch.setattr(config, "NIGHT_EXPOSURE_LOCK_ENABLED", False)
     assert recorder.lock_night_exposure() is False
-    assert recorder.lock_night_exposure(256) is False  # accepts the same signature as Camera's
+    assert recorder._night_exposure_locked is False
 
 
 def test_lock_night_exposure_before_open_raises(tmp_path):
