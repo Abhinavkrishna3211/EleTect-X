@@ -829,9 +829,16 @@ begin
   end if;
 
   -- GoTrue refuses to issue a session while banned_until is in the future, so this
-  -- blocks sign-in at the auth layer rather than only in the UI.
+  -- blocks sign-in at the auth layer rather than only in the UI. The date is a
+  -- sentinel for "no expiry" and must stay finite: GoTrue's admin API cannot
+  -- deserialise a Postgres infinity, so 'infinity' here made getUserById fail and
+  -- left the alert fan-out unable to tell a revoked account from an addressless
+  -- one (migration 0010).
   update auth.users
-     set banned_until = case when p_deactivated then 'infinity'::timestamptz else null end
+     set banned_until = case
+                          when p_deactivated then timestamptz '9999-12-31 23:59:59+00'
+                          else null
+                        end
    where id = p_user;
   if not found then
     raise exception 'no such user';

@@ -53,10 +53,18 @@ export async function sendEmail(to: string, subject: string, body: string): Prom
 // PostgREST, so the alternative is a second round-trip per person for data we
 // were handed anyway.
 //
-// 'infinity' is what admin_set_deactivated writes, and Date.parse cannot read it,
-// so an unparseable value counts as banned. Failing closed here costs a
-// deactivated account one missed email; failing open leaks to someone whose
-// access was deliberately revoked.
+// An unparseable banned_until counts as banned. Failing closed here costs a
+// deactivated account one missed email; failing open leaks a third party's
+// name, department, official email and phone to someone whose access was
+// deliberately revoked.
+//
+// 'infinity' used to be what admin_set_deactivated wrote, and Date.parse cannot
+// read it - but it never reached this function, because GoTrue's admin API
+// cannot deserialise that value and returned an error instead of the user. The
+// `if (!email) continue` below is what skipped the account, which is safe but
+// accidental. Migration 0010 writes a finite sentinel so the row is readable
+// and this check is the one that fires. send-alert's copy of this guard had no
+// such net and needed an explicit one; see its fanOut.
 function isDeactivated(bannedUntil: string | null | undefined): boolean {
   if (!bannedUntil) return false;
   const until = Date.parse(bannedUntil);

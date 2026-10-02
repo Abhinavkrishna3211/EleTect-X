@@ -220,10 +220,17 @@ export async function deliver(
 // PostgREST, so the alternative is a second round-trip per person for data we
 // were handed anyway.
 //
-// 'infinity' is what admin_set_deactivated writes, and Date.parse cannot read it,
-// so an unparseable value counts as banned. Failing closed here costs a
-// deactivated account one missed email; failing open leaks to someone whose
-// access was deliberately revoked.
+// Failing closed here costs a deactivated account one missed email; failing open
+// leaks to someone whose access was deliberately revoked. So an unparseable
+// banned_until counts as banned, and a lookup that fails or returns no user
+// skips that recipient rather than treating them as reachable.
+//
+// That last case is not hypothetical. admin_set_deactivated() used to write
+// 'infinity', which GoTrue's admin API cannot deserialise into a Go time, so
+// getUserById returned an error instead of the user - and because the error was
+// discarded, a revoked officer arrived here looking like someone with no email
+// address. Migration 0010 writes a finite sentinel so the row is readable; this
+// guard is the second half, so the next lookup failure is handled on purpose.
 function isDeactivated(bannedUntil: string | null | undefined): boolean {
   if (!bannedUntil) return false;
   const until = Date.parse(bannedUntil);
@@ -242,9 +249,14 @@ export async function fanOut(
   for (const p of people) {
     let email: string | null = null;
     try {
-      const { data: u } = await db.auth.admin.getUserById(p.id);
-      if (isDeactivated(u?.user?.banned_until)) continue;
-      email = u?.user?.email ?? null;
+      const { data: u, error } = await db.auth.admin.getUserById(p.id);
+      // A lookup that errored tells us nothing about whether this account is still
+      // active, so it is not safe to mail. Skip, same as a thrown lookup. Unlike
+      // notify-officer-request's fanOut there is no `if (!email)` net downstream:
+      // deliver() would carry this person on to the SMS and WhatsApp channels.
+      if (error || !u?.user) continue;
+      if (isDeactivated(u.user.banned_until)) continue;
+      email = u.user.email ?? null;
     } catch (_e) {
       continue;   // lookup failed for this recipient only; don't 500 and drop the rest of the batch
     }

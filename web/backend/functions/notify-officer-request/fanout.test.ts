@@ -156,7 +156,9 @@ Deno.test("fanOut: a deactivated admin is skipped, an active one still receives"
 });
 
 Deno.test("fanOut: an unparseable banned_until counts as banned", async () => {
-  // 'infinity' is what admin_set_deactivated() writes; Date.parse gives NaN.
+  // 'infinity' is what admin_set_deactivated() wrote before migration 0010;
+  // Date.parse gives NaN. Rows written then outlive the migration in any
+  // database it has not reached yet.
   const banned = "33333333-0000-0000-0000-0000000000c3";
   const { client } = makeBanStub({ [banned]: "infinity" });
   const { result, sentTo } = await runFanOut(client, [{ id: banned }]);

@@ -322,9 +322,12 @@ Deno.test("fanOut: a deactivated recipient is skipped and the rest of the batch 
 Deno.test("fanOut: an unparseable banned_until counts as banned", async () => {
   channelsOff();
 
-  // 'infinity' is exactly what admin_set_deactivated() writes, and Date.parse
-  // returns NaN for it. Failing closed costs a deactivated account one missed
-  // email; failing open keeps mailing someone whose access was revoked.
+  // 'infinity' is what admin_set_deactivated() wrote before migration 0010, and
+  // Date.parse returns NaN for it. Rows written then still exist in databases
+  // the migration has not reached, and nothing stops a future value being
+  // unparseable for some other reason. Failing closed costs a deactivated
+  // account one missed email; failing open keeps mailing someone whose access
+  // was revoked.
   const banned = "33333333-0000-0000-0000-00000000000c";
   const { client, inserts } = makeBanStub({ [banned]: "infinity" });
   await fanOut(
@@ -335,6 +338,51 @@ Deno.test("fanOut: an unparseable banned_until counts as banned", async () => {
   );
 
   assertEquals(reached(inserts), []);
+});
+
+Deno.test("fanOut: a recipient whose lookup errors is skipped, not mailed", async () => {
+  channelsOff();
+
+  // The step 9.5 defect in the runbook rehearsal. getUserById returned an error
+  // rather than throwing - GoTrue could not deserialise a banned_until of
+  // 'infinity' - and the error was discarded, so a revoked officer arrived in
+  // deliver() looking like an ordinary recipient who happened to have no email.
+  // An errored lookup says nothing about whether the account is still active, so
+  // the only safe reading is "do not mail". No row at all, as for any skip.
+  const broken = "66666666-0000-0000-0000-00000000000f";
+  const fine = "77777777-0000-0000-0000-000000000010";
+  const inserts: { table: string; row: Record<string, unknown> }[] = [];
+  const client = {
+    from(table: string) {
+      return {
+        insert(row: Record<string, unknown>) {
+          inserts.push({ table, row });
+          return Promise.resolve({ data: null, error: null });
+        },
+      };
+    },
+    auth: {
+      admin: {
+        getUserById(id: string) {
+          return id === broken
+            ? Promise.resolve({ data: { user: null }, error: { message: "unreadable user row" } })
+            : Promise.resolve({
+              data: { user: { id, email: `${id}@example.test`, banned_until: null } },
+              error: null,
+            });
+        },
+      },
+    },
+  };
+
+  await fanOut(
+    client as unknown as Parameters<typeof fanOut>[0],
+    [{ id: broken, phone: null }, { id: fine, phone: null }],
+    { subject: "s", body: "b" },
+    4,
+  );
+
+  assertEquals(reached(inserts), [`${fine}@example.test`]);
 });
 
 Deno.test("fanOut: an expired ban and a null ban both still receive", async () => {
