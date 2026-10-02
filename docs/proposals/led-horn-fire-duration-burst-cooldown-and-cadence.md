@@ -74,7 +74,7 @@ evidence capture overlaps the burst regardless of its length.
 ### Horn length — 3 s is already short; leave it, or trim to ~2 s
 
 The horn is bounded by ADR 0016's hearing-safety cap for people and livestock near the unit, and
-3 s is already modest. A small trim to ~2 s would cut the ~3.15 s MCU stall and save energy with
+3 s is already modest. A small trim to ~2 s would cut the ~3.8 s MCU stall and save energy with
 negligible deterrence loss (the bee/predator-growl content that actually matters, §2, registers in
 well under a second), but this is low-priority next to the LED change and should not be made
 without the same bench check.

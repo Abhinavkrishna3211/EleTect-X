@@ -102,7 +102,7 @@ printed menu (`? ` output) so whoever's running the test doesn't think it's brok
 **This call blocks.** `horn.cpp`'s fire sequence is a blocking `delay()` chain (up to
 `HORN_BURST_MAX_MS=3000` plus the amp-enable delay); `led.cpp`/`ir.cpp` block for their own
 `duration_ms`. During a manual fire-test command, `geophone_service()` and `lora_service()` in the same
-`loop()` iteration are blocked too, for up to ~3.15s in the horn case. Acceptable for a bench-only,
+`loop()` iteration are blocked too, for up to ~3.8 s in the horn case. Acceptable for a bench-only,
 human-triggered tool — call this out as a one-line comment in `fire_test.cpp`, don't silently leave it
 implicit the way a reviewer would have to go find out for themselves.
 
