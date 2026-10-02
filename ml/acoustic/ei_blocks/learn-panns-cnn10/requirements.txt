@@ -1,0 +1,6 @@
+# Pinned so a rerun of the documented training reproduces the published scores.
+numpy==1.26.4
+torch==2.4.1
+torchlibrosa==0.1.0
+onnx==1.16.2
+onnxruntime==1.19.2

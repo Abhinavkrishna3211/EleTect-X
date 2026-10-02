@@ -1,0 +1,6 @@
+# Host parity harness build output. Rebuilt in seconds from parity_main.cpp;
+# committing it would put a Windows binary in a tree that also builds on
+# aarch64 Linux.
+parity_cpp
+parity_cpp.exe
+*.o

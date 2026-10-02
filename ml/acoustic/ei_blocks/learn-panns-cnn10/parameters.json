@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "type": "machine-learning",
+  "info": {
+    "name": "PANNs Cnn10 transfer",
+    "description": "Freezes an AudioSet-pretrained PANNs Cnn10 backbone and trains a two-layer head on its 512-d embedding. Expects log-mel input from the PANNs log-mel processing block; the stock MFE block is a different front end and will not reproduce these scores.",
+    "operatesOn": "audio",
+    "indRequiresGpu": false
+  },
+  "parameters": [
+    {
+      "name": "Epochs",
+      "value": 100,
+      "type": "int",
+      "help": "Head-only training passes. The backbone is frozen, so this is cheap: the embeddings are computed once up front and reused every epoch. 100 rather than 60 because label smoothing needs the longer schedule to pay off - epoch-matched over 15 seeds, ls=0.1 is worth +0.85 points overall at 100 epochs but only +0.36 (sem 0.26, i.e. noise) at 60. On its own the epoch count barely matters: 30 through 250 all land within seed noise.",
+      "param": "epochs"
+    },
+    {
+      "name": "Learning rate",
+      "value": 0.0008,
+      "type": "float",
+      "help": "Adam step size for the head. Matches the harness's MLPClassifier learning_rate_init.",
+      "param": "learning-rate"
+    },
+    {
+      "name": "Backbone",
+      "value": "cnn10",
+      "type": "select",
+      "valid": [
+        "cnn10",
+        "cnn6"
+      ],
+      "help": "Cnn10 (6.3M params) scored 92.1% on the project's frozen test split against Cnn6's 91.9%, averaged over five seeds. Cnn6 is slightly cheaper per inference.",
+      "param": "backbone"
+    },
+    {
+      "name": "Balance classes",
+      "value": true,
+      "type": "boolean",
+      "help": "Oversample minority classes to the majority count. The project's corpus is imbalanced and chainsaw recall is the metric this most affects.",
+      "param": "balanced"
+    },
+    {
+      "name": "Label smoothing",
+      "value": 0.1,
+      "type": "float",
+      "help": "Softens the one-hot targets. Measured over 15 seeds on a 738-window validation split, and the effect depends on the epoch count. At 100 epochs, 0.1 is worth +0.85 points overall and +1.79 points of chainsaw recall, both real. At 60 epochs the overall gain washes out into noise (+0.36, sem 0.26) but the chainsaw gain survives (+1.08, sem 0.54), and 0.05 recovers slightly more of it (+1.43). Either way this is the only change out of 34 configurations tried that moved the weakest class - mixup, focal loss and class weighting all did nothing or hurt. Leave weight decay at its built-in 1e-3: dropping it is a comparable gain alone, but the two over-regularise together and chainsaw recall falls back below baseline.",
+      "param": "label-smoothing"
+    },
+    {
+      "name": "Random seed",
+      "value": 0,
+      "type": "int",
+      "help": "Fixed so a rerun reproduces the reported scores rather than landing somewhere in the seed spread.",
+      "param": "seed"
+    }
+  ]
+}

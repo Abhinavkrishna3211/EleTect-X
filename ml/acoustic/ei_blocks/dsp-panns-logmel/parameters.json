@@ -1,0 +1,72 @@
+{
+    "version": 1,
+    "type": "dsp",
+    "info": {
+        "title": "PANNs log-mel",
+        "author": "EleTect X",
+        "description": "Log-mel spectrogram using the exact front-end convention the PANNs AudioSet backbones were trained with: 32 kHz, 1024-point Hann STFT, 320-sample hop, 64 Slaney-normalised mel filters over 50-14000 Hz, power spectrum, and 10*log10 with no noise-floor clipping and no top_db ceiling. The stock MFE block zeroes every bin below a noise floor, which is not this convention - feeding MFE output to a PANNs backbone shifts the input distribution away from the one the pretrained weights expect.",
+        "name": "PANNs log-mel",
+        "preferConvolution": true,
+        "convolutionColumns": "mel_bins",
+        "convolutionKernelSize": 3,
+        "cppType": "panns_logmel",
+        "visualization": "dimensionalityReduction",
+        "experimental": false,
+        "latestImplementationVersion": 1,
+        "port": 4446
+    },
+    "parameters": [
+        {
+            "group": "Mel filterbank",
+            "items": [
+                {
+                    "name": "Number of mel filters",
+                    "value": 64,
+                    "type": "int",
+                    "help": "PANNs checkpoints are trained at 64. Changing this invalidates the pretrained weights.",
+                    "param": "mel_bins"
+                },
+                {
+                    "name": "FFT length",
+                    "value": 1024,
+                    "type": "int",
+                    "help": "PANNs window_size. 1024 at 32 kHz is a 32 ms analysis window.",
+                    "param": "n_fft"
+                },
+                {
+                    "name": "Hop length",
+                    "value": 320,
+                    "type": "int",
+                    "help": "PANNs hop_size. 320 at 32 kHz is 10 ms per frame.",
+                    "param": "hop_size"
+                },
+                {
+                    "name": "Low frequency",
+                    "value": 50,
+                    "type": "int",
+                    "help": "fmin. Below this is wind and handling noise at the deployment site.",
+                    "param": "fmin"
+                },
+                {
+                    "name": "High frequency",
+                    "value": 14000,
+                    "type": "int",
+                    "help": "fmax. PANNs uses 14 kHz, just under the 16 kHz Nyquist of its 32 kHz rate.",
+                    "param": "fmax"
+                }
+            ]
+        },
+        {
+            "group": "Windowing",
+            "items": [
+                {
+                    "name": "Centre on loudest 100 ms",
+                    "value": false,
+                    "type": "boolean",
+                    "help": "Reproduces the training harness's --crop peak, used for the 3 s configuration. Leave off for deployment: Edge Impulse already slides the window over the stream, so a transient cannot fall outside it, and re-centring here would make the deployed features differ from the ones the impulse was tested on.",
+                    "param": "peak_crop"
+                }
+            ]
+        }
+    ]
+}

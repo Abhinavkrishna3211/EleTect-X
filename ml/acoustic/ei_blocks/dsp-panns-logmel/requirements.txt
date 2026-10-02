@@ -1,0 +1,8 @@
+# Pinned: the log-mel values this block emits are the contract with a frozen
+# pretrained backbone, so a filterbank change in a minor release is a silent
+# accuracy regression rather than a build failure. parity_check.py is what
+# re-qualifies a bump.
+numpy==1.26.4
+librosa==0.11.0
+flask==3.0.3
+matplotlib==3.9.2
