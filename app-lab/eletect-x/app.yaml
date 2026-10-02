@@ -1,10 +1,77 @@
 # App Lab manifest for the real EleTect-X app (not the disposable bench apps
-# under device/mpu/bench/). Field names follow the same shape confirmed for
-# the ping bench (device/mpu/bench/ping/app.yaml) — name/description/version
-# — but have not independently been diffed against a fresh App Lab-generated
-# app.yaml on this board. If App Lab's own wizard ever produces a file with
-# different or additional fields, reconcile this one against that instead of
-# assuming this file alone is authoritative.
-name: eletect-x
-description: Autonomous seismic-primary elephant early-warning and deterrence node.
-version: "0.1.0"
+# under device/mpu/bench/).
+#
+# Reconciled 30 Sept 2026 against the board's own App Lab-generated file
+# (/home/arduino/ArduinoApps/eletect-x/app.yaml, 412 B, mtime 30 Jul - i.e.
+# pristine wizard output, never hand-edited). That file is authoritative and
+# this one now mirrors it. The previous guess here was wrong in both
+# directions: it carried `description:` and `version:` keys that this app's
+# own manifest does not have, and it omitted `icon`, `ports` and `bricks`,
+# which it does.
+#
+# The manifest schema is `AppDescriptor` in
+# internal/orchestrator/app/parser.go of arduino/arduino-app-cli, checked
+# 30 Sept 2026:
+#
+#   name        yaml:"name"
+#   description yaml:"description"
+#   ports       yaml:"ports"
+#   bricks      yaml:"bricks"
+#   icon        yaml:"icon,omitempty"
+#   required_devices  yaml:"required_devices,omitempty"   (deprecated - use
+#                     the per-brick `devices` key instead)
+#
+# So `description` is a valid key, simply unset here; setting it would be a
+# real change to the board rather than a correction of this file. There is
+# no `version` key at all - that one was invented, and this confirms it at
+# source level rather than by absence of evidence.
+#
+# `icon` is validated: IsValid() rejects anything that is not a single
+# emoji, so the default below is not cosmetic - a string there fails the
+# parse.
+#
+# Note `name` is `EleTect-X` on the board, distinct from the lowercase app
+# *id* `user:eletect-x`. They are different strings; do not collapse them.
+name: EleTect-X
+
+# Default emoji, never customised on the board. Kept verbatim so this file
+# stays a faithful mirror.
+icon: 😀
+
+# Empty on the board - and the live view on :8090 does NOT come from here.
+# Because this list is empty, App Lab's generated .cache/app-compose.yaml
+# also has `ports: []`. The running container only gets `- "8090:8090"` from
+# .cache/app-compose.golden.yaml, which the self-healing watchdog re-applies
+# after each crash-reboot. So the live view is a downstream patch, not a
+# declared app port: if the compose is ever regenerated from this file and
+# the watchdog does not follow, :8090 silently disappears. Declaring 8090
+# here is the durable fix, deliberately not done yet because it needs an app
+# restart (same reason as `bricks` below).
+ports: []
+
+# Empty on the board. The acoustic model is deployed as a *custom model*
+# (~/.arduino-bricks/models/etx-acoustic-panns-20260930/{model.eim,model.yaml})
+# rather than bound as a brick here, so nothing listens on 1339 - which is
+# why services/config.py's ACOUSTIC_INFERENCE_URL correctly stays on 1338.
+#
+# The binding, when it happens, is exactly this - `model` is a real key on
+# the per-brick mapping (`Brick.Model`, yaml:"model,omitempty"):
+#
+#   bricks:
+#     - arduino:audio_classification:
+#         model: etx-acoustic-panns-20260930
+#
+# Brick.UnmarshalYAML accepts a bare string *or* a single-key mapping, which
+# is why the stock examples get away with a flat `- arduino:web_ui` list:
+# they never override a model. MarshalYAML always writes the mapping form,
+# so App Lab rewrites this file into mappings the first time its UI touches
+# it.
+#
+# Registration is already done and the daemon already sees it - `brick
+# details arduino:audio_classification` lists etx-acoustic-panns-20260930
+# under `compatible_models` alongside stock glass-breaking. What is left is
+# only this manifest line, and it is deferred on purpose: it restarts the
+# production deterrence stack and buys nothing until the BY-M1 mic is
+# physically connected. When it is bound, the URL must point at the brick's
+# Compose service name (`ei-audio-classifier-runner:1337`), not a host port.
+bricks: []
