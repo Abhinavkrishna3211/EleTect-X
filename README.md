@@ -111,3 +111,8 @@ field validation and testing.
 ## License
 
 MIT — see [`LICENSE`](LICENSE).
+
+The deterrence audio on the device is third-party work under separate terms. Three of the
+five tracks are CC-BY and require attribution wherever this is distributed; the credits are
+in [`docs/AUDIO_CREDITS.md`](docs/AUDIO_CREDITS.md) and travel with any build or write-up
+that ships the sounds.
