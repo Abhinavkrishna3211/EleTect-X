@@ -106,8 +106,15 @@ NODE_HOUSEHOLD_PROXIMITY = os.environ.get("ELETECT_HOUSEHOLD_PROXIMITY", "0") !=
 # below owns the vocabulary. Unrecognized values fall back to
 # "elephant_only" and never raise, since a typo in a per-node environment
 # variable must not crash the reflex loop on a field node.
+#
+# 8 Sept: briefly hardcoded to "boar_only" for one night's field test, then
+# reverted to the container's own env once both species were wanted again.
+# Recorded because the detour's premise was wrong and should not be retried:
+# it was meant to exclude the honeybee track, which scope narrowing does not
+# reach. That track is Tier-1-only for Elephant (DETERRENCE_TIERS /
+# resolve_tier_action) and Boar's ladder never selects it either (ADR 0023),
+# so the tier configuration is what governs it, not the deterrence scope.
 NODE_DETERRENCE_SCOPE = os.environ.get("ELETECT_DETERRENCE_SCOPE", "elephant_only")
-
 
 @dataclasses.dataclass(frozen=True)
 class Species:
@@ -564,9 +571,17 @@ CAMERA_WARMUP_FRAMES = 3
 # see docs/KNOWN_GAPS.md. Open (not capture_frame()/capture_burst(), which
 # stay non-retrying by design - see their own docstrings) because a device
 # that isn't there yet at startup is exactly the case a few spaced attempts
-# can ride out. INVENTED counts - no real-world open-failure-rate data
-# backs these numbers yet.
-CAMERA_OPEN_RETRIES = 3
+# can ride out.
+#
+# 20 x 2s (~38s of retry window) rather than a "few": on an unattended field
+# deploy the board is cold-booted daily (mains switched off each morning,
+# on each night) and the container starts before the USB stack has finished
+# enumerating the camera - observed 10 Sept 2026, the container crash-looped
+# through three restarts before the Arducam node appeared. A retry window
+# that outlasts a cold-boot enumeration keeps that inside one open() call
+# instead of costing a container bounce every power-on. INVENTED counts - no
+# real-world open-failure-rate data backs these numbers yet.
+CAMERA_OPEN_RETRIES = 20
 CAMERA_OPEN_RETRY_BACKOFF_S = 2.0
 
 # Default burst size and inter-frame spacing for capture_burst(). 0.0
@@ -574,6 +589,22 @@ CAMERA_OPEN_RETRY_BACKOFF_S = 2.0
 # Both INVENTED - no detector-side timing requirement drives these yet.
 CAMERA_BURST_FRAMES = 5
 CAMERA_BURST_INTERVAL_S = 0.0
+
+# Extra evidence frames captured after drive_horn()/drive_led() have already
+# returned and CAPTURE_POST_FIRE_TAIL_S has already elapsed - reflex_loop.py
+# only reaches this capture after every actuator call is done, so widening
+# it can never delay the horn (services/reflex_loop.py's own sequencing,
+# same guarantee ADR 0020's video tail relies on). handle_footfall_event()
+# itself defaults retreat_burst_frames to 0 (a no-op, byte-for-byte the
+# pre-existing behaviour) - main.py's _footfall_kwargs is what opts
+# production into these values, so every existing test is unaffected unless
+# it explicitly asks for this. Deliberately reuses the same JPEG/cv2 path
+# as CAMERA_BURST_FRAMES rather than ADR 0020's GStreamer video path - see
+# docs/KNOWN_GAPS.md. INVENTED counts, not yet bench-verified against this
+# board's real camera: chosen to roughly span an animal's retreat, same
+# order of magnitude as EVENT_VIDEO_RETREAT_TAIL_S.
+CAMERA_RETREAT_BURST_FRAMES = 45
+CAMERA_RETREAT_BURST_INTERVAL_S = 1.0
 
 # ---------------------------------------------------------------------------
 # Vision inference (perception/detector.py)
@@ -594,7 +625,15 @@ CAMERA_BURST_INTERVAL_S = 0.0
 # running by the time an event needs it, and a detect() call against
 # nothing listening degrades to VISION unavailable, same as a camera
 # failure (perception/detector.py, services/reflex_loop.py).
-VISION_INFERENCE_URL = "http://127.0.0.1:1337"
+#
+# Env override exists because the App-Lab container runs on a bridge
+# network, not the host network namespace: 127.0.0.1 inside the container
+# is the container's own loopback, not the host's. The compose deployment
+# points this at the docker0 gateway alias instead; bare-host runs (no
+# container) keep the default.
+VISION_INFERENCE_URL = os.environ.get(
+    "ELETECT_VISION_INFERENCE_URL", "http://127.0.0.1:1337"
+)
 
 # Per-frame socket timeout for one detect call. Bench-measured
 # classification time on the real board was ~20ms (28 Aug, real image over
@@ -603,6 +642,15 @@ VISION_INFERENCE_URL = "http://127.0.0.1:1337"
 # the whole event" reasoning as BRIDGE_CALL_TIMEOUT_S above, just guarding a
 # different transport.
 VISION_INFERENCE_TIMEOUT_S = 2.0
+
+# Per-class score floor applied to the runner's boxes, on top of the single
+# min_score baked into the .eim (perception/detector.py). Empty = every box
+# the runner reports is kept, which is the deployed champion's behaviour.
+# A candidate tuned with per-class cut-offs (e.g. the 29 Sept 160px run:
+# Boar 0.18 / Elephant 0.18 / Fox 0.12, chosen for zero false alarms on the
+# 340 field frames - see the 28 Sept vision model training log)
+# sets them here when, and only when, that model is promoted.
+VISION_MIN_CONFIDENCE_BY_LABEL: dict[str, float] = {}
 
 # How many frames the pre-decision vision check captures, distinct from
 # CAMERA_BURST_FRAMES (the larger, IR-lit evidence burst captured only once
@@ -701,7 +749,25 @@ VISION_WATCH_MAX_EMPTY_POLLS = 3
 # enters `species`; Elephant costs +0. Measured, not assumed - the real
 # before/after false-positive numbers this bought are in
 # docs/qa/boar-gap-session-notes.md.
-VISION_SPECIES_CONSECUTIVE_POLLS: dict[str, int] = {"Boar": 2}
+#
+# RELAXED - 13 Sept 2026, alongside VISION_SPECIES_BURST_MAJORITY_LABELS
+# below, same reason and same revert plan: empty so a fox - which the
+# 2-class model of the time labelled "Boar" - admits on the first
+# qualifying poll instead of waiting for a second consecutive one.
+#
+# The premise has since changed and the relaxation has not. The 3-class
+# model labels a fox "Fox", so this no longer has anything to do with
+# foxes: it is now simply a relaxed admission bar for Boar. That is worth
+# knowing before reading the revert note below as still being about foxes.
+# It is not a reason to revert.
+#
+# Originally written as a one-day override. It is not one any more: the
+# relaxation is open-ended by the user's decision and carries no expiry.
+# REVERT to {"Boar": 2} only on an explicit request to do so - not because
+# a date has passed, and not as tidy-up. Until then the Boar
+# false-positive rate this gate was built to hold down (31.53% per-frame,
+# measured) is knowingly being accepted.
+VISION_SPECIES_CONSECUTIVE_POLLS: dict[str, int] = {}
 
 # Labels that must appear on a strict majority of a burst's
 # VISION_CHECK_FRAME_COUNT frames - not merely one of them - before
@@ -732,7 +798,26 @@ VISION_SPECIES_CONSECUTIVE_POLLS: dict[str, int] = {"Boar": 2}
 # Boar's problem is precision, not recall, so this is a clean win scoped to
 # the class that actually has it, leaving Elephant's OR-across-the-burst
 # path - and ADR 0022's confirm-and-exit latency - untouched.
-VISION_SPECIES_BURST_MAJORITY_LABELS: tuple[str, ...] = ("Boar",)
+#
+# RELAXED - 13 Sept 2026, at the user's explicit request: left empty so a
+# fox - which the 2-class model of the time could only label "Boar" -
+# confirms on a single frame instead of needing a majority of the burst,
+# matching Elephant's admission bar. This reopens the Boar false-positive
+# problem the majority gate exists to fix.
+#
+# The premise has since changed and the relaxation has not. The 3-class
+# model emits "Fox" as its own label, so foxes no longer arrive here as
+# Boar and the "there is no way to separate them" argument that justified
+# accepting the cost for real Boar sightings has expired with it. What
+# remains is a relaxed bar for Boar alone, carrying Boar's false-positive
+# rate with it. Stated so the trade is read accurately; it is not a reason
+# to revert.
+#
+# Originally written as a one-day override. It is not one any more: the
+# relaxation is open-ended by the user's decision and carries no expiry.
+# REVERT to ("Boar",) only on an explicit request to do so - not because a
+# date has passed, and not as tidy-up.
+VISION_SPECIES_BURST_MAJORITY_LABELS: tuple[str, ...] = ()
 
 # ADR 0022 Decision B: the deterrent fires on a vision confirmation, not on
 # the fused decision alone.
@@ -755,14 +840,315 @@ VISION_SPECIES_BURST_MAJORITY_LABELS: tuple[str, ...] = ("Boar",)
 # the whole system off from dusk to dawn.
 #
 # What this does NOT gate is warning people. The trigger is still recorded,
-# logged and settled on seismic alone. There is no footfall uplink on this
-# device yet to hold or release (the LoRa module is not joining -
-# docs/KNOWN_GAPS.md), so "seismic warns, vision fires" is today only half
-# implemented, and the implemented half is the fire gate.
+# logged and settled on seismic alone, and the footfall uplink goes out on
+# the seismic decision whether or not this gate held the fire - see
+# comms/lora_uplink.py's event_from_footfall(), which for a while read the
+# earlier version of this paragraph ("there is no footfall uplink yet")
+# and suppressed the frame along with the horn. A suppressed event reaches
+# the dashboard as UNCONFIRMED with no deterrent flag and pages nobody, so
+# "seismic warns, vision fires" is now implemented in both halves.
 #
 # False restores the pre-ADR-0022 behaviour: fire whenever decide() says
 # alert, whatever the camera saw.
 DETERRENT_REQUIRES_VISION_CONFIRMATION = True
+
+# ---------------------------------------------------------------------------
+# Acoustic capture + inference (perception/microphone.py,
+# perception/acoustic_detector.py, services/reflex_loop.py, ADR 0028)
+# ---------------------------------------------------------------------------
+# The acoustic modality moved from the MCU to the MPU. ADR 0009 put a
+# digital MEMS mic on the STM32's SAI peripheral so the MCU could listen in
+# its low-power domain; the Arduino core for this board ships a *prebuilt*
+# Zephyr loader with a fixed devicetree, so a sketch cannot add SAI at all,
+# and SAI sits outside the SmartRun domain regardless - meaning it could
+# never have delivered the always-on listening that was the whole reason to
+# prefer it. ADR 0028 has the full argument. What survives is event-gated
+# capture on the Linux side: a USB microphone, recorded through arecord,
+# classified once by a standing edge-impulse-linux-runner.
+#
+# Consequence worth stating plainly here because it is easy to miss: the
+# MCU->MPU `report_acoustic_event` RPC (bridge/schema.md) now has no
+# producer. handle_acoustic_event() is still the correct and only entry
+# point - it is just called from this side now.
+#
+# Always-on gunshot detection is NOT what this provides and is still
+# unbuilt. That remains ADR 0009's analog -> ADC4 -> LPBAM path, which
+# needs a MAX9814 re-bought and a small MCU-side model (the PANNs arena
+# cannot fit 786 kB of SRAM). See docs/KNOWN_GAPS.md.
+
+# Master switch. Default False.
+#
+# The path itself is no longer unproven: on 30 Sept 2026 a full capture ->
+# health-gate -> HTTP runner -> HttpAcousticClassifier run completed on the
+# board against the deployed impulse (15.00 s capture for 2 windows, health
+# PASS, 4.0-4.4 s inference per window, both windows `ambient` at 0.89-0.95
+# in a quiet room). So this is not gated on "does it work" any more.
+#
+# It stays False because the three health floors below are still INVENTED
+# for the mic that will actually be fielded. The 30 Sept run used the
+# board's existing USB webcam mic (Microdia 0c45:6366), not the BOYA BY-M1,
+# which is not procured yet. Calibrating the floors against the webcam and
+# then fielding a different capture chain would be worse than leaving them
+# uncalibrated, because it would look calibrated. Flip this to True once
+# mic_check has been run against the BY-M1 on its own adapter and the
+# floors below carry numbers from that run.
+ACOUSTIC_ENABLED = False
+
+# ALSA device string, e.g. "plughw:1,0". None means discover it by name at
+# startup (perception/microphone.discover_capture_device), which is the
+# right default: USB enumeration order on this board is not stable across
+# reboots, and a hardcoded card index that drifts would silently record
+# from an on-die codec - producing well-formed silence rather than an
+# error. Set the env var only to pin a specific device for a bench run.
+ACOUSTIC_CAPTURE_DEVICE = os.environ.get("ELETECT_ACOUSTIC_CAPTURE_DEVICE") or None
+
+# Capture rate. This is the rate the *impulse* takes, which is not the rate
+# its front end runs at, and the two being confused is what this comment
+# exists to prevent.
+#
+# The deployed model declares EI_CLASSIFIER_FREQUENCY 8000 with
+# RAW_SAMPLE_COUNT 80000, because the corpus is 8 kHz throughout
+# (ml/acoustic/README.md:241). PANNs' filterbank is defined at 32 kHz, so a
+# 4x upsample happens inside the DSP block - in training via librosa
+# (dsp-panns-logmel/dsp.py:147), on-device via the C++ port
+# (dsp-panns-logmel/cpp/panns_logmel_core.hpp). Feeding 32 kHz here would
+# not skip that step, it would push a 4x-too-fast signal through it and
+# land every frequency in the wrong mel bin, which a PANNs backbone reports
+# as confident wrong labels rather than as an error.
+#
+# There is no decimation leg on this board to worry about. `plughw:` will
+# resample in-kernel when a device needs it, but the capture device here
+# does not: `arecord -D hw:1,0 --dump-hw-params` reports
+# `RATE: [8000 48000]` and a direct `hw:1,0 -r 8000` capture prints
+# `exact rate : 8000 (8000/1)`, so 8 kHz is taken natively and plughw
+# passes it through untouched (measured 30 Sept 2026, Microdia 0c45:6366
+# on card 1). That leaves the 8k->32k upsample inside the DSP block as the
+# only resampling step on the path, and it is covered by
+# dsp-panns-logmel/cpp/parity_resample.py.
+#
+# This is a property of the capture device, not of the board. The BY-M1
+# fields through a different USB adapter, so re-run --dump-hw-params
+# against that adapter before assuming the same holds; if it only
+# advertises 44.1/48 kHz then plughw WILL decimate and that leg becomes
+# untested.
+ACOUSTIC_SAMPLE_RATE_HZ = 8000
+
+# How many overlapping inference windows one capture should yield. The
+# clip length is derived from this and the deployed model's own window
+# (HttpAcousticClassifier.required_capture_s) rather than set directly,
+# because POST /api/features rejects any feature count that is not exactly
+# input_features_count - a hardcoded duration would start 400ing the day
+# the impulse window changes.
+#
+# 2 is chosen against the inference cost, not against detection quality.
+# Studio's performance estimate for this impulse on the QRB2210 is 4,134 ms
+# for the classifier block alone, with the custom DSP block unestimated -
+# so each extra window is over four seconds of blocked CPU on the same four
+# cores the vision watch loop is using. INVENTED.
+ACOUSTIC_CAPTURE_WINDOWS = 2
+
+# Seconds between one acoustic check finishing and the next starting. The
+# acoustic modality polls on its own schedule rather than being triggered
+# by a seismic footfall, because a check costs roughly 4 s of inference
+# per window (see ACOUSTIC_CAPTURE_WINDOWS) and folding that into
+# handle_footfall_event() would punch a hole in the 45 s vision watch
+# window ADR 0022 sized to catch an elephant walking 140 m.
+#
+# 30 s is a duty-cycle choice, not a detection-latency one. The capture is
+# not a constant: acoustic_detector.required_capture_s() derives it from the
+# deployed impulse, and at the current 10 s analysis window with
+# ACOUSTIC_WINDOW_HOP_FRACTION = 0.5 and two windows it is 10 + 5 = 15 s. So
+# a cycle is ~15 s of capture, ~8 s of inference and 30 s idle: roughly 23 s
+# of every 53 s has the four cores busy, and about 28% of the timeline is
+# actually listened to. (A "~3 s capture" stood here until 2 Oct, which
+# understated the capture by 5x; the 8 s inference figure and the
+# quarter-of-the-timeline coverage both survive the correction, the latter by
+# coincidence rather than because the arithmetic was right.)
+#
+# It means a one-off transient - a single gunshot - is more likely to be
+# missed than heard, which is the honest consequence of not having the
+# always-on MCU path ADR 0009 specified and docs/KNOWN_GAPS.md still
+# tracks. The 15 s capture is also why folding a check into
+# handle_footfall_event() is worse than the paragraph above implies: it is
+# ~23 s of hole in a 45 s vision watch, not ~8 s. Sustained sources (a
+# chainsaw, a herd calling) are what this duty cycle actually catches.
+# INVENTED.
+ACOUSTIC_POLL_INTERVAL_S = 30.0
+
+# Hop between consecutive inference windows, as a fraction of the window
+# length. 0.5 = 50% overlap, so a transient landing on a window boundary
+# still falls whole inside its neighbour - which matters most for exactly
+# the class that alerts on its own (a gunshot is roughly 200 ms inside a
+# window of several seconds). 1.0 would give contiguous, non-overlapping
+# windows and half the compute. INVENTED.
+ACOUSTIC_WINDOW_HOP_FRACTION = 0.5
+
+# Hard ceiling on windows classified per clip, independent of clip length.
+# At 4+ seconds each, an unbounded count over a long capture would block
+# the caller for minutes. Windows past the cap are dropped from the end of
+# the clip, so the earliest audio - nearest whatever triggered the capture
+# - is always what gets classified.
+ACOUSTIC_MAX_WINDOWS = 4
+
+# Confidence a non-ambient window must reach before it is allowed to route.
+# Below this the clip is reported as "ran, heard nothing actionable" -
+# available=True with no routed outcome - which is distinct from both an
+# ambient result and an unavailable check.
+#
+# This closes the asymmetry perception/acoustic_detector.py's _select()
+# docstring names and then leaves open. _select() max-pools over time,
+# which is the right shape for a 200 ms gunshot inside a 10 s window, but
+# it means a single spurious window carries the whole clip - and for
+# gunshot, the one class that alerts on its own by ADR 0007 5, that clip
+# becomes an officer's pager. The docstring argues the cost is paid
+# downstream by fusion; that argument does not cover gunshot, which never
+# reaches fusion. This is the guard for the branch fusion cannot guard.
+#
+# 0.6 is not invented. ADR 0030 measured accuracy against threshold over
+# the frozen 605-clip split with below-threshold windows counted as wrong:
+# fp32 scores 91.90% at argmax and 91.74% at a 0.6 gate, so the floor costs
+# 0.16 points - one clip in 605 - and 0.6 is also the gate Edge Impulse's
+# own reporting for this impulse uses. int8 pays 0.50 points at the same
+# gate, which stays inside the same budget if ADR 0030's int8 arm ships.
+#
+# Applies to every non-ambient class. Ambient is never gated: a
+# low-confidence ambient window is still the honest answer "nothing to
+# report", and gating it would turn a quiet forest into a routed event.
+ACOUSTIC_MIN_CONFIDENCE = 0.6
+
+# Per-class overrides of ACOUSTIC_MIN_CONFIDENCE, keyed by the
+# bridge/rpc.py AcousticClass value ("gunshot", "chainsaw",
+# "elephant_call"). Empty means every class uses the global floor. Same
+# shape as VISION_MIN_CONFIDENCE_BY_LABEL, for the same reason: the two
+# classes that only corroborate can afford a lower bar than the one that
+# alerts alone, but nothing has measured what those bars should be, so
+# raising or lowering one is a deliberate edit and not a default. An
+# unrecognized key is ignored with a warning rather than raising - a typo
+# here must not take the acoustic poll down on a field node.
+ACOUSTIC_MIN_CONFIDENCE_BY_CLASS: dict[str, float] = {}
+
+# Endpoint of the standing `edge-impulse-linux-runner --run-http-server`
+# serving the acoustic .eim. Must be a different port from
+# VISION_INFERENCE_URL: one runner process serves exactly one artifact, so
+# the two models are two processes. Same env-override rationale as the
+# vision URL above - inside the App-Lab container 127.0.0.1 is the
+# container's own loopback, not the host's.
+#
+# 1338 is the host-side runner, which is what serves the model today and is
+# the configuration every on-target latency number in
+# ml/acoustic/ACOUSTIC_MODEL_REPORT.md was measured against.
+#
+# The model is ALSO registered as an App Lab custom model now
+# (deployment/install/install-acoustic-brick.sh), and the
+# arduino:audio_classification brick publishes host 1339 -> container 1337.
+# That is deliberately NOT the default here, and the mismatch is not an
+# oversight:
+#
+#   - Nothing binds the brick in app.yaml yet, so nothing listens on 1339.
+#     Pointing the default there would break the working path to chase one
+#     that is not wired up.
+#   - When the brick IS bound, the right answer is not 1339 either. The
+#     brick and the app share a Compose network, so the app should address
+#     the brick by service name and never traverse the host at all - which
+#     is exactly the problem that forced the vision runner host-side, since
+#     the App-Lab container cannot reach host 127.0.0.1 over the bridge.
+#
+#     The service name is `ei-audio-classifier-runner` and the in-network
+#     port is 1337, not the published 1339. That is not a guess: the brick's
+#     own client resolves it the same way. arduino/app_internal/core/ei.py
+#     `_get_ei_url()` loads the brick's compose file, takes the *first*
+#     service key as the hostname, and returns f"http://{addr}:1337".
+#     1339 exists only so a human on the board can curl it.
+#
+# So the switch is an env var at that point, not an edit here: set
+# ELETECT_ACOUSTIC_INFERENCE_URL to http://ei-audio-classifier-runner:1337.
+# It goes in the golden compose's `environment:` block alongside the other
+# ELETECT_* vars, not in app.yaml - AppDescriptor has no app-level env key,
+# and a brick's `variables` block can only carry variables that brick
+# declares in its own brick_config.yaml. This constant stays pointed at the
+# runner that is actually running.
+#
+# For the record, 1338 is not an arbitrary choice of ours that happens to
+# collide - it is the port arduino:image_classification publishes. The
+# host-side runner borrows a port from a brick we do not run. If that brick
+# is ever added, this default has to move.
+ACOUSTIC_INFERENCE_URL = os.environ.get(
+    "ELETECT_ACOUSTIC_INFERENCE_URL", "http://127.0.0.1:1338"
+)
+
+# Per-window socket timeout. Deliberately an order of magnitude above
+# VISION_INFERENCE_TIMEOUT_S's 2.0s, because the workload genuinely is
+# that much heavier: Studio estimates 4,134 ms for the PANNs Cnn10
+# transfer block alone on this silicon (float32, unoptimised), and the
+# custom log-mel block on top of that is unestimated because Studio cannot
+# profile a custom block. 15s leaves roughly 3x headroom over the known
+# part of that figure. This is a ceiling for detecting a wedged runner, not
+# a latency target - if real measurements come in near it, the answer is a
+# quantised model, not a larger number here. INVENTED.
+ACOUSTIC_INFERENCE_TIMEOUT_S = 15.0
+
+# --- Microphone health floors (perception/microphone.assess_health) -------
+# The field mic is a BOYA BY-M1: an electret lavalier powered by one LR44
+# cell. Its failure mode is the dangerous kind - a dead cell does not stop
+# the USB device enumerating or stop frames arriving, it just makes them
+# near-silent, which classifies as confident `ambient` forever and is
+# indistinguishable from a quiet forest. So level is checked on every clip
+# and a clip that fails is reported to fuse() as ACOUSTIC *unavailable*,
+# never classified. An absent modality fusion can drop; a lying one it
+# cannot.
+#
+# ALL THREE NUMBERS BELOW ARE INVENTED and must be replaced with measured
+# ones. device/mpu/bench/mic_check/mic_check.py prints exactly these three
+# statistics for a real capture; run it against (a) the mic switched on
+# with a fresh cell, (b) the mic switched off, and set the floor between
+# the two. Until that is done ACOUSTIC_ENABLED stays False.
+#
+# What a real capture looks like, for scale. Four settled captures on the
+# board 30 Sept 2026 (Microdia 0c45:6366, plughw:1,0, quiet indoor room,
+# after Microphone.WARMUP_S is discarded) read:
+#
+#     rms      0.0057 - 0.0141
+#     peak     0.023  - 0.056
+#     clipped  0.000000 in all four
+#     dc       +0.00059 - +0.00078
+#
+# Against that, every floor here is loose by one to two orders of
+# magnitude: MIN_RMS 0.0003 is ~20x below a quiet room, MAX_CLIPPED 0.01
+# is ~300x above what a clean capture produces, MAX_DC_OFFSET 0.05 is ~60x
+# above the measured bias. A gate that far out is a gate that only catches
+# a mic that has stopped existing. It did not, for instance, catch the
+# capture warm-up transient documented at Microphone.WARMUP_S - a
+# full-scale clipping artifact present on every single capture - because
+# averaging it over a whole clip pulled all three statistics back inside
+# these bounds. That defect is fixed by discarding the warm-up, not by
+# these floors, and it is the concrete argument for tightening them rather
+# than a hypothetical one.
+#
+# These are webcam-mic numbers. They say what order of magnitude to expect;
+# they are not the BY-M1's numbers and must not be pasted in as the
+# calibration.
+
+# RMS below this, normalised to full scale, means "no working microphone".
+# Set low on purpose: a genuinely quiet night must not be mistaken for a
+# dead cell, so this errs toward accepting near-silence rather than
+# rejecting it. That bias is the wrong way round for catching a slowly
+# dying battery and is the main reason the measured calibration matters.
+ACOUSTIC_MIN_RMS = 0.0003
+
+# Fraction of samples at or beyond full scale above which the clip is
+# treated as distorted. Clipping squares off the waveform and the harmonic
+# content the log-mel front end then sees is an artifact of the ADC rather
+# than of the source. 1% is a permissive gate aimed at a badly
+# misconfigured capture gain (the adapter's "mic boost"), not at the odd
+# transient peak of a genuinely loud event close to the mic.
+ACOUSTIC_MAX_CLIPPED_FRACTION = 0.01
+
+# Mean sample value, unsigned and normalised, above which a bias or
+# coupling fault is assumed. Checked *before* the RMS floor, because a DC
+# offset inflates RMS and can therefore mask exactly the near-silence the
+# floor exists to catch - a dead mic with an offset passes a naive level
+# check while carrying no signal at all.
+ACOUSTIC_MAX_DC_OFFSET = 0.05
 
 # ---------------------------------------------------------------------------
 # External IR illuminator gating (perception/night.py, services/reflex_loop.py)
@@ -845,6 +1231,47 @@ NIGHT_LOCKED_EXPOSURE = 256
 # SAFE_MODE (reflex_loop.py), read once so startup can honestly log which
 # mode the run is in.
 NIGHT_EXPOSURE_LOCK_ENABLED = os.environ.get("ELETECT_NIGHT_EXPOSURE_LOCK", "1") != "0"
+
+# Mean frame brightness (luma, 0-255) at or above which a scene is treated
+# as daylit even if its saturation still reads mono - the dawn override in
+# perception/night.py's ExposureAutoLock. The IR-cut-open sensor produces a
+# near-zero-saturation frame whatever the ambient light, so the
+# saturation-only day/night classifier cannot see sunrise coming and holds
+# the night exposure lock straight through it, over-exposing the sensor.
+#
+# Measured from the Kothamangalam field trial, dawn of 10 Sept 2026: a
+# working night-locked frame ~05:34 IST read mean luma 138; the dawn
+# over-exposure window (06:14-06:16 IST) read 190-198 and climbing; full
+# daylight read 220+. 175 sits above the night frame with margin and below
+# every over-exposed frame. Provisional - like HOME_TEST_EXPOSURE_FLIP_
+# CONSECUTIVE it wants tightening against a clean ambient-brightness trace
+# from the first supervised overnight soak (see docs/KNOWN_GAPS.md). The
+# override can only release a lock, never impose one, so erring high is the
+# safe direction.
+NIGHT_BRIGHTNESS_DAY_THRESHOLD = 175.0
+
+# Near-field clip trim (perception/night.py's ExposureAutoLock). NIGHT_LOCKED_
+# EXPOSURE above was only ever measured against a static, empty, far-field
+# scene - IR intensity falls off with distance^2, so the same fixed value can
+# drive near-field foliage to solid-white clipping while a subject metres out
+# stays correctly exposed. Seen live in the field 23 Sept 2026: a locked
+# frame with near-field foliage blown to white and a near-black background -
+# a case NIGHT_BRIGHTNESS_DAY_THRESHOLD's frame-wide mean cannot catch, since
+# the frame's average stays low.
+#
+# All four values below are a first cut, not yet validated against a real
+# overnight soak with the trim active - see docs/KNOWN_GAPS.md. Directional
+# reasoning only: NIGHT_CLIP_VALUE=250 sits just under saturation (255) so it
+# only counts pixels that are actually blown, not merely bright.
+# NIGHT_CLIP_FRACTION_THRESHOLD=0.02 (2% of the frame) is meant to catch a
+# real near-field patch while ignoring a handful of stray bright pixels.
+# NIGHT_EXPOSURE_TRIM_STEP=32 matches the ladder granularity Finding 4's
+# sweep actually tested. NIGHT_EXPOSURE_FLOOR=128 is Finding 4's own
+# documented noise-limited floor - the trim must never cross it.
+NIGHT_CLIP_VALUE = 250.0
+NIGHT_CLIP_FRACTION_THRESHOLD = 0.02
+NIGHT_EXPOSURE_TRIM_STEP = 32
+NIGHT_EXPOSURE_FLOOR = 128
 
 # ---------------------------------------------------------------------------
 # Which species this node acts on (services/reflex_loop.py)
@@ -1132,6 +1559,665 @@ EVENT_VIDEO_FRAME_TIMEOUT_S = 2.0
 # enough to see wake/event/Bridge activity on the bench without extra
 # configuration.
 LOG_LEVEL = "INFO"
+
+# ---------------------------------------------------------------------------
+# HOME_TEST_MODE - backyard test build ONLY, never a field deployment
+# ---------------------------------------------------------------------------
+# Second operating mode for a supervised one-night backyard wild-boar test.
+# Field mode's whole design point is low power: seismic-gated wake, camera
+# opened only for an event, no continuous recording - ADR 0020 rejects
+# always-on capture outright, on power grounds. A backyard test has mains
+# power and no such constraint, so this mode trades that away for data:
+# continuous capture, a rolling frame ring, an unconditional detection log,
+# and one saved clip per encounter covering arrival through departure.
+#
+# The MCU half of this toggle is HOME_TEST_MODE in device/mcu/src/config.h.
+# The two flags are deliberately INDEPENDENT - there is no cross-process
+# command that syncs them, and there must not be one. A new Bridge message
+# type invented under time pressure is a far bigger reliability risk than
+# two flags that each print loudly at boot; main.py and the sketch's
+# setup() both log which mode they came up in, so a board left in test mode
+# announces itself on the console rather than silently under-reporting in
+# the field.
+#
+# Env-first with a field-safe default, matching NODE_HOUSEHOLD_PROXIMITY and
+# NODE_DETERRENCE_SCOPE above. This is deliberately NOT a source constant on
+# the MPU side: the goal is that nobody ships to the field still in test
+# mode, and a default-off environment variable achieves that better than a
+# constant does - the field default is safe with nobody having to remember
+# to flip anything back. The MCU has no environment to read, so it stays a
+# #define there.
+#
+# What this flag does NOT change: the deterrence path. Fusion, the bandit,
+# the rule gate and the actuator RPCs are shared and unforked between modes.
+# Only sensing, logging and camera duty-cycle differ. A tier chosen here is
+# chosen by exactly the code that would choose it in the field.
+HOME_TEST_MODE = os.environ.get("ELETECT_HOME_TEST_MODE", "0") != "0"
+
+# Fox used to be appended to both target lists here whenever HOME_TEST_MODE
+# was set, because the backyard trial's real visitors are foxes and no
+# deterrence scope could name them. A scope can now, so the operating mode
+# no longer decides what the node deters:
+#
+#     ELETECT_DETERRENCE_SCOPE=Elephant,Boar,Fox
+#
+# Worth stating why the old form had to go rather than just being
+# redundant. It appended Fox *after* deterrence_scope_labels() had already
+# resolved, so the node deterred a species its own configuration did not
+# name and no scope string could switch off; and it ran after
+# EXPERIENCE_DB_PATH was derived, so the extra species learned its policy
+# into the DB belonging to the narrower scope.
+#
+# The one thing it did that the scope does not: it took effect without
+# anyone setting an environment variable. Any deployment relying on that -
+# including the backyard node - must now carry the scope explicitly, or it
+# will stop deterring foxes at the next deploy.
+
+# Everything this mode writes lives under one directory, kept separate from
+# CAPTURE_DIR so a test night is trivially separable from real event
+# captures when copying data off the board.
+HOME_TEST_DIR = _MODULE_DIR / "data" / "home_test"
+
+# The rolling ring: every frame the capture thread grabs, as a JPEG, named
+# by wall-clock timestamp. Frames older than HOME_TEST_PREROLL_S are deleted
+# continuously while idle, so this directory's size is bounded by the
+# pre-roll depth and never by the length of the night.
+HOME_TEST_RING_DIR = HOME_TEST_DIR / "ring"
+
+# One subdirectory per encounter, holding the protected frames. Permanent -
+# nothing in here is ever auto-deleted.
+HOME_TEST_ENCOUNTERS_DIR = HOME_TEST_DIR / "encounters"
+
+# A detection that never clears HOME_TEST_FIRE_MIN_CONFIDENCE (or, for a
+# VISION_SPECIES_BURST_MAJORITY_LABELS member, never wins its burst majority)
+# opens no encounter, so its ring frames age out after HOME_TEST_PREROLL_S
+# with zero image evidence kept - confirmed as a real gap the night of 10-11
+# Sept 2026 when a Boar cluster peaked at 0.631 but never won its
+# burst-majority vote: by the time the board was next reachable, every ring
+# frame from that window was long gone, leaving only the detections.jsonl
+# rows. This directory holds one representative still per such gap -
+# permanent, small, and independent of the encounter/fire state machine, so
+# it can never affect a firing decision.
+HOME_TEST_REVIEW_DIR = HOME_TEST_DIR / "review_frames"
+
+# Floor for a review still: above ambient noise, below the fire bar, so it
+# catches exactly the marginal case above without saving every noise blip.
+# 10-11 Sept's real cluster ran 0.52-0.63; the same session's daytime noise
+# floor (post-restart Boar reads, same camera/scene) sat at 0.14-0.22.
+#
+# 23 Sept: cut 0.45 -> 0.25 alongside that night's HOME_TEST_FIRE_MIN_CONFIDENCE
+# drop to 0.35 - left at 0.45 it would sit ABOVE the new fire bar, so nothing
+# would ever land in the gap this exists to cover. 0.25 sits just above the
+# 0.14-0.22 daytime noise floor and below the fire bar.
+#
+# The fire bar has since gone back up to 0.60, so the gap this floor covers
+# is now the wide 0.25-0.60 band rather than the narrow 0.25-0.35 one it was
+# sized against. That is the safe direction (more marginal evidence kept, and
+# a review still can never affect a firing decision), so it is left at 0.25 -
+# but the two constants are coupled and must be re-read together whenever
+# either moves.
+HOME_TEST_REVIEW_MIN_CONFIDENCE = 0.25
+
+# Minimum spacing between saved review stills, per label, so one lingering
+# animal writes a handful of stills rather than one per inference poll.
+HOME_TEST_REVIEW_MIN_INTERVAL_S = 5.0
+
+# Independent, small byte budget for review stills - separate from
+# HOME_TEST_MAX_TOTAL_BYTES, which governs encounter video and is sized for
+# that much larger job. Reaching this cap stops new stills; it never deletes
+# existing ones and never touches the encounter/fire path.
+HOME_TEST_REVIEW_MAX_TOTAL_BYTES = 200 * 1024 * 1024  # 200 MB
+
+# Every detection the model returns, unconditionally, one JSON object per
+# line. Deliberately NOT gated on confidence or on the encounter state
+# machine: false positives are exactly as useful as true positives when the
+# point of the night is a labelled dataset, and a log that only records what
+# already passed a threshold cannot be used to re-tune that threshold later.
+HOME_TEST_DETECTIONS_PATH = HOME_TEST_DIR / "detections.jsonl"
+
+# Raw geophone samples relayed by the MCU's existing
+# debug_stream_raw_seismic_sample notify, stamped with the MPU's own clock
+# on receive. See main.py's handler for why MPU-receive time (rather than a
+# new MCU-timestamp wire field) is what this records.
+HOME_TEST_SEISMIC_CSV_PATH = HOME_TEST_DIR / "seismic_raw.csv"
+
+# Ring capture resolution. Lower than CAMERA_FRAME_WIDTH/HEIGHT's 1920x1080
+# on purpose: the ring writes every frame to disk, so per-frame bytes are
+# the dominant storage term, and 720p is well above what the 320x320 model
+# input needs while staying watchable as video. Inference runs on these same
+# frames - there is no second, higher-resolution capture path.
+HOME_TEST_RING_WIDTH = 1280
+HOME_TEST_RING_HEIGHT = 720
+
+# cv2.IMWRITE_JPEG_QUALITY for ring frames. 85 rather than the default 95:
+# on a dark IR scene the visual difference is negligible and the file is
+# roughly a third smaller, which is a third more encounters inside
+# HOME_TEST_MAX_TOTAL_BYTES.
+HOME_TEST_JPEG_QUALITY = 85
+
+# How many recent frames the capture thread keeps in memory for the
+# inference and deterrence threads to read. Memory-bounded, not time-bounded:
+# at 720p a decoded BGR frame is ~2.7 MB, so 16 frames is ~44 MB, which is
+# affordable next to the container's footprint and is comfortably more than
+# CAMERA_BURST_FRAMES needs for one deterrence burst.
+#
+# This deque is the ONLY thing the inference and deterrence threads read
+# frames from. Neither of them ever touches the camera. One USB video node
+# opened once, by one thread, for the whole session.
+HOME_TEST_FRAME_BUFFER_FRAMES = 16
+
+# Frames per inference poll, and how long to wait between polls. The poll
+# interval is a floor, not a schedule: if inference takes longer than this
+# the next poll simply starts late, and - crucially - the capture thread is
+# entirely unaffected either way. Capture rate and inference rate are
+# independent by construction, which is the whole reason the ring produces
+# smooth video even though the detector runs at ~5 fps.
+HOME_TEST_INFERENCE_FRAME_COUNT = 3
+HOME_TEST_INFERENCE_INTERVAL_S = 1.0
+
+# ---------------------------------------------------------------------------
+# HOME_TEST_MODE encounter state machine
+# ---------------------------------------------------------------------------
+# Start-here values, chosen to be defensible rather than tuned. Every one of
+# them should be revisited against the first real encounter's footage.
+
+# Ring depth, and therefore how much footage precedes the first detection in
+# a saved encounter. The point of a pre-roll is to capture the approach -
+# the part that happens before the model is confident enough to say
+# anything - which is usually the most behaviourally interesting part of the
+# clip and is unrecoverable if not already buffered.
+HOME_TEST_PREROLL_S = 40.0
+
+# How much to keep recording after the encounter ends, so the clip shows the
+# animal actually leaving rather than cutting at the last detection.
+HOME_TEST_POSTROLL_S = 20.0
+
+# No qualifying detection for this long ends the encounter. Long enough to
+# ride out an animal walking behind a bush or briefly out of frame - which
+# would otherwise split one encounter into several - and short enough that
+# an encounter closes and is written out while the night is still running.
+HOME_TEST_DEPARTURE_TIMEOUT_S = 45.0
+
+# Hard ceiling on a single encounter regardless of continuing detections.
+# This is a containment bound, not a behavioural one: the deployed detector
+# has a measured 27.54% poll-level Boar false-positive rate on foliage (see
+# HOME_TEST_FIRE_MIN_CONFIDENCE below), so a windblown branch that keeps
+# tripping the gate must not be able to protect frames all night and fill
+# the disk. Whatever it is, three minutes of it is enough to diagnose it in
+# the morning.
+HOME_TEST_MAX_ENCOUNTER_S = 180.0
+
+# 7 Sept, live in-person field test: HomeTestSession originally fired
+# deterrence exactly once per encounter (on _start_encounter()) and then let
+# the animal linger unopposed until it left on its own or departure timeout
+# closed the clip - fine for capturing footage, not for actually moving a
+# boar that doesn't scare off a single roar. While an encounter stays active
+# and still qualifying, _advance_encounter() now re-fires every time this
+# many seconds have passed since the encounter's last fire, for as long as
+# HOME_TEST_MAX_ENCOUNTER_S allows. Set just above both MCU-side actuator
+# cooldowns (HORN_COOLDOWN_MS=10000, LED_COOLDOWN_MS=8000, device/mcu/src/
+# config.h) so every retrigger is a real fire rather than one the rule gate
+# silently refuses.
+HOME_TEST_REFIRE_INTERVAL_S = 12.0
+
+# 2026-09-10 field-trial run #1 hardening: hard ceiling on how many times a
+# single encounter may fire deterrence, regardless of how long it stays
+# qualifying. Run #1's runaway kept one "encounter" (stale frames of a
+# frozen animal after the camera browned out) re-firing every
+# HOME_TEST_REFIRE_INTERVAL_S for the full HOME_TEST_MAX_ENCOUNTER_S window,
+# ~15 fires, and the repeated peak actuator draw is what sustained the
+# battery sag. A real animal not moved by four escalating blasts over ~48s
+# will not be moved by a fifth; past this count the encounter keeps
+# recording and tracking but stops firing. Belt-and-braces alongside the
+# camera-blind guard below - either one alone breaks the loop.
+HOME_TEST_MAX_FIRES_PER_ENCOUNTER = 4
+
+# Session-wide ceiling on protected (encounter) bytes, against ~15 GB free
+# on /home/arduino. On reaching it the session STOPS PROTECTING new frames
+# but keeps logging detections and keeps the ring rotating - the dataset is
+# the irreplaceable part and it costs almost nothing to keep, whereas video
+# is large and the first several encounters are the ones worth having.
+# perception/storage.py's _warn_if_low_disk already warns below 500 MB
+# headroom but never deletes anything; this is the actual stop.
+#
+# This counter is in-memory and resets to 0 on every container restart, so
+# it has no idea how much prior-session data already sits on disk. The
+# board's rootfs is 9.8 GB total with old bench-test encounters routinely
+# eating multiple GB (confirmed 9 Sept: 4.5 GB from six days of dev
+# testing, against only 3.2 GB physically free at the time) - so 8 GB is
+# not a safe budget for THIS partition regardless of what's already
+# written. Capped well under actual free space instead, so a long
+# unattended overnight run degrades to "stopped protecting new frames"
+# long before the OS ever sees ENOSPC.
+HOME_TEST_MAX_TOTAL_BYTES = 3 * 1024 * 1024 * 1024  # 3 GB
+
+# ---------------------------------------------------------------------------
+# HOME_TEST_MODE fire/protect gate - raised above field thresholds
+# ---------------------------------------------------------------------------
+# These gate ONLY the decision to start an encounter, protect video and fire
+# a deterrent. Detection logging is never gated by them.
+#
+# Why they are higher than the field's: the deployed detector's measured
+# Boar false-positive rate is 27.54% at poll level *after* the shipped
+# debounce and burst-majority gates, on a two-hour outdoor foliage run with
+# no animals present (docs/qa/boar-gap-session-notes.md). At field
+# thresholds, pointing this camera at a backyard all night means near-
+# continuous false encounters, each one protecting video and firing a horn
+# next to a sleeping household. Raising the bar for the fire/protect
+# decision while logging everything unconditionally gives both a clean
+# dataset and a survivable night.
+#
+# This is the one place this mode is deliberately less sensitive than the
+# field. It is a threshold change on a shared code path, not a forked
+# decision path: the same fuse -> decide -> bandit -> rule-gate chain runs
+# either way, and it runs on exactly the same inputs.
+# 9 Sept, tonight's field test only: cut from 0.60 to 0.35 at the user's
+# explicit request - the deployed detector was reading real Boar-shaped
+# signal in the 0.07-0.37 range all night without ever clearing 0.60 (see
+# tonight's detections.jsonl), so nothing was firing at all. 0.35 sat just
+# above the highest ambient/false reading seen in that log.
+#
+# Cut again same night, 0.35 -> 0.20, at the user's explicit follow-up
+# request to fire faster and not worry about false positives - the goal is
+# footage of a real reaction tonight, not a clean dataset. 0.20 sits
+# below most of the observed 0.07-0.37 noise floor on purpose: ambient/
+# false readings will cross it often and that is accepted.
+#
+# 9 Sept, mid-night: raised back 0.20 -> 0.35 at the user's request once the
+# 0.20 false-positive rate proved unusable in the field.
+#
+# 10 Sept: field trial over - REVERTED to 0.60. Even at 0.35 the dawn
+# twilight (05:34-06:29 IST) drove the detector into a degenerate full-frame
+# "Boar" box at a flat ~0.37 every poll: 44 deterrent fires in 15 minutes on
+# an empty backyard, and the household powered the board off. 0.35 cleared
+# the still-dark noise floor but not the dawn one. Back at the field default
+# and its measured 27.54% poll-level Boar false-positive basis.
+#
+# 23 Sept, tonight only: cut back to 0.35 at the user's explicit request -
+# priority is catching every real animal for footage, false positives
+# accepted for tonight's session. Deliberately NOT dropped to 0.20: that
+# exact value was already tried on 9 Sept and rolled back same night as
+# "unusable" (fired continuously on noise). 0.35 is the highest-risk value
+# with a real precedent of working overnight - but that precedent is
+# night-only. The 10 Sept dawn-twilight runaway (44 fires/15min, board
+# powered off) happened at exactly this value, 05:34-06:29 IST. If this
+# session is still running into that window, raise this back to 0.60 before
+# then or expect the same runaway.
+#
+# 23 Sept, minutes later: cut further, 0.35 -> 0.30, at the user's explicit
+# request, run live as a timed 30-minute trial with the fire rate watched
+# for false positives. No prior session has a direct data point at 0.30 -
+# the two adjacent known points are 0.35 (worked overnight, failed at dawn
+# twilight) and 0.20 (rolled back same night as unusable, fired on noise
+# continuously). 0.30 is an interpolation, not a re-run of a known-good
+# value. If the 30-minute trial shows a high false-fire rate, raise back
+# toward 0.35 first before going all the way to 0.60.
+#
+# 24 Sept, morning: the 10 Sept dawn-twilight runaway repeated at this
+# value, in the same window (encounters opened 00:43-01:14 UTC = 06:13-
+# 06:44 IST, 7 separate encounters in ~31 minutes, user confirmed repeated
+# real horn/LED misfires as the morning light came up) - the household's
+# own pre-committed rule ("more than 3 false fires -> raise, but no higher
+# than the previous value") is triggered here. Raised back 0.30 -> 0.35,
+# the cap that rule allows; NOT reverted to 0.60, per that same rule. 0.35
+# is still not dawn-twilight-safe on its own precedent (10 Sept: 44 fires/
+# 15min at this exact value in this exact window) - if the household hits
+# another dawn misfire storm at 0.35, the next lever is
+# HOME_TEST_FIRE_CONSECUTIVE_POLLS or a scheduled window, not a further
+# threshold cut, since 0.35 is the floor this rule permits.
+# 24 Sept, later same morning: the backlight-compensation camera fix
+# (perception/camera.py's _assert_auto_exposure now forces backlight
+# compensation to max at every open()) landed and was confirmed live -
+# confidence on the same daytime scene that was fusing 0.674-0.818 and
+# re-firing every ~15-20s dropped to a flat 0.260 immediately after the
+# fix-carrying restart, with no further fires observed. With the root
+# cause (overexposed foliage misread as Boar/Elephant) addressed at the
+# source, raised back to the pre-experiment ceiling, 0.60, at the user's
+# explicit instruction ("raise to .60") - no longer holding at the 0.35
+# cap the earlier "no higher than previous" rule required while the
+# camera fix was unverified.
+#
+# 24 Sept, evening (board local ~18:00+ IST, night-exposure lock already
+# engaged): the backlight-compensation fix turned out NOT to be the reason
+# fires stopped after 0.60 went in - direct before/after frame comparison
+# showed it made no visible difference to the blown-out daytime image, and
+# a follow-up manual-exposure experiment to actually fix it made the image
+# worse and was reverted (see perception/camera.py). The real daytime
+# overexposure problem is still open. At the user's explicit request,
+# reverted to 0.30 - the value actually active for the whole of 23 Sept
+# night's session (cut down from 0.35 within minutes of starting; not
+# 0.60, which is last week's standing daytime default and not what any of
+# 23 Sept night's encounters, including the confirmed real animal at
+# 21:20 IST, were captured under). Night-only precedent: 0.30 ran all of
+# 23 Sept night without incident and only failed at dawn twilight
+# (00:43-01:14 UTC / 06:13-06:44 IST, 7 encounters/~31min, see the 24 Sept
+# morning note above). MUST be raised back toward 0.35/0.60 before that
+# window recurs tomorrow, or expect the same runaway.
+#
+# 29 Sept: raised to 0.70 at the user's explicit request, temporary, as an
+# immediate stopgap against a fresh false-positive spike. Not a root-cause
+# fix - the same day's full-history query of detections.jsonl (439,708
+# Elephant rows) found confidence is quantized onto a fixed ladder of ~27
+# rungs roughly 0.0371 apart, and 0.30 sat just under two of them (0.3342,
+# 0.3713), so ordinary background noise landing on either rung alone was
+# enough to fire (Elephant carries no burst-majority gate). 0.70 sits
+# between rungs 0.6684 and 0.7426, so only detections clearing the 0.7426
+# rung or above now qualify - this cuts off legitimate distant/partial
+# detections that would have landed on the excluded lower rungs, trading
+# recall for an immediate stop to the noise. MUST be revisited (see the
+# quantization-ladder discussion, not yet written up in docs/KNOWN_GAPS.md)
+# rather than left here as a permanent value.
+#
+# 29 Sept, same night: raised again to 0.80 at the user's explicit request -
+# 0.70 wasn't enough, still seeing false positives. 0.80 sits between rungs
+# 0.7798 and 0.8912, so it now also excludes the 0.7426/0.7798 rungs that
+# 0.70 had let through - only the 0.8912 and 0.9283 rungs (and anything
+# above) still qualify. Still the same temporary stopgap, not a fix.
+#
+# 29 Sept, evening: 0.65 with the vision model swapped from the 30 Aug
+# champion to the 29 Sept Run F build (160 px, Boar/Elephant/Fox). The rung
+# numbers above belong to the old model and do not carry over. Chosen on the
+# board: replaying the 55 hand-labelled encounter clips from 23-29 Sept, F at
+# 0.65 caught all 7 real fox visits and alarmed on none of the 47 false
+# triggers, while the champion at 0.80 caught none of the foxes. On 81
+# minutes of the empty daytime plantation F never scored above 0.56. See
+# the 28 Sept vision model training log, section 10f.
+#
+# 29 Sept, night: 0.60 for the first night on Run F, so a fox visit is not
+# lost to the margin and tonight yields a clip to compare against. The same
+# replay caught 7/7 foxes with no false clips at 0.60 as well; the 0.56
+# empty-scene ceiling above is the reason not to go lower.
+HOME_TEST_FIRE_MIN_CONFIDENCE = 0.60
+
+# Consecutive qualifying polls before an encounter starts, against
+# VISION_SPECIES_CONSECUTIVE_POLLS' 2 for Boar in the field. Was 3; cut to 2
+# on 7 Sept 2026 after bench/vision_latency/poll_latency.py measured the
+# real cost against the actual edge-impulse-linux-runner and a genuine
+# encounter's frames: per-poll latency (p50 700ms at frame_count=3, p50
+# 228ms at frame_count=1) already sits under HOME_TEST_INFERENCE_INTERVAL_S's
+# 1.0s floor either way, so the floor - not inference speed - was the
+# binding cost, and every consecutive poll adds exactly one more 1.0s floor
+# wait, not "about a second" as the old estimate here guessed. Dropping to 2
+# saves that one full poll (~1.0s) off the animal-appears-to-deterrent-
+# responds window; the pre-roll buffer still makes it invisible in the saved
+# clip either way, since those frames are already buffered and get
+# protected retroactively. Trades one poll's worth of debounce margin for
+# that latency - see docs/KNOWN_GAPS.md's inference-latency entry for the
+# full measurement and the frame-count half of the fix, deliberately left
+# at 3 pending its own decision.
+#
+# 8 Sept, tonight only: cut further to 1 at the user's explicit request -
+# fire on the very first qualifying poll (still gated by
+# HOME_TEST_FIRE_MIN_CONFIDENCE above), false positives accepted, because
+# tonight's goal is footage of a real reaction, not a clean dataset.
+# This trades away the one poll of debounce margin the 7 Sept cut already
+# reduced from 3 to 2 - a lone windblown-branch poll can now open an
+# encounter and fire a deterrent on its own.
+#
+# 10 Sept: field trial over - REVERTED to 2. With this at 1 the 10 Sept dawn
+# false-positive storm (see the note above HOME_TEST_FIRE_MIN_CONFIDENCE)
+# opened a fresh encounter on every single qualifying poll.
+#
+# 11 Sept: despite the name, _advance_encounter() no longer requires these
+# to land back to back - see HOME_TEST_FIRE_WINDOW_POLLS below for why and
+# _advance_encounter()'s own docstring for the mechanism. This is still the
+# count of qualifying polls required; only the "consecutive" part moved.
+HOME_TEST_FIRE_CONSECUTIVE_POLLS = 2
+
+# Size of the sliding window HOME_TEST_FIRE_CONSECUTIVE_POLLS is counted
+# within, in polls (HOME_TEST_INFERENCE_INTERVAL_S apart) - replaces a
+# strict back-to-back streak. Added 11 Sept 2026 after the 10-11 Sept
+# overnight run's real Boar cluster (22:41:55-22:43:33Z, soil-digging
+# ground-truth confirmed the next morning) cleared HOME_TEST_FIRE_MIN_CONFIDENCE
+# at :23/:28/:33 - 5s apart, 4 non-qualifying polls between each hit - and
+# never opened an encounter, because the previous streak design zeroed on
+# every single miss. 6 polls (6s at the 1.0s inference interval) covers
+# that exact gap with one poll of margin, without touching either lever
+# that measurably controls Boar's false-positive rate: the burst-majority
+# gate (VISION_SPECIES_BURST_MAJORITY_LABELS) and HOME_TEST_FIRE_MIN_CONFIDENCE
+# itself are both unchanged, and HOME_TEST_FIRE_CONSECUTIVE_POLLS still
+# requires that many genuinely qualifying polls, just not adjacent ones -
+# a single isolated qualifying poll surrounded by silence still cannot
+# open an encounter on its own, exactly as before.
+#
+# 11 Sept, later same day: widened 6 -> 15 at the user's explicit request.
+# Priority shifted from "survive the one observed 5s gap" to "get the
+# complete empty-frame -> approach -> fire -> retreat -> empty-frame arc on
+# every real animal" - a missed encounter-open costs the whole clip, not
+# just one fire, since HOME_TEST_PREROLL_S/POSTROLL_S/DEPARTURE_TIMEOUT_S
+# below only start protecting footage once an encounter actually opens.
+# 15s gives roughly 2.5x the observed gap's margin. This still does not
+# touch either false-positive lever (the burst-majority gate or
+# HOME_TEST_FIRE_MIN_CONFIDENCE) and still requires the same count of
+# genuinely qualifying polls - it only extends how far apart two of them
+# may land, so the residual added risk is limited to two independently
+# noisy qualifying polls coincidentally landing within 15s of each other,
+# not a lowered bar for what counts as qualifying in the first place.
+HOME_TEST_FIRE_WINDOW_POLLS = 15
+
+# A detection whose box covers at least this fraction of the frame is dropped
+# from the fire/protect gate (detection logging still records it unchanged).
+#
+# 10 Sept, added after field-trial run #1: the deployed detector has a
+# recurring degenerate mode where it stops localising and returns a box at
+# or near the full frame extent (x:0 y:0 w:CAMERA_FRAME_WIDTH
+# h:CAMERA_FRAME_HEIGHT). detections.jsonl carries 1,745 such boxes between
+# 7 and 10 Sept, ~70% of them labelled "Elephant" at confidence up to 1.00 -
+# including the 01:22-01:31 IST "Elephant" burst on an empty backyard that
+# no confidence floor alone would have stopped. A box that fills the frame
+# carries no localisation information and cannot correspond to the threat
+# geometry this camera is placed for (an animal at deterrence distance
+# occupies a fraction of the field of view), so it is treated as a detector
+# artefact, not a target. Set at 0.85 rather than ~1.0 to catch the near-
+# full-frame variants while leaving genuine close-range large-animal boxes
+# (measured max 0.84 area fraction across every real bench encounter to
+# date) untouched. Boxes below the floor are unaffected: only 5 of 498
+# poll-level "Boar" detections above HOME_TEST_FIRE_MIN_CONFIDENCE clear
+# this bar, versus 437 of 1,096 "Elephant".
+HOME_TEST_MAX_BOX_AREA_FRACTION = 0.85
+
+# Consecutive polls with a frame-filling detection (see
+# HOME_TEST_MAX_BOX_AREA_FRACTION above) before home_test.py treats the
+# camera as possibly obstructed rather than just discarding one more
+# detector artefact. Added 11 Sept 2026 after a ~40 minute stretch where
+# the lens itself was physically covered: every poll returned a frame-
+# filling "Elephant" at a near-constant confidence (39 of 42 samples read
+# exactly 0.928, a flat reading no moving animal produces), correctly
+# excluded from the fire gate the whole time, but with nothing surfacing
+# that the camera itself had effectively gone blind. This is purely
+# observational - see HomeTestSession._update_camera_covered_state() - it
+# never reads or writes _advance_encounter's state, HOME_TEST_FIRE_WINDOW_POLLS,
+# or anything else the fire path touches, so the instant a frame stops
+# filling (a real animal at deterrence distance, or the obstruction
+# clearing) detection resumes exactly as if this had never tripped. 30
+# polls (30s at the 1.0s inference interval) is long enough that a single
+# transient large-object pass does not trip it, short enough that a
+# genuine obstruction is flagged promptly.
+HOME_TEST_CAMERA_COVERED_STREAK_POLLS = 30
+
+# Same streak, fed by either signal: a frame-filling detection (above) OR
+# a near-uniform frame (HOME_TEST_CAMERA_COVERED_LOW_TEXTURE_STD, added
+# 11 Sept 2026 for the partial-covering case the frame-filling check alone
+# does not catch). One counter, one log, two independent ways to trip it.
+
+# Where HomeTestSession logs camera-possibly-covered/clear transitions, one
+# JSON line per transition (not per poll) - mirrors HOME_TEST_EXPOSURE_LOG_PATH's
+# pattern below. Added alongside HOME_TEST_CAMERA_COVERED_STREAK_POLLS above.
+HOME_TEST_CAMERA_COVERED_LOG_PATH = HOME_TEST_DIR / "camera_covered.jsonl"
+
+# Grayscale standard deviation below which a frame reads as near-uniform
+# (flat), for the low-texture half of the camera-covered check
+# (HomeTestSession._burst_low_texture). Found live, 11 Sept 2026: a
+# *partial* lens covering (hand/cloth over part of the lens, not the whole
+# frame) never triggers HOME_TEST_MAX_BOX_AREA_FRACTION's frame-filling-box
+# check - it instead produces varying, low-confidence, sub-threshold boxes,
+# because the detector is reading noise off a mostly-flat image rather than
+# one dominant artefact. That flatness shows up directly in the frame's own
+# pixel statistics regardless of what the detector makes of it. Every frame
+# in a poll's burst must read below this to count, so one frame with real
+# texture (a genuine animal, or a covering that only reached part of the
+# burst) does not contribute.
+#
+# 10.0 is a provisional estimate, not a measured bench value: this board
+# was powered down for a hardware change before a covered-lens sample's
+# grayscale std could be captured and compared against normal daylight/IR
+# bench frames. Same purely-observational contract as
+# HOME_TEST_CAMERA_COVERED_STREAK_POLLS - reads only its own streak
+# counter, never the fire path - so a wrong threshold here can misreport
+# the camera-covered log but cannot suppress or delay a real detection.
+# Recalibrate against real frame std distributions once the board is back
+# up, the same way HOME_TEST_MAX_BOX_AREA_FRACTION was tuned against real
+# bench encounters.
+HOME_TEST_CAMERA_COVERED_LOW_TEXTURE_STD = 10.0
+
+# ---------------------------------------------------------------------------
+# HOME_TEST_MODE exposure auto-lock (services/home_test.py, perception/night.py)
+# ---------------------------------------------------------------------------
+# home_test.py used to lock NIGHT_LOCKED_EXPOSURE once at camera open and
+# never revisit it - correct only for a session that starts and stays dark.
+# Found 6-7 Sept 2026: indoors under room lighting this drove the sensor to
+# near-white, and the only fix available that night was the whole-session
+# ELETECT_NIGHT_EXPOSURE_LOCK=0 kill switch. perception.night.ExposureAutoLock
+# re-answers the day/night question periodically from live frames instead,
+# using the same is_night() callable and threshold the field path already
+# trusts (services/reflex_loop.py's vision-watch illumination block).
+
+# How often to re-evaluate, not how often to look at a frame: the session's
+# own inference poll already samples the buffer every
+# HOME_TEST_INFERENCE_INTERVAL_S (1.0s) - re-running frames_are_night() on
+# every one of those would burn an extra HSV conversion per poll for no
+# benefit, since the scene does not change fast enough for that resolution
+# to matter. 30s is fast enough to catch someone flipping a light switch
+# mid-session without being noticeably slower than a human would notice it
+# themselves.
+HOME_TEST_EXPOSURE_RECHECK_INTERVAL_S = 30.0
+
+# Consecutive agreeing re-evaluations required before flipping lock state.
+# Without this, a single ambiguous reading right at the IR-cut filter's own
+# transition point (the "ten minutes either side of the filter's own
+# switch" perception/night.py's own docstring calls out) could flap the
+# lock back and forth. 2 is the same debounce shape as
+# HOME_TEST_FIRE_CONSECUTIVE_POLLS uses for detections - cheap insurance,
+# unmeasured against a real dawn/dusk transition until the first overnight
+# soak (see docs/KNOWN_GAPS.md).
+HOME_TEST_EXPOSURE_FLIP_CONSECUTIVE = 2
+
+# Minimum wall-clock gap between two actual lock()/restore() calls, on top
+# of interval_s * flip_consecutive. Found live, 11 Sept 2026, Kothamangalam
+# bench (partially covered lens): the policy locked to a fixed dark exposure,
+# which made the frame read dark (median brightness ~126) and confirmed a
+# further lock next check, then the restore made the same scene read bright
+# (median brightness ~138, saturation 0.0 -> 36.0), confirming a restore -
+# a self-sustaining 60s lock/restore/lock cycle (exactly
+# interval_s * flip_consecutive), because each action changes the very
+# brightness/saturation signal the next debounce evaluates, so a fixed
+# consecutive-count debounce is trivially satisfied every half-cycle
+# regardless of its size. Raising flip_consecutive or interval_s alone
+# cannot fix this - each dwell state is internally consistent for its own
+# full duration. This is a separate cooldown, measured from the last actual
+# action (not the last re-evaluation): once flip_consecutive agrees on a
+# direction, ExposureAutoLock still withholds the call if less than this
+# many seconds have passed since the previous lock()/restore(), holding
+# instead and letting the streak keep re-confirming. A real dusk/dawn
+# transition (the module docstring's own "ten minutes either side" of the
+# IR-cut filter's mechanical swap) is far slower than this, so genuine
+# transitions are unaffected; a self-induced 60s cycle is not.
+HOME_TEST_EXPOSURE_MIN_DWELL_S = 300.0
+
+# Where ExposureAutoLock's lock/unlock decisions are logged, one JSON line
+# per decision (wall_s, saturation reading, night answer, action taken,
+# whether the write verified) - the record a morning review needs to match
+# what the classifier decided against what the scene actually was doing.
+HOME_TEST_EXPOSURE_LOG_PATH = HOME_TEST_DIR / "exposure_decisions.jsonl"
+
+# ---------------------------------------------------------------------------
+# HOME_TEST_MODE telemetry + stall watchdog (services/home_test.py)
+# ---------------------------------------------------------------------------
+# 9 Sept 2026: for an unattended overnight run there is no one present to
+# notice a thread that is technically alive (is_healthy()'s original check)
+# but stuck - e.g. wedged on a hung read - and therefore never advancing.
+# Each loop stamps a monotonic heartbeat at the top of every iteration;
+# is_healthy() also fails if any heartbeat is older than this, which turns
+# a silent stall into the same hard process exit _run_guarded already uses
+# for a crash, so the container's restart policy recovers it either way.
+# 90s is generously above every real per-iteration cost in this module
+# (capture has none, inference is HOME_TEST_INFERENCE_INTERVAL_S, and
+# HttpVisionDetector/handle_footfall_event's own Bridge calls already carry
+# their own sub-15s timeouts) - this is a backstop for the unmeasured case,
+# not a tight bound on the measured ones.
+HOME_TEST_STALL_TIMEOUT_S = 90.0
+
+# ---------------------------------------------------------------------------
+# HOME_TEST_MODE camera-blindness guard + auto-recovery (services/home_test.py)
+# ---------------------------------------------------------------------------
+# 2026-09-10, field-trial run #1: a battery brown-out reset the USB link
+# mid-encounter and the camera stopped delivering frames. The capture loop
+# skipped the None grabs (correct) but the frame deque kept serving the
+# handful of frames captured just before the failure; the inference loop
+# kept "detecting" the animal on those frozen frames and _advance_encounter
+# kept re-firing deterrence at a scene nothing could actually observe -
+# which sagged the battery further and held the camera down. The stall
+# watchdog could not see it because the capture thread was still ticking its
+# heartbeat every iteration (a fast None grab is still an iteration).
+#
+# Guard: past HOME_TEST_CAMERA_STALE_S with no fresh frame, the buffer is
+# treated as blind - no detection on it can qualify, nothing fires, and any
+# open encounter is closed immediately. Set above one inference interval
+# plus a few capture frames so a single slow poll never trips it.
+HOME_TEST_CAMERA_STALE_S = 6.0
+
+# No good frame for this long -> the capture loop attempts an in-place
+# Camera.reopen() (release + re-open the V4L2 handle on the re-enumerated
+# node). Recovers the common USB link-reset case with no process or board
+# restart.
+HOME_TEST_CAMERA_REOPEN_AFTER_S = 5.0
+
+# Minimum gap between reopen attempts - a device mid-re-enumeration needs
+# time to settle, not to be thrashed.
+HOME_TEST_CAMERA_REOPEN_MIN_INTERVAL_S = 20.0
+
+# Camera still not delivering this long after it first failed, despite the
+# reopen attempts -> the capture loop drops a reboot-request sentinel file
+# for the host-side watchdog cron to act on. The app container is
+# unprivileged and cannot reboot the board itself. Long enough that an
+# ordinary USB storm rides itself out first.
+HOME_TEST_CAMERA_REBOOT_AFTER_S = 240.0
+
+# Never request a second reboot within this window of the last one. The
+# marker is written outside the container tmpfs (under HOME_TEST_DIR, a bind
+# mount) so it survives the very reboot it triggers and cannot boot-loop
+# the board.
+HOME_TEST_CAMERA_REBOOT_MIN_INTERVAL_S = 1800.0
+
+# Sentinel the capture loop writes to ask the host watchdog to reboot, and
+# the persisted marker that rate-limits it. Plain files, JSON payload
+# ({"wall_s": ..., "down_for_s": ...}); the watchdog also applies its own
+# freshness + interval checks before acting.
+HOME_TEST_CAMERA_REBOOT_REQUEST_PATH = HOME_TEST_DIR / "reboot-request"
+HOME_TEST_CAMERA_REBOOT_MARKER_PATH = HOME_TEST_DIR / "last-reboot-request.json"
+
+# Manual override: touching this file (a bind-mounted path, no docker exec
+# or container restart needed) forces an immediate fire+record on the next
+# inference poll, bypassing the vision/confidence gate entirely. Added
+# 23 Sept 2026 after a live sighting (a cat) had no fast way to force a
+# recorded deterrence fire - the only path until then was editing
+# HOME_TEST_FIRE_MIN_CONFIDENCE live and restarting the container, far too
+# slow for an animal that is only in frame for seconds. From the board:
+#   touch python/data/home_test/manual-fire-request
+# Consumed (deleted) the instant it is seen, so a stale touch can never
+# cause a second unintended fire later. See
+# HomeTestSession._check_manual_fire_trigger for the encounter-machine
+# reuse this drives.
+HOME_TEST_MANUAL_FIRE_TRIGGER_PATH = HOME_TEST_DIR / "manual-fire-request"
+
+# One JSONL line per interval: model inference latency for the most recent
+# poll plus a best-effort board-resource snapshot (CPU temp, available
+# memory, load average, free disk). Read by nothing on-device - this is
+# purely the performance record an overnight unattended run would otherwise
+# have no evidence of afterward (model speed, thermal/memory headroom on
+# the UNO Q across a full night), not a control input.
+HOME_TEST_TELEMETRY_PATH = HOME_TEST_DIR / "telemetry.jsonl"
+HOME_TEST_TELEMETRY_INTERVAL_S = 30.0
 
 
 # ---------------------------------------------------------------------------
