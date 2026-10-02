@@ -109,13 +109,23 @@ test('priority: only camera-confirmed wildlife and poaching sounds page people',
   assert.equal(eventPriority(ev(5, 0x00)), 'normal', 'elephant call');
 });
 
-test('priority: no retreat outranks everything', () => {
+test('priority: no retreat outranks everything the node pages on', () => {
   const ev = (cls: number, flags: number) =>
     decodeUplink(Uint8Array.from([0x12, 0, cls, 80, 3, flags, 0, 0, 0, 0])) as UplinkEvent;
   assert.equal(eventPriority(ev(1, 0x0b)), 'critical', 'elephant stayed after the top tier');
-  // The flag says the node has run out of options; that is true whatever
-  // the species, so it is not gated on PAGING_SPECIES.
+  // The flag says the node has run out of options, and when it cannot say
+  // what stayed, not knowing is a reason to send someone rather than not to.
   assert.equal(eventPriority(ev(0, 0x08)), 'critical', 'unnamed, stayed');
+
+  // But it does not promote a species that is never pushed. _no_retreat_flagged()
+  // on the device is species-blind, and a fox sitting through a tier-3 burst is
+  // the likeliest way the flag is ever set - habituating fast is what fox
+  // deterrence is up against. Routing that as 'critical' sends an officer into
+  // the forest at night for a fox, which is how the elephant alert stops being
+  // believed.
+  assert.equal(eventPriority(ev(6, 0x0b)), 'normal', 'fox stayed');
+  assert.equal(eventPriority(ev(2, 0x0b)), 'normal', 'boar stayed');
+  assert.equal(eventPriority(ev(5, 0x08)), 'normal', 'heard and not seen');
 });
 
 test('action label', () => {

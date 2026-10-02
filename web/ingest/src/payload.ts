@@ -161,11 +161,33 @@ const PAGING_SPECIES = new Set(['elephant', 'gunshot', 'chainsaw']);
 // send-alert (isPaging in message.ts) and the public_area_risk view both
 // treat 'critical' as paging, so a no-retreat event reaches the same people
 // a 'high' one does, worded as a request for a team (migration 0005).
-export function eventPriority(ev: UplinkEvent): 'critical' | 'high' | 'normal' {
+export function eventPriority(
+  ev: Pick<UplinkEvent, 'species' | 'visionConfirmed' | 'noRetreat'>,
+): 'critical' | 'high' | 'normal' {
+  const species = ev.species;
+  // A species this build knows and deliberately does not page on - boar, fox,
+  // an elephant heard and not seen - stays off every phone, and that has to
+  // include the no-retreat flag.
+  //
+  // _no_retreat_flagged() on the device is species-blind by design: top tier,
+  // something fired, the animal was still there. Fox and boar are ordinary
+  // deterrence targets, and a fox is the animal most likely to sit through a
+  // burst - habituating fast is the premise the whole bandit is built on. So
+  // reading the flag before the species, as this did, routed a fox that held
+  // its ground to 'critical' and asked an officer to drive into the forest at
+  // night for it. That is the exact alert the boar and fox exclusion exists to
+  // prevent, arriving through the one door that skipped the check.
+  //
+  // The flag stays on the frame either way. That a fox did not retreat is a
+  // real finding about the deterrent; it belongs on the dashboard and in the
+  // bandit's record. It is not a reason to wake anyone up.
+  if (species !== null && !PAGING_SPECIES.has(species)) return 'normal';
+  // An unnamed event keeps the escalation. Something was tracked through a
+  // top-tier fire and did not leave, and the camera could not say what it was;
+  // not knowing is a reason to send a person, not a reason not to.
   if (ev.noRetreat) return 'critical';
-  if (ev.species === null) return 'normal';
-  if (!PAGING_SPECIES.has(ev.species)) return 'normal';
-  if (ev.species === 'gunshot' || ev.species === 'chainsaw') return 'high';
+  if (species === null) return 'normal';
+  if (species === 'gunshot' || species === 'chainsaw') return 'high';
   return ev.visionConfirmed ? 'high' : 'normal';
 }
 

@@ -158,6 +158,17 @@ async function handleRawFrame(devEui: string, msg: ChirpstackUplink) {
 }
 
 // Pre-decoded JSON in `object` - test devices and test-uplink.json.
+//
+// The priority is derived here and never read off the uplink, for the same
+// reason the binary path derives it: which phones ring is this bridge's
+// decision, and `object` is whatever was published to the broker. Copying
+// `object.priority` straight into the row, as this did, was a door around the
+// entire routing table - `{"species":"elephant","priority":"critical"}` on the
+// MQTT topic inserted an event that the send-alert webhook fans out to every
+// officer and every opted-in resident within 3 km of the node, with a message
+// asking them to send a team. Nothing on the binary path can produce that
+// without the device having actually fired its top tier and watched the animal
+// stay.
 async function handleObject(
   devEui: string,
   deviceName: string | undefined,
@@ -191,7 +202,11 @@ async function handleObject(
       confidence: num(object.confidence),
       direction_deg: num(object.direction_deg),
       action: typeof object.action === 'string' ? object.action : null,
-      priority: typeof object.priority === 'string' ? object.priority : 'normal',
+      priority: eventPriority({
+        species: object.species,
+        visionConfirmed: object.vision_confirmed === true,
+        noRetreat: object.no_retreat === true,
+      }),
     });
     if (error) throw error;
     console.log(`Logged ${object.species} event from ${devEui} (confidence=${object.confidence ?? 'n/a'})`);
