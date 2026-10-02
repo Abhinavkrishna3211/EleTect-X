@@ -215,8 +215,12 @@ alter table health      enable row level security;
 alter table maintenance enable row level security;
 alter table officer_requests enable row level security;
 
--- Profiles: users manage their own; staff can read all; admin can write all
-create policy p_self_rw on profiles for all using (id = auth.uid()) with check (id = auth.uid());
+-- Profiles: users read and update their own; staff can read all; admin can
+-- write all. Deliberately not `for all` on the self policy - see the revoke
+-- below for what self-INSERT bought an attacker (migration 0007).
+create policy p_self_read   on profiles for select using (id = auth.uid());
+create policy p_self_update on profiles for update using (id = auth.uid())
+                                               with check (id = auth.uid());
 create policy p_staff_read on profiles for select using (is_staff());
 create policy p_admin_all on profiles for all using (is_admin()) with check (is_admin());
 
@@ -228,6 +232,19 @@ create policy p_admin_all on profiles for all using (is_admin()) with check (is_
 -- function owner, not as `authenticated`, so they are unaffected by this revoke.
 revoke update on profiles from authenticated;
 grant update (full_name, phone, lat, lng, alerts_enabled) on profiles to authenticated;
+
+-- And no self-service INSERT or DELETE at all (migration 0007). The column
+-- grant above only constrains UPDATE, so while `authenticated` held the other
+-- two - which it does by default in the public schema, which is why the revoke
+-- above had to be written - a resident could DELETE their own profile and
+-- INSERT a replacement carrying role = 'admin'. The row's id was still
+-- auth.uid(), so the policy admitted it.
+--
+-- Nothing needs these through PostgREST: handle_new_user() creates the row as
+-- a SECURITY DEFINER trigger, `on delete cascade` from auth.users removes it
+-- with the referencing table's rights, and the admin panel deactivates rather
+-- than deletes (admin_set_deactivated).
+revoke insert, delete on profiles from authenticated, anon;
 
 -- Operational tables: staff read; admin full write. (Public gets aggregates via a view below.)
 create policy n_staff_read on nodes for select using (is_staff());
