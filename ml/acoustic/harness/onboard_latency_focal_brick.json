@@ -1,0 +1,273 @@
+{
+  "url": "http://127.0.0.1:1340",
+  "n": 16,
+  "warmup": 2,
+  "dsp_ms": {
+    "mean": 649.8,
+    "median": 646.0,
+    "min": 642,
+    "max": 669
+  },
+  "classification_ms": {
+    "mean": 3264.8,
+    "median": 3263.5,
+    "min": 3209,
+    "max": 3366
+  },
+  "wall_ms": {
+    "mean": 4128.6,
+    "median": 4007.6,
+    "min": 3938.7,
+    "max": 4472.7
+  },
+  "total_ms": {
+    "mean": 3914.6,
+    "median": 3907.0,
+    "min": 3856,
+    "max": 4021
+  },
+  "realtime_factor": 0.3915,
+  "correct": 15,
+  "rows": [
+    {
+      "file": "ambient_xiao_esp32s3_2026-09_bg.1.10s.e2.norm.wav",
+      "truth": "ambient",
+      "pred": "ambient",
+      "score": 0.37831395864486694,
+      "dsp_ms": 644,
+      "classification_ms": 3265,
+      "wall_ms": 4159.4,
+      "scores": {
+        "ambient": 0.37831395864486694,
+        "chainsaw": 0.24736396968364716,
+        "elephant_call": 0.25397536158561707,
+        "gunshot": 0.12034676969051361
+      }
+    },
+    {
+      "file": "ambient_xiao_esp32s3_elephant_noise_2026-09_Noice_10_4tvefonr.10s.e2.norm.wav",
+      "truth": "ambient",
+      "pred": "ambient",
+      "score": 0.7972428798675537,
+      "dsp_ms": 655,
+      "classification_ms": 3366,
+      "wall_ms": 4388.5,
+      "scores": {
+        "ambient": 0.7972428798675537,
+        "chainsaw": 0.04344727843999863,
+        "elephant_call": 0.10483869165182114,
+        "gunshot": 0.05447116494178772
+      }
+    },
+    {
+      "file": "ambient_xiao_esp32s3_elephant_noise_2026-09_Noice_11_4tvefp8g.10s.e2.norm.wav",
+      "truth": "ambient",
+      "pred": "ambient",
+      "score": 0.5673172473907471,
+      "dsp_ms": 657,
+      "classification_ms": 3279,
+      "wall_ms": 4293.0,
+      "scores": {
+        "ambient": 0.5673172473907471,
+        "chainsaw": 0.07659099996089935,
+        "elephant_call": 0.2666562497615814,
+        "gunshot": 0.08943548053503036
+      }
+    },
+    {
+      "file": "ambient_xiao_esp32s3_elephant_noise_2026-09_Noice_12_4tveg4n0.10s.e2.norm.wav",
+      "truth": "ambient",
+      "pred": "ambient",
+      "score": 0.4059365689754486,
+      "dsp_ms": 651,
+      "classification_ms": 3296,
+      "wall_ms": 4302.9,
+      "scores": {
+        "ambient": 0.4059365689754486,
+        "chainsaw": 0.08431502431631088,
+        "elephant_call": 0.36569109559059143,
+        "gunshot": 0.14405730366706848
+      }
+    },
+    {
+      "file": "chainsaw_laptop_phone_2026-09_chain.1.10s.e2.norm.wav",
+      "truth": "chainsaw",
+      "pred": "chainsaw",
+      "score": 0.8940000534057617,
+      "dsp_ms": 663,
+      "classification_ms": 3348,
+      "wall_ms": 4472.7,
+      "scores": {
+        "ambient": 0.03927890956401825,
+        "chainsaw": 0.8940000534057617,
+        "elephant_call": 0.028889143839478493,
+        "gunshot": 0.037831857800483704
+      }
+    },
+    {
+      "file": "chainsaw_xiao_esp32s3_2026-09_chain.1.10s.e2.norm.wav",
+      "truth": "chainsaw",
+      "pred": "chainsaw",
+      "score": 0.919626772403717,
+      "dsp_ms": 669,
+      "classification_ms": 3283,
+      "wall_ms": 4415.7,
+      "scores": {
+        "ambient": 0.02364226244390011,
+        "chainsaw": 0.919626772403717,
+        "elephant_call": 0.02787960320711136,
+        "gunshot": 0.028851401060819626
+      }
+    },
+    {
+      "file": "chainsaw_103301.10s.norm.wav",
+      "truth": "chainsaw",
+      "pred": "chainsaw",
+      "score": 0.9443367123603821,
+      "dsp_ms": 656,
+      "classification_ms": 3288,
+      "wall_ms": 4326.6,
+      "scores": {
+        "ambient": 0.014587919227778912,
+        "chainsaw": 0.9443367123603821,
+        "elephant_call": 0.02251741848886013,
+        "gunshot": 0.018557976931333542
+      }
+    },
+    {
+      "file": "chainsaw_3-165856-A-41.wav.10s.norm.wav",
+      "truth": "chainsaw",
+      "pred": "chainsaw",
+      "score": 0.8639921545982361,
+      "dsp_ms": 645,
+      "classification_ms": 3223,
+      "wall_ms": 3963.8,
+      "scores": {
+        "ambient": 0.04882507771253586,
+        "chainsaw": 0.8639921545982361,
+        "elephant_call": 0.047465577721595764,
+        "gunshot": 0.03971713408827782
+      }
+    },
+    {
+      "file": "elephant_call_laptop_phone_2026-09_elephant.1.10s.e2.norm.wav",
+      "truth": "elephant_call",
+      "pred": "elephant_call",
+      "score": 0.8516906499862671,
+      "dsp_ms": 649,
+      "classification_ms": 3209,
+      "wall_ms": 3969.9,
+      "scores": {
+        "ambient": 0.038216471672058105,
+        "chainsaw": 0.05934105068445206,
+        "elephant_call": 0.8516906499862671,
+        "gunshot": 0.05075179040431976
+      }
+    },
+    {
+      "file": "elephant_call_xiao_esp32s3_elephant_noise_2026-09_Elephant_11_4tveet9a.10s.e2.norm.wav",
+      "truth": "elephant_call",
+      "pred": "elephant_call",
+      "score": 0.9706342816352844,
+      "dsp_ms": 646,
+      "classification_ms": 3224,
+      "wall_ms": 3953.4,
+      "scores": {
+        "ambient": 0.009192137978971004,
+        "chainsaw": 0.009845261462032795,
+        "elephant_call": 0.9706342816352844,
+        "gunshot": 0.01032821461558342
+      }
+    },
+    {
+      "file": "elephant_call_xiao_esp32s3_elephant_noise_2026-09_Elephant_13_4tveest6.10s.e2.norm.wav",
+      "truth": "elephant_call",
+      "pred": "elephant_call",
+      "score": 0.9231545925140381,
+      "dsp_ms": 644,
+      "classification_ms": 3236,
+      "wall_ms": 3949.5,
+      "scores": {
+        "ambient": 0.025831153616309166,
+        "chainsaw": 0.028001323342323303,
+        "elephant_call": 0.9231545925140381,
+        "gunshot": 0.02301294542849064
+      }
+    },
+    {
+      "file": "elephant_call_xiao_esp32s3_elephant_noise_2026-09_Elephant_16_4tveepp7.10s.e2.norm.wav",
+      "truth": "elephant_call",
+      "pred": "elephant_call",
+      "score": 0.9444520473480225,
+      "dsp_ms": 642,
+      "classification_ms": 3214,
+      "wall_ms": 3938.7,
+      "scores": {
+        "ambient": 0.02100958116352558,
+        "chainsaw": 0.016240743920207024,
+        "elephant_call": 0.9444520473480225,
+        "gunshot": 0.018297655507922173
+      }
+    },
+    {
+      "file": "gunshot_xiao_esp32s3_2026-09_gun.1.10s.e2.norm.wav",
+      "truth": "gunshot",
+      "pred": "gunshot",
+      "score": 0.8821439743041992,
+      "dsp_ms": 646,
+      "classification_ms": 3246,
+      "wall_ms": 3963.2,
+      "scores": {
+        "ambient": 0.047408297657966614,
+        "chainsaw": 0.04053787514567375,
+        "elephant_call": 0.029909813776612282,
+        "gunshot": 0.8821439743041992
+      }
+    },
+    {
+      "file": "gunshot_100174.10s.e2.norm.wav",
+      "truth": "gunshot",
+      "pred": "chainsaw",
+      "score": 0.9232794642448425,
+      "dsp_ms": 643,
+      "classification_ms": 3278,
+      "wall_ms": 4016.2,
+      "scores": {
+        "ambient": 0.016843505203723907,
+        "chainsaw": 0.9232794642448425,
+        "elephant_call": 0.023500699549913406,
+        "gunshot": 0.03637637943029404
+      }
+    },
+    {
+      "file": "gunshot_107619.10s.e2.norm.wav",
+      "truth": "gunshot",
+      "pred": "gunshot",
+      "score": 0.9039492011070251,
+      "dsp_ms": 643,
+      "classification_ms": 3262,
+      "wall_ms": 3999.1,
+      "scores": {
+        "ambient": 0.031878601759672165,
+        "chainsaw": 0.03433496877551079,
+        "elephant_call": 0.02983725443482399,
+        "gunshot": 0.9039492011070251
+      }
+    },
+    {
+      "file": "gunshot_107621.10s.e2.norm.wav",
+      "truth": "gunshot",
+      "pred": "gunshot",
+      "score": 0.9325937628746033,
+      "dsp_ms": 644,
+      "classification_ms": 3220,
+      "wall_ms": 3945.6,
+      "scores": {
+        "ambient": 0.027833297848701477,
+        "chainsaw": 0.018815673887729645,
+        "elephant_call": 0.020757218822836876,
+        "gunshot": 0.9325937628746033
+      }
+    }
+  ]
+}

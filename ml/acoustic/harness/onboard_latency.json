@@ -1,0 +1,309 @@
+{
+  "url": "http://127.0.0.1:1338",
+  "n": 16,
+  "warmup": 2,
+  "dsp_ms": {
+    "mean": 645.6,
+    "median": 643.5,
+    "min": 639,
+    "max": 658
+  },
+  "classification_ms": {
+    "mean": 3490.7,
+    "median": 3498.0,
+    "min": 3334,
+    "max": 3760
+  },
+  "wall_ms": {
+    "mean": 4274.1,
+    "median": 4244.1,
+    "min": 4053.0,
+    "max": 4626.0
+  },
+  "total_ms": {
+    "mean": 4136.3,
+    "median": 4140.5,
+    "min": 3974,
+    "max": 4411
+  },
+  "realtime_factor": 0.4136,
+  "correct": 15,
+  "rows": [
+    {
+      "file": "ambient_xiao_esp32s3_2026-09_bg.1.10s.e2.norm.wav",
+      "truth": "ambient",
+      "pred": "ambient",
+      "score": 0.37831416726112366,
+      "dsp_ms": 651,
+      "classification_ms": 3760,
+      "wall_ms": 4626.0,
+      "scores": {
+        "ambient": 0.37831416726112366,
+        "chainsaw": 0.24736395478248596,
+        "elephant_call": 0.2539752423763275,
+        "gunshot": 0.12034672498703003
+      }
+    },
+    {
+      "file": "ambient_xiao_esp32s3_elephant_noise_2026-09_Noice_10_4tvefonr.10s.e2.norm.wav",
+      "truth": "ambient",
+      "pred": "ambient",
+      "score": 0.7972429394721985,
+      "dsp_ms": 642,
+      "classification_ms": 3504,
+      "wall_ms": 4232.3,
+      "scores": {
+        "ambient": 0.7972429394721985,
+        "chainsaw": 0.04344727098941803,
+        "elephant_call": 0.10483869910240173,
+        "gunshot": 0.054471127688884735
+      }
+    },
+    {
+      "file": "ambient_xiao_esp32s3_elephant_noise_2026-09_Noice_11_4tvefp8g.10s.e2.norm.wav",
+      "truth": "ambient",
+      "pred": "ambient",
+      "score": 0.5673171281814575,
+      "dsp_ms": 643,
+      "classification_ms": 3558,
+      "wall_ms": 4282.3,
+      "scores": {
+        "ambient": 0.5673171281814575,
+        "chainsaw": 0.07659102231264114,
+        "elephant_call": 0.2666563391685486,
+        "gunshot": 0.08943550288677216
+      }
+    },
+    {
+      "file": "ambient_xiao_esp32s3_elephant_noise_2026-09_Noice_12_4tveg4n0.10s.e2.norm.wav",
+      "truth": "ambient",
+      "pred": "ambient",
+      "score": 0.4059363305568695,
+      "dsp_ms": 644,
+      "classification_ms": 3518,
+      "wall_ms": 4244.5,
+      "scores": {
+        "ambient": 0.4059363305568695,
+        "chainsaw": 0.08431503921747208,
+        "elephant_call": 0.36569109559059143,
+        "gunshot": 0.14405755698680878
+      }
+    },
+    {
+      "file": "chainsaw_laptop_phone_2026-09_chain.1.10s.e2.norm.wav",
+      "truth": "chainsaw",
+      "pred": "chainsaw",
+      "score": 0.8940000534057617,
+      "dsp_ms": 644,
+      "classification_ms": 3529,
+      "wall_ms": 4313.3,
+      "scores": {
+        "ambient": 0.03927893564105034,
+        "chainsaw": 0.8940000534057617,
+        "elephant_call": 0.028889156877994537,
+        "gunshot": 0.037831876426935196
+      }
+    },
+    {
+      "file": "chainsaw_xiao_esp32s3_2026-09_chain.1.10s.e2.norm.wav",
+      "truth": "chainsaw",
+      "pred": "chainsaw",
+      "score": 0.9196266531944275,
+      "dsp_ms": 642,
+      "classification_ms": 3543,
+      "wall_ms": 4269.7,
+      "scores": {
+        "ambient": 0.02364228665828705,
+        "chainsaw": 0.9196266531944275,
+        "elephant_call": 0.0278796274214983,
+        "gunshot": 0.02885141782462597
+      }
+    },
+    {
+      "file": "chainsaw_103301.10s.norm.wav",
+      "truth": "chainsaw",
+      "pred": "chainsaw",
+      "score": 0.9443367123603821,
+      "dsp_ms": 643,
+      "classification_ms": 3523,
+      "wall_ms": 4243.8,
+      "scores": {
+        "ambient": 0.014587919227778912,
+        "chainsaw": 0.9443367123603821,
+        "elephant_call": 0.022517424076795578,
+        "gunshot": 0.018557976931333542
+      }
+    },
+    {
+      "file": "chainsaw_3-165856-A-41.wav.10s.norm.wav",
+      "truth": "chainsaw",
+      "pred": "chainsaw",
+      "score": 0.8639920949935913,
+      "dsp_ms": 650,
+      "classification_ms": 3436,
+      "wall_ms": 4241.9,
+      "scores": {
+        "ambient": 0.048825107514858246,
+        "chainsaw": 0.8639920949935913,
+        "elephant_call": 0.047465622425079346,
+        "gunshot": 0.03971714898943901
+      }
+    },
+    {
+      "file": "elephant_call_laptop_phone_2026-09_elephant.1.10s.e2.norm.wav",
+      "truth": "elephant_call",
+      "pred": "elephant_call",
+      "score": 0.8516906499862671,
+      "dsp_ms": 643,
+      "classification_ms": 3417,
+      "wall_ms": 4144.7,
+      "scores": {
+        "ambient": 0.03821646422147751,
+        "chainsaw": 0.059341080486774445,
+        "elephant_call": 0.8516906499862671,
+        "gunshot": 0.05075177550315857
+      }
+    },
+    {
+      "file": "elephant_call_xiao_esp32s3_elephant_noise_2026-09_Elephant_11_4tveet9a.10s.e2.norm.wav",
+      "truth": "elephant_call",
+      "pred": "elephant_call",
+      "score": 0.9706342816352844,
+      "dsp_ms": 644,
+      "classification_ms": 3477,
+      "wall_ms": 4212.4,
+      "scores": {
+        "ambient": 0.009192137978971004,
+        "chainsaw": 0.009845261462032795,
+        "elephant_call": 0.9706342816352844,
+        "gunshot": 0.01032821461558342
+      }
+    },
+    {
+      "file": "elephant_call_xiao_esp32s3_elephant_noise_2026-09_Elephant_13_4tveest6.10s.e2.norm.wav",
+      "truth": "elephant_call",
+      "pred": "elephant_call",
+      "score": 0.9231545925140381,
+      "dsp_ms": 640,
+      "classification_ms": 3334,
+      "wall_ms": 4053.0,
+      "scores": {
+        "ambient": 0.02583114616572857,
+        "chainsaw": 0.02800131030380726,
+        "elephant_call": 0.9231545925140381,
+        "gunshot": 0.02301294170320034
+      }
+    },
+    {
+      "file": "elephant_call_xiao_esp32s3_elephant_noise_2026-09_Elephant_16_4tveepp7.10s.e2.norm.wav",
+      "truth": "elephant_call",
+      "pred": "elephant_call",
+      "score": 0.9444520473480225,
+      "dsp_ms": 639,
+      "classification_ms": 3372,
+      "wall_ms": 4080.7,
+      "scores": {
+        "ambient": 0.021009569987654686,
+        "chainsaw": 0.016240734606981277,
+        "elephant_call": 0.9444520473480225,
+        "gunshot": 0.018297651782631874
+      }
+    },
+    {
+      "file": "gunshot_xiao_esp32s3_2026-09_gun.1.10s.e2.norm.wav",
+      "truth": "gunshot",
+      "pred": "gunshot",
+      "score": 0.8821439743041992,
+      "dsp_ms": 653,
+      "classification_ms": 3372,
+      "wall_ms": 4417.1,
+      "scores": {
+        "ambient": 0.047408267855644226,
+        "chainsaw": 0.04053785279393196,
+        "elephant_call": 0.029909808188676834,
+        "gunshot": 0.8821439743041992
+      }
+    },
+    {
+      "file": "gunshot_100174.10s.e2.norm.wav",
+      "truth": "gunshot",
+      "pred": "chainsaw",
+      "score": 0.9232795834541321,
+      "dsp_ms": 658,
+      "classification_ms": 3536,
+      "wall_ms": 4527.5,
+      "scores": {
+        "ambient": 0.016843508929014206,
+        "chainsaw": 0.9232795834541321,
+        "elephant_call": 0.02350069209933281,
+        "gunshot": 0.03637630492448807
+      }
+    },
+    {
+      "file": "gunshot_107619.10s.e2.norm.wav",
+      "truth": "gunshot",
+      "pred": "gunshot",
+      "score": 0.9039492011070251,
+      "dsp_ms": 651,
+      "classification_ms": 3480,
+      "wall_ms": 4268.3,
+      "scores": {
+        "ambient": 0.03187860921025276,
+        "chainsaw": 0.03433496877551079,
+        "elephant_call": 0.02983725443482399,
+        "gunshot": 0.9039492011070251
+      }
+    },
+    {
+      "file": "gunshot_107621.10s.e2.norm.wav",
+      "truth": "gunshot",
+      "pred": "gunshot",
+      "score": 0.932593822479248,
+      "dsp_ms": 643,
+      "classification_ms": 3492,
+      "wall_ms": 4228.1,
+      "scores": {
+        "ambient": 0.027833279222249985,
+        "chainsaw": 0.018815666437149048,
+        "elephant_call": 0.020757203921675682,
+        "gunshot": 0.932593822479248
+      }
+    }
+  ],
+  "run": 2,
+  "conditions": {
+    "board": "Arduino UNO Q (QRB2210), 4 cores, aarch64",
+    "contention": "Measured with the production stack live: /app/python/main.py (the EleTect-X app, ~111%% CPU) and the vision runner on etx_runF_0929.eim (~69%% CPU) were both running throughout; load average 3.33 on 4 cores. This is the contention acoustic would actually face in the field, not a quiescent best case.",
+    "runner": "edge-impulse-linux-runner --model-file acoustic-panns-20260930.eim --run-http-server 1338",
+    "model_sha256": "c36ab31fccea507209f37954ddd3395674a5e70b44ee96118e85d8d72d4835a7",
+    "impulse": "Edge Impulse Experts / ETX-Test (v7), freq 8000Hz, window 10000ms"
+  },
+  "prior_run_1": {
+    "dsp_ms": {
+      "mean": 662.2,
+      "min": 643,
+      "max": 679,
+      "median": 659.5
+    },
+    "classification_ms": {
+      "mean": 3647.4,
+      "min": 3486,
+      "max": 3788,
+      "median": 3658.5
+    },
+    "wall_ms": {
+      "mean": 4511.4,
+      "min": 4237.7,
+      "max": 4956.4,
+      "median": 4507.3
+    },
+    "total_ms": {
+      "mean": 4309.6,
+      "min": 4129,
+      "max": 4467,
+      "median": 4314.5
+    },
+    "realtime_factor": 0.431,
+    "correct": 15
+  }
+}

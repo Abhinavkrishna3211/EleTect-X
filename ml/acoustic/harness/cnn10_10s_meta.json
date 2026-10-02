@@ -1,0 +1,23 @@
+{
+  "arch": "cnn10",
+  "quant_ops": [
+    "Conv"
+  ],
+  "calib_method": "MinMax",
+  "reduce_range": true,
+  "window_s": 10.0,
+  "frames": 1001,
+  "mels": 64,
+  "hop": 320,
+  "n_fft": 1024,
+  "sample_rate": 32000,
+  "classes": [
+    "ambient",
+    "chainsaw",
+    "elephant_call",
+    "gunshot"
+  ],
+  "seed": 0,
+  "fp32": "cnn10_10s_fp32.onnx",
+  "int8": "cnn10_10s_int8_conv_rr.onnx"
+}

@@ -1,0 +1,63 @@
+{
+  "fp32 10 s": {
+    "overall": 0.9190082644628099,
+    "n": 605,
+    "matrix": {
+      "ambient->ambient": 215,
+      "ambient->chainsaw": 3,
+      "ambient->elephant_call": 3,
+      "ambient->gunshot": 15,
+      "chainsaw->ambient": 2,
+      "chainsaw->chainsaw": 62,
+      "chainsaw->elephant_call": 2,
+      "chainsaw->gunshot": 2,
+      "elephant_call->ambient": 3,
+      "elephant_call->chainsaw": 2,
+      "elephant_call->elephant_call": 53,
+      "gunshot->ambient": 8,
+      "gunshot->chainsaw": 7,
+      "gunshot->elephant_call": 2,
+      "gunshot->gunshot": 226
+    }
+  },
+  "int8 7-bit 10 s": {
+    "overall": 0.9173553719008265,
+    "n": 605,
+    "matrix": {
+      "ambient->ambient": 215,
+      "ambient->chainsaw": 3,
+      "ambient->elephant_call": 3,
+      "ambient->gunshot": 15,
+      "chainsaw->ambient": 2,
+      "chainsaw->chainsaw": 62,
+      "chainsaw->elephant_call": 2,
+      "chainsaw->gunshot": 2,
+      "elephant_call->ambient": 2,
+      "elephant_call->chainsaw": 2,
+      "elephant_call->elephant_call": 54,
+      "gunshot->ambient": 10,
+      "gunshot->chainsaw": 6,
+      "gunshot->elephant_call": 3,
+      "gunshot->gunshot": 224
+    }
+  },
+  "int8 7-bit 3 s peak": {
+    "overall": 0.915702479338843,
+    "n": 605,
+    "matrix": {
+      "ambient->ambient": 216,
+      "ambient->chainsaw": 4,
+      "ambient->elephant_call": 5,
+      "ambient->gunshot": 11,
+      "chainsaw->ambient": 3,
+      "chainsaw->chainsaw": 59,
+      "chainsaw->elephant_call": 4,
+      "chainsaw->gunshot": 2,
+      "elephant_call->ambient": 2,
+      "elephant_call->elephant_call": 56,
+      "gunshot->ambient": 11,
+      "gunshot->chainsaw": 9,
+      "gunshot->gunshot": 223
+    }
+  }
+}

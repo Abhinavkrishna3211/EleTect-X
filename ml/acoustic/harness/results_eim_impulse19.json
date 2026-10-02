@@ -1,0 +1,66 @@
+{
+  "model": "model-x86_64.eim (EI project 1110036, impulse 19, deploy v7)",
+  "note": "Locally built .eim: Studio cannot build this impulse for a device target because it contains a custom DSP block, so the C++ library export was compiled with our panns_logmel implementation. Scored over the same frozen split the harness uses, which is also exactly the partition uploaded to EI as 'testing' (verified against ei_upload_ledger.json: 605/605 match, zero leakage).",
+  "n": 605,
+  "window_s": 10.0,
+  "overall": 0.9256198347107438,
+  "overall_at_ei_threshold_0.6": 0.8793388429752066,
+  "studio_reported": 0.8777,
+  "threshold_sweep": {
+    "0.00": 0.9256198347107438,
+    "0.50": 0.9024793388429752,
+    "0.55": 0.8975206611570248,
+    "0.60": 0.8793388429752066,
+    "0.65": 0.8661157024793389,
+    "0.70": 0.8495867768595041,
+    "0.80": 0.7851239669421488,
+    "0.90": 0.5619834710743802
+  },
+  "mean_dsp_ms_x86_64": 278.10578512396694,
+  "mean_classify_ms_x86_64": 464.7404958677686,
+  "per_class": {
+    "ambient": {
+      "recall": 0.9279661016949152,
+      "precision": 0.9279661016949152,
+      "support": 236
+    },
+    "chainsaw": {
+      "recall": 0.9117647058823529,
+      "precision": 0.8985507246376812,
+      "support": 68
+    },
+    "elephant_call": {
+      "recall": 0.9310344827586207,
+      "precision": 0.9152542372881356,
+      "support": 58
+    },
+    "gunshot": {
+      "recall": 0.9259259259259259,
+      "precision": 0.9336099585062241,
+      "support": 243
+    }
+  },
+  "confusion": {
+    "chainsaw->chainsaw": 62,
+    "elephant_call->elephant_call": 54,
+    "ambient->ambient": 219,
+    "gunshot->gunshot": 225,
+    "elephant_call->ambient": 2,
+    "ambient->gunshot": 15,
+    "gunshot->chainsaw": 4,
+    "chainsaw->elephant_call": 2,
+    "gunshot->ambient": 12,
+    "gunshot->elephant_call": 2,
+    "chainsaw->ambient": 3,
+    "chainsaw->gunshot": 1,
+    "elephant_call->chainsaw": 2,
+    "ambient->chainsaw": 1,
+    "ambient->elephant_call": 1
+  },
+  "aarch64_crosscheck": {
+    "clips": 8,
+    "argmax_disagreements_vs_x86_64": 0,
+    "max_abs_score_delta": 3.58e-07,
+    "note": "Cross-built .eim run under qemu-aarch64-static. Timings from that run are emulation artefacts and are deliberately not recorded."
+  }
+}

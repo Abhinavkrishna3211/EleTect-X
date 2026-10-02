@@ -1,0 +1,32 @@
+{
+  "model": "cnn10_10s_int8_conv_Entropy.onnx",
+  "threads": 0,
+  "n": 605,
+  "median_ms": 69.0650999895297,
+  "mean_ms": 68.27537520651028,
+  "p90_ms": 73.48038000345696,
+  "window_s": 10.0,
+  "overall": 0.5454545454545454,
+  "per_class": {
+    "ambient": {
+      "recall": 0.8135593220338984,
+      "precision": 0.4948453608247423,
+      "support": 236
+    },
+    "chainsaw": {
+      "recall": 0.058823529411764705,
+      "precision": 0.8,
+      "support": 68
+    },
+    "elephant_call": {
+      "recall": 0.3448275862068966,
+      "precision": 0.2857142857142857,
+      "support": 58
+    },
+    "gunshot": {
+      "recall": 0.4691358024691358,
+      "precision": 0.8028169014084507,
+      "support": 243
+    }
+  }
+}

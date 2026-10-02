@@ -1,0 +1,11 @@
+# Without this, `ruff check` gives different answers depending on the directory
+# it is run from. With no config anywhere in the tree, ruff sets isort's `src`
+# to the working directory, so the sibling modules in here (embed, train_head,
+# panns_small) resolve as first-party when ruff runs from this directory and as
+# third-party when it runs from the repository root - and isort then disagrees
+# with itself about whether a blank line belongs between them and `import torch`.
+# Naming them explicitly makes the result the same either way.
+line-length = 100
+
+[lint.isort]
+known-first-party = ["embed", "train_head", "panns_small", "export_panns", "bench_onnx"]

@@ -1,0 +1,32 @@
+{
+  "model": "cnn10_10s_int8_conv_rr.onnx",
+  "threads": 4,
+  "n": 605,
+  "median_ms": 118.20919999445323,
+  "mean_ms": 117.52770661127711,
+  "p90_ms": 128.03185999800917,
+  "window_s": 10.0,
+  "overall": 0.9190082644628099,
+  "per_class": {
+    "ambient": {
+      "recall": 0.9152542372881356,
+      "precision": 0.9391304347826087,
+      "support": 236
+    },
+    "chainsaw": {
+      "recall": 0.9117647058823529,
+      "precision": 0.8611111111111112,
+      "support": 68
+    },
+    "elephant_call": {
+      "recall": 0.9310344827586207,
+      "precision": 0.8709677419354839,
+      "support": 58
+    },
+    "gunshot": {
+      "recall": 0.9218106995884774,
+      "precision": 0.9294605809128631,
+      "support": 243
+    }
+  }
+}

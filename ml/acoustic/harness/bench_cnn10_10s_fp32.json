@@ -1,0 +1,32 @@
+{
+  "model": "cnn10_10s_fp32.onnx",
+  "threads": 0,
+  "n": 605,
+  "median_ms": 111.53799999738112,
+  "mean_ms": 110.93313123957228,
+  "p90_ms": 116.23271999997087,
+  "window_s": 10.0,
+  "overall": 0.9190082644628099,
+  "per_class": {
+    "ambient": {
+      "recall": 0.9110169491525424,
+      "precision": 0.9429824561403509,
+      "support": 236
+    },
+    "chainsaw": {
+      "recall": 0.9117647058823529,
+      "precision": 0.8378378378378378,
+      "support": 68
+    },
+    "elephant_call": {
+      "recall": 0.9137931034482759,
+      "precision": 0.8833333333333333,
+      "support": 58
+    },
+    "gunshot": {
+      "recall": 0.9300411522633745,
+      "precision": 0.9300411522633745,
+      "support": 243
+    }
+  }
+}

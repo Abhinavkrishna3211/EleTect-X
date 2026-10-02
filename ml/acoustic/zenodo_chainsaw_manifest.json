@@ -1,0 +1,95 @@
+{
+ "source": "https://zenodo.org/records/5824433",
+ "license": "CC-BY-4.0",
+ "citation": "N. Stefanakis, K. Psaroulakis, N. Simou, C. Astaras, 'An open-access system for long-range chainsaw sound detection', EUSIPCO 2022",
+ "recordings": [
+  {
+   "recording": "PR_20161205_115013",
+   "sha256": "6d0f657b6e39d8045ddbefdf465123ca842fc7b614ed8ae20532c96abf32852c",
+   "duration_s": 14372.9,
+   "events": 42,
+   "event_s": 62.4,
+   "chainsaw_windows": 29,
+   "ambient_windows": 240,
+   "source": "zenodo:5824433",
+   "license": "CC-BY-4.0"
+  },
+  {
+   "recording": "RP10_1h0_to1h35",
+   "sha256": "5f2f9321f82cd609517e90e27cadbaf1180a00149b9e6516004a47b4c365cf56",
+   "duration_s": 2154.5,
+   "events": 64,
+   "event_s": 150.8,
+   "chainsaw_windows": 57,
+   "ambient_windows": 71,
+   "source": "zenodo:5824433",
+   "license": "CC-BY-4.0"
+  },
+  {
+   "recording": "RP11_5h50_to_6h20",
+   "sha256": "ca8a5fcfaa408e202d1af70c3012160c81007b722196c605b8fbdf26538cfa98",
+   "duration_s": 444.4,
+   "events": 74,
+   "event_s": 214.2,
+   "chainsaw_windows": 60,
+   "ambient_windows": 0,
+   "source": "zenodo:5824433",
+   "license": "CC-BY-4.0"
+  },
+  {
+   "recording": "RP14_10h5m_to_10h30m",
+   "sha256": "5601bfcc9b6a05f9b531d5057f140fc38456539d140246bf17bbc0e3189f1bce",
+   "duration_s": 1740.8,
+   "events": 72,
+   "event_s": 129.4,
+   "chainsaw_windows": 57,
+   "ambient_windows": 35,
+   "source": "zenodo:5824433",
+   "license": "CC-BY-4.0"
+  },
+  {
+   "recording": "RP15_1h10_till_1h25",
+   "sha256": "9ac9b388f7911fa71e555f7e6ee7a9f568392a219b671a9ab956a86a3cb60130",
+   "duration_s": 900.1,
+   "events": 22,
+   "event_s": 50.8,
+   "chainsaw_windows": 21,
+   "ambient_windows": 25,
+   "source": "zenodo:5824433",
+   "license": "CC-BY-4.0"
+  },
+  {
+   "recording": "RP3_0h30_to1h20",
+   "sha256": "50229d656628a408d1c5dfed6e17aad49877e1a63517eccad62347f810a260fe",
+   "duration_s": 3014.7,
+   "events": 74,
+   "event_s": 88.5,
+   "chainsaw_windows": 48,
+   "ambient_windows": 102,
+   "source": "zenodo:5824433",
+   "license": "CC-BY-4.0"
+  },
+  {
+   "recording": "RP6_9h30_to_9h40",
+   "sha256": "37ff4bbfe94a9b28731d1f8d5a3e1f6d7f9ff166a9e56232ffff35fd2f5e7d11",
+   "duration_s": 624.6,
+   "events": 106,
+   "event_s": 245.3,
+   "chainsaw_windows": 60,
+   "ambient_windows": 6,
+   "source": "zenodo:5824433",
+   "license": "CC-BY-4.0"
+  },
+  {
+   "recording": "SW2_20181115_7h45_8h20",
+   "sha256": "43be0f635b101636c096c222e9ec09a8327ad7a406580fdc06d100220f581884",
+   "duration_s": 2093.1,
+   "events": 90,
+   "event_s": 180.4,
+   "chainsaw_windows": 60,
+   "ambient_windows": 66,
+   "source": "zenodo:5824433",
+   "license": "CC-BY-4.0"
+  }
+ ]
+}
