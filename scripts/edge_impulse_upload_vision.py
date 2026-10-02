@@ -1492,7 +1492,7 @@ def _parse_ingest_response(raw, sent_names):
         }
 
     accepted, rejected = [], []
-    for name, entry in zip(sent_names, files):
+    for name, entry in zip(sent_names, files, strict=True):
         if entry.get("success"):
             accepted.append(name)
         else:
