@@ -2955,10 +2955,13 @@ def handle_footfall_event(
     # safety argument, and every one of its blind cases falls straight back
     # to the seismic decision rather than going quiet. What this does *not*
     # do is suppress anything else: the trigger is still recorded, the
-    # bandit still settles, the event is still logged, and any uplink this
-    # path grows should sit on the seismic decision, not behind this gate.
-    # See docs/KNOWN_GAPS.md - there is no working footfall uplink today, so
-    # "seismic warns" is a half this code cannot yet deliver.
+    # bandit still settles, the event is still logged, and the uplink sits
+    # on the seismic decision, not behind this gate. That last clause used
+    # to read "any uplink this path grows should" - main.py grew one, and
+    # comms/lora_uplink.py's event_from_footfall() was built against the
+    # old wording and dropped suppressed events on the floor. It no longer
+    # does; a suppressed event goes out as UNCONFIRMED with no deterrent
+    # flag, which the backend scores 'normal' and pages nobody for.
     suppressed_by_vision = (
         require_vision_confirmation
         and decision.alert
@@ -3495,7 +3498,12 @@ def handle_acoustic_event(
                 capture_ref,
                 footfall.vision_confirmed,
                 footfall.species,
-                footfall.alerted,
+                # Composed, not read: FootfallOutcome has no `alerted`
+                # field, and this line raised AttributeError on every
+                # elephant_call event - after the horn had already fired,
+                # so the deterrent ran and the caller never got the
+                # outcome. Same composition comms/lora_uplink.py uses.
+                footfall.decision.alert and not footfall.suppressed_by_vision,
             )
         return AcousticOutcome(
             class_label=class_label, footfall=footfall, direct_alert=False, lora_ack=None

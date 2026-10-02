@@ -194,10 +194,23 @@ class _FakeSendLoraAlert:
 
 
 # A finished event, as handle_acoustic_event() sees one coming back out of
-# the injected start_vision_event. Only the three fields the handler logs
-# are present: a real FootfallOutcome here would say nothing extra and
-# would have to be rebuilt every time the dataclass gains a field.
-_FAKE_FOOTFALL = SimpleNamespace(vision_confirmed=True, species="Elephant", alerted=True)
+# the injected start_vision_event. Carries exactly the fields the handler
+# reads, under the names FootfallOutcome uses.
+#
+# It used to carry `alerted=True`, a field FootfallOutcome has never had,
+# invented here because the handler's log line asked for one. That made
+# this test pass against a line that raised AttributeError on every real
+# elephant_call event - after the horn had fired, so the deterrent ran and
+# the caller never received the outcome. A hand-rolled stand-in is only
+# worth its speed while its field names are the real ones; the moment it
+# answers to a name the dataclass does not have, it stops testing the
+# handler and starts certifying a crash.
+_FAKE_FOOTFALL = SimpleNamespace(
+    vision_confirmed=True,
+    species="Elephant",
+    decision=SimpleNamespace(alert=True),
+    suppressed_by_vision=False,
+)
 
 
 class _FakeStartVisionEvent:
