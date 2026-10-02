@@ -31,6 +31,23 @@ const PLANNER_VERTEX = '#E9EDE6'
 // and legend that overlay the corners.
 const PIN_PADDING: [number, number] = [56, 56]
 
+// Leaflet's divIcon takes a string of HTML, so everything below builds markup
+// by interpolation and anything interpolated has to be escaped first.
+//
+// `node.id` is the one value here that is not ours. It is the DevEUI, and
+// web/ingest's touchNode() writes it straight from `deviceInfo.devEui` on the
+// MQTT uplink without looking at it - correctly, because a format check at that
+// boundary would drop real alerts from a node whose identifier does not match
+// what we assumed. So the shape of a node id is whatever reaches the broker,
+// and it arrives here inside innerHTML on the screen an officer watches all
+// night, with their session behind it. Escape it.
+function esc(value: string | number): string {
+  return String(value).replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
+  )
+}
+
 // A node pin styled like SectorMap.dc.html: a glowing status dot with its id
 // below, plus an animated ping ring while the node is alerting or is actively
 // steering the herd. The id sits in a dark pill so it stays legible on the
@@ -51,7 +68,7 @@ function pinHtml(node: NodeRow, selected: boolean, active: boolean): string {
         ${ping}
         <span style="width:12px;height:12px;border-radius:50%;background:${color};border:1.5px solid rgba(7,13,10,0.85);${glow};${pulse}"></span>
       </div>
-      <span style="font:600 8.5px 'IBM Plex Mono',monospace;color:rgba(233,237,230,0.9);letter-spacing:0.06em;white-space:nowrap;background:rgba(7,13,10,0.72);padding:1px 4px;border-radius:4px">${node.id}</span>
+      <span style="font:600 8.5px 'IBM Plex Mono',monospace;color:rgba(233,237,230,0.9);letter-spacing:0.06em;white-space:nowrap;background:rgba(7,13,10,0.72);padding:1px 4px;border-radius:4px">${esc(node.id)}</span>
     </div>`
 }
 
@@ -63,9 +80,9 @@ function herdHtml(count: number, label: string): string {
     <div style="position:relative;display:flex;flex-direction:column;align-items:center;gap:4px">
       <div style="position:relative;width:34px;height:34px;display:grid;place-items:center">
         <span style="position:absolute;inset:0;border-radius:50%;border:1.5px solid ${GOLD};animation:et-ping 1.8s ease-out infinite"></span>
-        <span style="width:18px;height:18px;border-radius:50%;background:${GOLD};color:#070D0A;display:grid;place-items:center;font:700 9px 'IBM Plex Mono',monospace">${count}</span>
+        <span style="width:18px;height:18px;border-radius:50%;background:${GOLD};color:#070D0A;display:grid;place-items:center;font:700 9px 'IBM Plex Mono',monospace">${esc(count)}</span>
       </div>
-      <span style="font:700 8.5px 'IBM Plex Mono',monospace;letter-spacing:0.14em;color:${GOLD};background:rgba(7,13,10,0.78);padding:2px 5px;border-radius:4px;white-space:nowrap">${label}</span>
+      <span style="font:700 8.5px 'IBM Plex Mono',monospace;letter-spacing:0.14em;color:${GOLD};background:rgba(7,13,10,0.78);padding:2px 5px;border-radius:4px;white-space:nowrap">${esc(label)}</span>
     </div>`
 }
 
