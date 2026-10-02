@@ -9,10 +9,11 @@ by device/mcu/src/footfall/sta_lta.cpp and device/mcu/src/actuators/
 rule_gate.cpp (ENGINEERING_CONVENTIONS.md 2). The fused P now has a real
 consumer - services/reflex_loop.py calls decide() on it and cognition/
 bandit.py selects a deterrence tier once it alerts - but the inputs are
-still partly synthetic: the vision detector, geophone feature extraction,
-and acoustic classifier that would produce real l_i values, plus the Bridge
-wiring that would deliver them here, remain future build calls
-(device/mpu/README.md's Layout table).
+only as good as their producers: the vision detector, geophone feature
+extraction, acoustic classifier and the Bridge wiring that delivers them
+here are all in the tree now (device/mpu/README.md's Layout table), but the
+geophone's 8-feature vector is still the honest placeholder
+device/mcu/src/footfall_features.h names itself as.
 
 Availability-gated dropout (docs/decisions/0001-physical-ai-sensing-and-
 fusion-architecture.md 6, addendum): a modality with `available=False` is

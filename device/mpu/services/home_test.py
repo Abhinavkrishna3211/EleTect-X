@@ -45,7 +45,7 @@ an unattended overnight run. A separate, best-effort performance log
 and on-device resource headroom every HOME_TEST_TELEMETRY_INTERVAL_S -
 evidence for later, not an input to any decision here.
 
-Status: written 6 Sept 2026 for tonight's test, hardened 9 Sept 2026 for an
+Status: written 6 Sept 2026 for that night's test, hardened 9 Sept 2026 for an
 unattended overnight run (stall watchdog, performance telemetry).
 """
 
@@ -1062,7 +1062,7 @@ class HomeTestSession:
         HOME_TEST_PREROLL_S every capture-loop iteration regardless of
         whether an encounter is active, so any encounter running longer
         than about one pre-roll window opened a dead gap in the middle of
-        its own footage: confirmed on tonight's first real encounter, which
+        its own footage: confirmed on the first real encounter of that run, which
         had a single 116s stretch with zero protected frames sandwiched
         between two dense ~13fps clusters at its edges - a slideshow with
         the whole approach-fire-depart arc missing from its middle, not a
@@ -1310,7 +1310,7 @@ class HomeTestSession:
         vision-confirmation window a strong geophone reading would, since a
         vision-only trigger has no seismic-based reason to be watched any
         more cheaply. probability/sta_lta_ratio/feature_vector carry no real
-        geophone reading (none exists tonight) and are logged, not scored.
+        geophone reading (none exists in this mode) and are logged, not scored.
         """
         try:
             handle_footfall_event(

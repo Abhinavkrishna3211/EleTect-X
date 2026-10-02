@@ -139,7 +139,7 @@ void state_machine_init() { enter(reflex_state::kIdle, millis()); }
 void state_machine_tick(uint32_t now_ms) {
   switch (g_state) {
     case reflex_state::kIdle:
-      // Entry stub: later build calls gate this transition on fusion/bandit
+      // Entry stub: a later pass gates this transition on fusion/bandit
       // policy (e.g. don't bother sensing if the MPU already reports no
       // elephant presence). For now, idle always proceeds straight to
       // sensing - there is no policy to defer to yet.

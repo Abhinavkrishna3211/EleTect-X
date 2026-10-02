@@ -87,8 +87,8 @@ frame rate in low ambient light (the camera's own `Exposure, Dynamic
 Framerate` control defaults off, which cuts against this, so it is a
 hypothesis, not a finding). The decisive test - force manual exposure,
 re-measure, restore - was not run: it changes live camera hardware state
-on the production board, which this session's tooling would not do without
-a human confirming first. If real, this matters: a raw H.264 stream has no
+on the production board, which the bench tooling will not do without a
+human confirming first. If real, this matters: a raw H.264 stream has no
 per-frame timestamps, so a stretch of real time recorded at ~3.8fps plays
 back as a shorter clip at the expected 30fps, not as slow motion - an
 event's footage could end up representing far fewer real seconds than its

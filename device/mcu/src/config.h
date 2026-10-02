@@ -286,8 +286,8 @@
 // Set to 1 for the horn bring-up session (adds the raw-AT console mode,
 // fire_test.cpp) - MUST be back to 0 before any field sync.
 //
-// 7 Sept, system audit: reset to 0. No MCU reflash is planned for tonight's
-// test (only device/mpu Python files are pushed via scp to the bind-mounted
+// 7 Sept, system audit: reset to 0. No MCU reflash was planned for the 7 Sept
+// field test (only device/mpu Python files are pushed via scp to the bind-mounted
 // /app tree), so this had no live effect either way - closing it now just
 // clears a real, previously-flagged-but-unexecuted HANDOVER.md todo before
 // it can be forgotten and shipped in a future flash.
@@ -350,7 +350,7 @@
 
 // Full STA/LTA feature stream (sta/lta/ratio), not just the binary trigger.
 // Field mode logs [trigger] events only; this is the continuous time series
-// tonight's dataset needs to let ml/seismic/'s missing footfall classifier
+// the capture dataset needs to let ml/seismic/'s missing footfall classifier
 // be trained against real labelled ground truth instead of a hand-tuned
 // ratio threshold.
 #undef SEISMIC_DEBUG_VERBOSE

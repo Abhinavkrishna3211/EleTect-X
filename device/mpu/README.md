@@ -43,7 +43,7 @@ bridge/
   rpc.py         signatures + docstrings for all 8 schema.md functions, no Bridge wiring yet
 perception/
   camera.py      IMX462 V4L2 capture wrapper — open/capture/burst/release, no trigger/IR logic
-  (vision INT8 detector itself: future build call)
+  detector.py    vision INT8 detector (Edge Impulse export) - inference only, no capture
 cognition/
   fusion.py      weighted log-odds fusion (CONTEXT.md 4) — pure function, no Bridge/hardware
   decision.py    alert gate on the fused probability — pure function
@@ -52,7 +52,7 @@ cognition/
   config.py      fusion weights + bandit hyperparameters and tier ladder — one rationale each
 services/
   config.py      MPU-side tuning constants, one rationale each (mirrors device/mcu/src/config.h)
-comms/           LoRa uplink (future build call)
+comms/           LoRa uplink (lora_uplink.py) - frame build + Bridge send, no radio driver
 models/          on-device vision model export, gitignored (*.tflite)
 tests/           host-only contract + config tests, never synced to the board
 bench/ping/          disposable hello-world Bridge round trip, see below

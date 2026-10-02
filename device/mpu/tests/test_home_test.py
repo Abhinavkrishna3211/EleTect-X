@@ -588,7 +588,7 @@ def test_maybe_save_review_still_still_saves_a_frame_filling_box_when_shape_is_u
 
     Mirrors _gate_results_without_degenerate_boxes' own degrade-safe rule:
     a shape-read failure must never manufacture a dropped detection, so a
-    still is saved rather than silently losing evidence this session
+    still is saved rather than silently losing evidence the caller
     cannot even confirm is degenerate. cv2.imencode is stubbed the same
     way test_maybe_save_review_still_swallows_an_encode_failure does,
     since a str-backed fake frame (no real .shape) cannot be encoded for

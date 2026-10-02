@@ -1,10 +1,10 @@
 // Reflex loop shape: IDLE -> SENSING -> EVENT -> COOLDOWN -> IDLE.
 //
-// This build call wires only the geophone/STA-LTA reflex path end to end
+// This file wires only the geophone/STA-LTA reflex path end to end
 // (enough to produce a logged trigger event on the bench) and leaves the
 // EVENT state's actual deterrence policy - which actuator, what gain,
 // bandit/fusion input - as a stub. No fusion, no bandit, no Bridge calls, no
-// deterrence policy live here yet; those arrive in later build calls.
+// deterrence policy live here yet; those arrive in later work.
 
 #ifndef STATE_MACHINE_H
 #define STATE_MACHINE_H

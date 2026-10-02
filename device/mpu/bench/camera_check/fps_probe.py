@@ -329,8 +329,8 @@ def main() -> int:
             f"  Auto-exposure throttling NOT confirmed: {auto.fps:.2f} -> {manual.fps:.2f} fps, "
             f"within noise.\n"
             f"  ~{auto.fps:.1f} fps looks like this camera/board/USB combination's real ceiling,\n"
-            f"  which means smooth continuous video is not achievable tonight at any format or\n"
-            f"  codec. The ring still works - expect a ~{ring.fps:.1f} fps encounter clip."
+            f"  which means smooth continuous video is not achievable on this hardware at any\n"
+            f"  format or codec. The ring still works - expect a ~{ring.fps:.1f} fps clip."
         )
 
     if ring.mean_jpeg_bytes is not None:

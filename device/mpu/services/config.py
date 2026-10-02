@@ -762,7 +762,7 @@ VISION_WATCH_MAX_EMPTY_POLLS = 3
 # It is not a reason to revert.
 #
 # Originally written as a one-day override. It is not one any more: the
-# relaxation is open-ended by the user's decision and carries no expiry.
+# relaxation is open-ended by the operator's decision and carries no expiry.
 # REVERT to {"Boar": 2} only on an explicit request to do so - not because
 # a date has passed, and not as tidy-up. Until then the Boar
 # false-positive rate this gate was built to hold down (31.53% per-frame,
@@ -799,7 +799,7 @@ VISION_SPECIES_CONSECUTIVE_POLLS: dict[str, int] = {}
 # the class that actually has it, leaving Elephant's OR-across-the-burst
 # path - and ADR 0022's confirm-and-exit latency - untouched.
 #
-# RELAXED - 13 Sept 2026, at the user's explicit request: left empty so a
+# RELAXED - 13 Sept 2026, at the operator's explicit request: left empty so a
 # fox - which the 2-class model of the time could only label "Boar" -
 # confirms on a single frame instead of needing a majority of the burst,
 # matching Elephant's admission bar. This reopens the Boar false-positive
@@ -814,7 +814,7 @@ VISION_SPECIES_CONSECUTIVE_POLLS: dict[str, int] = {}
 # to revert.
 #
 # Originally written as a one-day override. It is not one any more: the
-# relaxation is open-ended by the user's decision and carries no expiry.
+# relaxation is open-ended by the operator's decision and carries no expiry.
 # REVERT to ("Boar",) only on an explicit request to do so - not because a
 # date has passed, and not as tidy-up.
 VISION_SPECIES_BURST_MAJORITY_LABELS: tuple[str, ...] = ()
@@ -1811,19 +1811,19 @@ HOME_TEST_MAX_TOTAL_BYTES = 3 * 1024 * 1024 * 1024  # 3 GB
 # field. It is a threshold change on a shared code path, not a forked
 # decision path: the same fuse -> decide -> bandit -> rule-gate chain runs
 # either way, and it runs on exactly the same inputs.
-# 9 Sept, tonight's field test only: cut from 0.60 to 0.35 at the user's
+# 9 Sept, that night's field test only: cut from 0.60 to 0.35 at the operator's
 # explicit request - the deployed detector was reading real Boar-shaped
 # signal in the 0.07-0.37 range all night without ever clearing 0.60 (see
-# tonight's detections.jsonl), so nothing was firing at all. 0.35 sat just
+# that night's detections.jsonl), so nothing was firing at all. 0.35 sat just
 # above the highest ambient/false reading seen in that log.
 #
-# Cut again same night, 0.35 -> 0.20, at the user's explicit follow-up
+# Cut again same night, 0.35 -> 0.20, at the operator's explicit follow-up
 # request to fire faster and not worry about false positives - the goal is
-# footage of a real reaction tonight, not a clean dataset. 0.20 sits
+# footage of a real reaction that night, not a clean dataset. 0.20 sits
 # below most of the observed 0.07-0.37 noise floor on purpose: ambient/
 # false readings will cross it often and that is accepted.
 #
-# 9 Sept, mid-night: raised back 0.20 -> 0.35 at the user's request once the
+# 9 Sept, mid-night: raised back 0.20 -> 0.35 at the operator's request once the
 # 0.20 false-positive rate proved unusable in the field.
 #
 # 10 Sept: field trial over - REVERTED to 0.60. Even at 0.35 the dawn
@@ -1833,20 +1833,20 @@ HOME_TEST_MAX_TOTAL_BYTES = 3 * 1024 * 1024 * 1024  # 3 GB
 # the still-dark noise floor but not the dawn one. Back at the field default
 # and its measured 27.54% poll-level Boar false-positive basis.
 #
-# 23 Sept, tonight only: cut back to 0.35 at the user's explicit request -
+# 23 Sept, that night only: cut back to 0.35 at the operator's explicit request -
 # priority is catching every real animal for footage, false positives
-# accepted for tonight's session. Deliberately NOT dropped to 0.20: that
+# accepted for that night's run. Deliberately NOT dropped to 0.20: that
 # exact value was already tried on 9 Sept and rolled back same night as
 # "unusable" (fired continuously on noise). 0.35 is the highest-risk value
 # with a real precedent of working overnight - but that precedent is
 # night-only. The 10 Sept dawn-twilight runaway (44 fires/15min, board
-# powered off) happened at exactly this value, 05:34-06:29 IST. If this
-# session is still running into that window, raise this back to 0.60 before
+# powered off) happened at exactly this value, 05:34-06:29 IST. If a run
+# is still going into that window, raise this back to 0.60 before
 # then or expect the same runaway.
 #
-# 23 Sept, minutes later: cut further, 0.35 -> 0.30, at the user's explicit
+# 23 Sept, minutes later: cut further, 0.35 -> 0.30, at the operator's explicit
 # request, run live as a timed 30-minute trial with the fire rate watched
-# for false positives. No prior session has a direct data point at 0.30 -
+# for false positives. No prior run has a direct data point at 0.30 -
 # the two adjacent known points are 0.35 (worked overnight, failed at dawn
 # twilight) and 0.20 (rolled back same night as unusable, fired on noise
 # continuously). 0.30 is an interpolation, not a re-run of a known-good
@@ -1872,7 +1872,7 @@ HOME_TEST_MAX_TOTAL_BYTES = 3 * 1024 * 1024 * 1024  # 3 GB
 # re-firing every ~15-20s dropped to a flat 0.260 immediately after the
 # fix-carrying restart, with no further fires observed. With the root
 # cause (overexposed foliage misread as Boar/Elephant) addressed at the
-# source, raised back to the pre-experiment ceiling, 0.60, at the user's
+# source, raised back to the pre-experiment ceiling, 0.60, at the operator's
 # explicit instruction ("raise to .60") - no longer holding at the 0.35
 # cap the earlier "no higher than previous" rule required while the
 # camera fix was unverified.
@@ -1883,9 +1883,9 @@ HOME_TEST_MAX_TOTAL_BYTES = 3 * 1024 * 1024 * 1024  # 3 GB
 # showed it made no visible difference to the blown-out daytime image, and
 # a follow-up manual-exposure experiment to actually fix it made the image
 # worse and was reverted (see perception/camera.py). The real daytime
-# overexposure problem is still open. At the user's explicit request,
+# overexposure problem is still open. At the operator's explicit request,
 # reverted to 0.30 - the value actually active for the whole of 23 Sept
-# night's session (cut down from 0.35 within minutes of starting; not
+# night's run (cut down from 0.35 within minutes of starting; not
 # 0.60, which is last week's standing daytime default and not what any of
 # 23 Sept night's encounters, including the confirmed real animal at
 # 21:20 IST, were captured under). Night-only precedent: 0.30 ran all of
@@ -1894,7 +1894,7 @@ HOME_TEST_MAX_TOTAL_BYTES = 3 * 1024 * 1024 * 1024  # 3 GB
 # morning note above). MUST be raised back toward 0.35/0.60 before that
 # window recurs tomorrow, or expect the same runaway.
 #
-# 29 Sept: raised to 0.70 at the user's explicit request, temporary, as an
+# 29 Sept: raised to 0.70 at the operator's explicit request, temporary, as an
 # immediate stopgap against a fresh false-positive spike. Not a root-cause
 # fix - the same day's full-history query of detections.jsonl (439,708
 # Elephant rows) found confidence is quantized onto a fixed ladder of ~27
@@ -1908,7 +1908,7 @@ HOME_TEST_MAX_TOTAL_BYTES = 3 * 1024 * 1024 * 1024  # 3 GB
 # quantization-ladder discussion, not yet written up in docs/KNOWN_GAPS.md)
 # rather than left here as a permanent value.
 #
-# 29 Sept, same night: raised again to 0.80 at the user's explicit request -
+# 29 Sept, same night: raised again to 0.80 at the operator's explicit request -
 # 0.70 wasn't enough, still seeing false positives. 0.80 sits between rungs
 # 0.7798 and 0.8912, so it now also excludes the 0.7426/0.7798 rungs that
 # 0.70 had let through - only the 0.8912 and 0.9283 rungs (and anything
@@ -1924,7 +1924,7 @@ HOME_TEST_MAX_TOTAL_BYTES = 3 * 1024 * 1024 * 1024  # 3 GB
 # the 28 Sept vision model training log, section 10f.
 #
 # 29 Sept, night: 0.60 for the first night on Run F, so a fox visit is not
-# lost to the margin and tonight yields a clip to compare against. The same
+# lost to the margin and the night yields a clip to compare against. The same
 # replay caught 7/7 foxes with no false clips at 0.60 as well; the 0.56
 # empty-scene ceiling above is the reason not to go lower.
 HOME_TEST_FIRE_MIN_CONFIDENCE = 0.60
@@ -1946,10 +1946,10 @@ HOME_TEST_FIRE_MIN_CONFIDENCE = 0.60
 # full measurement and the frame-count half of the fix, deliberately left
 # at 3 pending its own decision.
 #
-# 8 Sept, tonight only: cut further to 1 at the user's explicit request -
+# 8 Sept, that night only: cut further to 1 at the operator's explicit request -
 # fire on the very first qualifying poll (still gated by
 # HOME_TEST_FIRE_MIN_CONFIDENCE above), false positives accepted, because
-# tonight's goal is footage of a real reaction, not a clean dataset.
+# that night's goal was footage of a real reaction, not a clean dataset.
 # This trades away the one poll of debounce margin the 7 Sept cut already
 # reduced from 3 to 2 - a lone windblown-branch poll can now open an
 # encounter and fire a deterrent on its own.
@@ -1980,7 +1980,7 @@ HOME_TEST_FIRE_CONSECUTIVE_POLLS = 2
 # a single isolated qualifying poll surrounded by silence still cannot
 # open an encounter on its own, exactly as before.
 #
-# 11 Sept, later same day: widened 6 -> 15 at the user's explicit request.
+# 11 Sept, later same day: widened 6 -> 15 at the operator's explicit request.
 # Priority shifted from "survive the one observed 5s gap" to "get the
 # complete empty-frame -> approach -> fire -> retreat -> empty-frame arc on
 # every real animal" - a missed encounter-open costs the whole clip, not

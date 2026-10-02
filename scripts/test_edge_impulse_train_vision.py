@@ -23,7 +23,7 @@ def _yolo_pro_model():
 
     customParameters values/selectOptions match the live API response read
     4 Sep 2026 (project 1097972) - sizing/architecture-type plus the three
-    advanced-section knobs this session added CLI overrides for.
+    advanced-section knobs the trainer exposes CLI overrides for.
     """
     return {
         "name": "YOLO-Pro",

@@ -43,7 +43,7 @@ instead. A future schema 5 would be sent as `129`.
   because "the table changed and the version did not" is exactly the kind of silent edit this
   history exists to make impossible.
 
-Two Bridge primitives, both confirmed against Arduino's own reference Bricks this session, not assumed:
+Two Bridge primitives, both confirmed against Arduino's own reference Bricks, not assumed:
 `Bridge.call(name, args) -> return_value` is synchronous request/response — caller blocks until a response
 or timeout. `Bridge.notify(name, args)` is fire-and-forget — no return value, caller does not block. Use
 `notify` for MCU→MPU event pushes (the MCU must not stall on MPU wake state); use `call` for MPU→MCU

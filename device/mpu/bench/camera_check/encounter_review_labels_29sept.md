@@ -1,8 +1,8 @@
 # Manual review labels — 29 Sept 2026
 
-Ground truth from the user watching all downloaded encounter clips
+Ground truth from a frame-by-frame review of all downloaded encounter clips
 (`board_pull_20260924` .. `board_pull_20260929`). Verbatim notes kept as given;
-`category` is my normalization for grep/sort. Local only — this directory is
+`category` normalizes them for grep/sort. Local only — this directory is
 already untracked, not added to git.
 
 | # | Path (relative to `bench/camera_check/`) | Category | Note (verbatim) |
@@ -108,7 +108,7 @@ This is a real design mismatch: ADR 0022's watch-length logic assumes a
 seismic reading exists to justify the longer window. HOME_TEST_MODE has no
 seismic reading at all, so every cold fox trigger is structurally stuck with
 the short 8s window regardless of `HOME_TEST_FIRE_MIN_CONFIDENCE`. Raising
-that threshold (0.30 -> 0.70 -> 0.80, done earlier tonight) does not touch
+that threshold (0.30 -> 0.70 -> 0.80, raised earlier the same day) does not touch
 this — it only changes which detections open an encounter at all, not how long
 the encounter gets to reconfirm once opened.
 

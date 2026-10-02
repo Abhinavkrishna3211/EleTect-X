@@ -120,7 +120,7 @@ logger.info(
 # HOME_TEST_FIRE_MIN_CONFIDENCE/HOME_TEST_FIRE_CONSECUTIVE_POLLS bar for
 # firing (services/config.py). ELETECT_HOME_TEST_MODE is independent of the
 # MCU's own HOME_TEST_MODE #define (device/mcu/src/config.h) - both default
-# off and both must be flipped for tonight's test to run as designed.
+# off and both must be flipped for a home test to run as designed.
 if config.HOME_TEST_MODE:
     logger.warning(
         "*** HOME_TEST_MODE=1 *** backyard test build: always-on capture, "
@@ -145,7 +145,7 @@ def debug_stream_raw_seismic_sample(volts: float) -> None:
     never waits on one.
 
     Under HOME_TEST_MODE, this appends to HOME_TEST_SEISMIC_CSV_PATH instead
-    of printing - the geophone is unwired tonight so this produces nothing,
+    of printing - the geophone is unwired in that mode so this produces nothing,
     but the receive-side plumbing is correct and ready for whenever it is
     wired again. Field/bench behaviour (the bare 6-decimal print
     live_seismic_plot.py parses) is unchanged when the flag is off.
@@ -264,7 +264,7 @@ def _is_night(frames: list[Frame]) -> bool | None:
 # SharedFrameCamera reading from that session's buffer instead of a second
 # handle on /dev/video0. This is what makes _on_footfall_event below safe to
 # leave registered under HOME_TEST_MODE even though the geophone is unwired
-# tonight - if it ever did fire, it would share the session's camera rather
+# there - if it ever did fire, it would share the session's camera rather
 # than race it for the device. EVENT_VIDEO_ENABLED is not combined with
 # HOME_TEST_MODE - the ring/encounter pipeline is this mode's own equivalent
 # evidence path.
@@ -273,7 +273,7 @@ if config.HOME_TEST_MODE:
         logger.warning(
             "HOME_TEST_MODE and EVENT_VIDEO_ENABLED are both set - ignoring "
             "EVENT_VIDEO_ENABLED. HOME_TEST_MODE's own ring/encounter capture "
-            "(services/home_test.py) owns the camera tonight."
+            "(services/home_test.py) owns the camera in this mode."
         )
     _event_video: EventVideoRecorder | None = None
 elif config.EVENT_VIDEO_ENABLED:

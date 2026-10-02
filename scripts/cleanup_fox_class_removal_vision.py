@@ -13,8 +13,8 @@ single-source drop, so this deletes by label rather than by a frozen source's fi
 set.
 
 Why Fox is being dropped from the live project (not from the codebase's research
-record): see ml/vision/README.md's 14 Sept entry. Short version - the user asked
-Edge Impulse Studio's live project to reflect the actual champion (Boar/Elephant/
+record): see ml/vision/README.md's 14 Sept entry. Short version - the live Edge
+Impulse project has to reflect the actual champion (Boar/Elephant/
 Background, deployed as etx_cpu_final_0830.eim), and build_impulse() in
 edge_impulse_train_vision.py deletes and rebuilds the impulse on every run, so as
 long as Fox samples were live any retrain would still produce a 3-class model. The

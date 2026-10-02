@@ -599,7 +599,7 @@ TIER_3_LED_PATTERN_IDS = (5, 6)
 # ecological argument (tiger/leopard are real Sus scrofa predators on the
 # Indian subcontinent - multiple India/Nepal tiger-reserve diet studies put
 # wild boar at 7-16% of tiger biomass intake) and partly on a second, more
-# direct study found and read this session: Ani (2025) 15(7):1017 tested
+# direct study: Ani (2025) 15(7):1017 tested
 # actual Amur tiger call playback against actual wild boar in Hunchun,
 # China, and measured it working (~26.5 days before efficacy declined,
 # combined with boar distress calls) - the ecological argument now has a

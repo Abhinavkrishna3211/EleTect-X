@@ -15,9 +15,9 @@
 // device/mpu/bridge/schema.md's MPU->MCU handlers (drive_horn, drive_led,
 // pulse_ir, get_system_state, send_lora_event) have real adapters in
 // bridge_handlers.cpp. drive_led and pulse_ir were registered in earlier
-// hardware sessions; drive_horn joined them this session (HOME_TEST_MODE
-// plan prerequisite 2). send_lora_event is registered with the LoRa build
-// (LORA_ENABLED) and is that bring-up session's one new function (ADR
+// hardware bring-ups; drive_horn joined them with the HOME_TEST_MODE work
+// (plan prerequisite 2). send_lora_event is registered with the LoRa build
+// (LORA_ENABLED) and is that bring-up's one new function (ADR
 // 0029/0030). get_system_state stays deliberately commented out - see
 // docs/KNOWN_GAPS.md for why that is deferred to a hardware session, one
 // function at a time. Bridge.begin()/Bridge.update()
@@ -81,7 +81,7 @@ void setup() {
   // uncommenting the next. Never uncomment more than one at a time, and
   // never as part of a routine sync-to-board.sh push.
   //
-  // drive_horn registered this session (HOME_TEST_MODE plan prerequisite 2),
+  // drive_horn registered with the HOME_TEST_MODE work (plan prerequisite 2),
   // source-level only - this line was uncommented and pushed to the board's
   // on-disk sketch/ tree, but the flash-and-verify step this discipline
   // requires (arduino-app-cli app restart, then confirm drive_led/pulse_ir

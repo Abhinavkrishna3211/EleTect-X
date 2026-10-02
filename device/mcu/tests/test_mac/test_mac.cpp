@@ -204,7 +204,7 @@ static void test_happy_path_full_join_sequence(void) {
 // NOT be fooled by a bare "OK" the way the original code was - each of
 // their real E5 responses never contains the substring "OK" at all, so a
 // gate that (incorrectly) checked rx_contains("OK") would hang forever
-// against real hardware, exactly the bug this session's fix corrected.
+// against real hardware, exactly the bug the fix below this corrected.
 
 static void test_setting_mode_does_not_advance_on_bare_ok(void) {
   uint32_t t = 1000;

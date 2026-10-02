@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Bench-only capture wrapper around the board's socat/nc console bridge.
 
-Connects to the board over `ssh <host> "nc 127.0.0.1 7500"` (same method
-used for tonight's cadence-gate check - the socat daemon on the board
+Connects to the board over `ssh <host> "nc 127.0.0.1 7500"` (the same method
+the cadence-gate check uses - the socat daemon on the board
 bridges /dev/ttyGS0 to tcp:127.0.0.1:7500, since arduino-app-cli monitor
 cannot read this board's live serial console, see docs/KNOWN_GAPS.md).
 
