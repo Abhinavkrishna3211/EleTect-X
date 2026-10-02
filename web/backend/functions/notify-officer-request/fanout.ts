@@ -21,7 +21,15 @@ export async function sendEmail(to: string, subject: string, body: string): Prom
         Authorization: `Bearer ${Deno.env.get("RESEND_API_KEY")!}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ from, to, subject, text: body, html: `<p>${body}</p>` }),
+      // Text only, deliberately. Every field of this body comes from
+      // raw_user_meta_data at public signup, so an applicant could close the <p>
+      // and write their own markup - a forged "APPROVED, no action needed" line
+      // and a working link, delivered to every admin from the project's own
+      // verified sending domain. Re-reading the row (which index.ts does) proves
+      // somebody really signed up with these values; it does not make them safe
+      // to interpolate. The html part was also wrapping a body full of \n in one
+      // <p>, which collapsed it to a single run-on line.
+      body: JSON.stringify({ from, to, subject, text: body }),
     });
     return r.ok;
   } catch (_e) {
@@ -32,6 +40,29 @@ export async function sendEmail(to: string, subject: string, body: string): Prom
 // Email every admin in the list. A getUserById lookup that throws skips only that admin — it
 // must not 500 the caller and drop everyone later in the batch (same guard as send-alert's
 // fanOut, WEBAPP_COMPLETION_PLAN.md's Day 3 fix).
+// admin_set_deactivated() blocks sign-in by writing auth.users.banned_until, and
+// deliberately leaves profiles.role alone - the person is still an officer, they
+// just cannot get in. Every recipient query here selects on role, so without this
+// check a deactivated account keeps receiving node names, places, species and
+// confidences at a personal mailbox indefinitely; for a deactivated admin that is
+// every officer applicant's name, department, official email and phone. Revoking
+// access covered the front door and not the mail.
+//
+// Checked here rather than in the recipient query because the admin API lookup
+// below already has the user row in hand - auth.users is not reachable through
+// PostgREST, so the alternative is a second round-trip per person for data we
+// were handed anyway.
+//
+// 'infinity' is what admin_set_deactivated writes, and Date.parse cannot read it,
+// so an unparseable value counts as banned. Failing closed here costs a
+// deactivated account one missed email; failing open leaks to someone whose
+// access was deliberately revoked.
+function isDeactivated(bannedUntil: string | null | undefined): boolean {
+  if (!bannedUntil) return false;
+  const until = Date.parse(bannedUntil);
+  return Number.isNaN(until) || until > Date.now();
+}
+
 export async function fanOut(
   db: SupabaseClient,
   admins: { id: string }[],
@@ -42,6 +73,7 @@ export async function fanOut(
     let email: string | undefined;
     try {
       const { data: u } = await db.auth.admin.getUserById(a.id);
+      if (isDeactivated(u?.user?.banned_until)) continue;
       email = u?.user?.email;
     } catch (_e) {
       continue;   // lookup failed for this admin only; don't 500 and drop the rest of the batch

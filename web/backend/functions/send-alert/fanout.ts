@@ -84,8 +84,14 @@ const emailChannel: Channel = {
         },
         body: JSON.stringify({
           from, to: to.email, subject: msg.subject,
+          // Text only, deliberately. `place` comes from nodes.name, which
+          // touchNode() will set from an MQTT-supplied deviceName for any node
+          // id it has not seen, so it is not ours to trust - and interpolating
+          // it into an html part sent it unescaped to an officer's mailbox. The
+          // html part also wrapped a multi-line body in one <p>, which collapses
+          // every newline, so the part that carried the risk was also the part
+          // that rendered worse than the text beside it.
           text: msg.body,
-          html: `<p>${msg.body}</p>`,
         }),
       });
       return r.ok;
@@ -201,6 +207,29 @@ export async function deliver(
 // Fan out one message to a deduped recipient list. Each recipient's email is resolved from
 // auth.users here (profiles stores no email). A lookup that throws skips only that recipient —
 // it must not 500 the caller and drop everyone later in the batch.
+// admin_set_deactivated() blocks sign-in by writing auth.users.banned_until, and
+// deliberately leaves profiles.role alone - the person is still an officer, they
+// just cannot get in. Every recipient query here selects on role, so without this
+// check a deactivated account keeps receiving node names, places, species and
+// confidences at a personal mailbox indefinitely; for a deactivated admin that is
+// every officer applicant's name, department, official email and phone. Revoking
+// access covered the front door and not the mail.
+//
+// Checked here rather than in the recipient query because the admin API lookup
+// below already has the user row in hand - auth.users is not reachable through
+// PostgREST, so the alternative is a second round-trip per person for data we
+// were handed anyway.
+//
+// 'infinity' is what admin_set_deactivated writes, and Date.parse cannot read it,
+// so an unparseable value counts as banned. Failing closed here costs a
+// deactivated account one missed email; failing open leaks to someone whose
+// access was deliberately revoked.
+function isDeactivated(bannedUntil: string | null | undefined): boolean {
+  if (!bannedUntil) return false;
+  const until = Date.parse(bannedUntil);
+  return Number.isNaN(until) || until > Date.now();
+}
+
 export async function fanOut(
   db: SupabaseClient,
   people: { id: string; phone: string | null }[],
@@ -214,6 +243,7 @@ export async function fanOut(
     let email: string | null = null;
     try {
       const { data: u } = await db.auth.admin.getUserById(p.id);
+      if (isDeactivated(u?.user?.banned_until)) continue;
       email = u?.user?.email ?? null;
     } catch (_e) {
       continue;   // lookup failed for this recipient only; don't 500 and drop the rest of the batch
