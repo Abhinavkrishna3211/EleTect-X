@@ -249,6 +249,11 @@ grant update (full_name, phone, lat, lng, alerts_enabled) on profiles to authent
 -- than deletes (admin_set_deactivated).
 revoke insert, delete on profiles from authenticated, anon;
 
+-- The same default grant also hands over TRUNCATE, REFERENCES and TRIGGER on
+-- every table. Those are revoked schema-wide at the foot of this file, after
+-- the last create table - `on all tables in schema public` only reaches tables
+-- that already exist when it runs.
+
 -- Operational tables: staff read; admin full write. (Public gets aggregates via a view below.)
 create policy n_staff_read on nodes for select using (is_staff());
 create policy n_admin_all  on nodes for all using (is_admin()) with check (is_admin());
@@ -856,3 +861,23 @@ revoke execute on function admin_set_deactivated(uuid, boolean) from public, ano
 grant execute on function admin_list_users() to authenticated;
 grant execute on function admin_set_role(uuid, user_role) to authenticated;
 grant execute on function admin_set_deactivated(uuid, boolean) to authenticated;
+
+-- Schema-wide: take back the three privileges Supabase's default grant hands
+-- out that PostgREST never speaks (migration 0011). `grant all on tables to
+-- anon, authenticated` means the four DML verbs *plus* TRUNCATE, REFERENCES
+-- and TRIGGER - the same default that forced the two `profiles` revokes
+-- earlier in this file. TRUNCATE is the one that matters: every policy here
+-- filters rows, and TRUNCATE is a table-level operation that skips the policy
+-- machinery entirely, so leaving it granted puts one privilege - the most
+-- destructive one - outside the authorisation model the rest of this schema is
+-- built on. Nothing can reach it through PostgREST today; this removes it
+-- before something can. service_role keeps everything, because web/ingest and
+-- the edge functions authenticate as that role and bypass RLS by design.
+--
+-- This sits at the foot of the file on purpose: `on all tables in schema
+-- public` only reaches tables that exist when it runs, so it has to follow the
+-- last create table. The second statement covers tables added later.
+revoke truncate, references, trigger on all tables in schema public
+  from anon, authenticated;
+alter default privileges in schema public
+  revoke truncate, references, trigger on tables from anon, authenticated;

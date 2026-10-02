@@ -1,0 +1,73 @@
+-- 0011 — TRUNCATE is the one write privilege RLS does not constrain, and both
+-- client roles still hold it on every table.
+--
+-- Start with what this is NOT. There is no reachable exploit today. PostgREST
+-- issues SELECT, INSERT, UPDATE, DELETE and function calls; it has no TRUNCATE
+-- verb and no arbitrary-SQL endpoint, so nothing a client can send reaches this
+-- privilege. This migration is not closing an open door. It is removing a
+-- privilege that should never have been granted, before some later feature
+-- supplies the door.
+--
+-- Why it is worth a migration anyway: every other write on these tables is
+-- policy-checked. `p_self_update` decides which profile row you may touch,
+-- `n_admin_all` decides who may write a node, and 0008's column grant decides
+-- which fields. TRUNCATE answers to none of them. Row-level security filters
+-- rows; TRUNCATE is a table-level operation and skips the policy machinery
+-- entirely. So the authorisation model this schema is built on has exactly one
+-- privilege sitting outside it, and it is the most destructive one available.
+--
+-- Where it came from: nowhere in this repo. Supabase's project bootstrap runs
+--
+--   alter default privileges in schema public grant all on tables
+--     to anon, authenticated, service_role;
+--
+-- and `all` is not the four verbs PostgREST speaks — it is those plus TRUNCATE,
+-- REFERENCES and TRIGGER. That grant is why 0007 and 0008 had to revoke INSERT,
+-- UPDATE and DELETE from `profiles` at all; the same default handed over these
+-- three at the same moment and no migration has mentioned them since. Because
+-- the grant is implicit, it never appeared in schema.sql, which is why reading
+-- that file has not shown it. Only the catalog does.
+--
+-- Scope is all three and every table, not TRUNCATE on profiles, for two
+-- reasons. TRIGGER is arguably worse than TRUNCATE if a DDL path ever opens —
+-- it lets a role attach a trigger to a table it cannot otherwise write, and the
+-- trigger body can call an existing SECURITY DEFINER function. REFERENCES is
+-- harmless by comparison and is swept up only because leaving one unused
+-- privilege behind invites the next reader to assume it was deliberate.
+-- Narrowing to `profiles` would leave `events`, `alerts` and `nodes` holding
+-- exactly the privilege this migration exists to remove.
+--
+-- service_role deliberately keeps everything. web/ingest and the edge functions
+-- authenticate as that role and bypass RLS by design; constraining it here
+-- would be security theatre that breaks the uplink path.
+
+revoke truncate, references, trigger on all tables in schema public
+  from anon, authenticated;
+
+-- The statement above only reaches tables that exist right now. Without this
+-- second one the next `create table` in the public schema silently re-grants
+-- all three and the gap reopens with nobody watching.
+--
+-- Honest bound: ALTER DEFAULT PRIVILEGES only rewrites defaults owned by the
+-- role running it. Migrations here are applied through the dashboard SQL
+-- editor, which connects as `postgres`, and tables created that way are owned
+-- by `postgres`, so this covers the path this project actually uses. A table
+-- created by `supabase_admin` through some other tool would still pick the
+-- three privileges back up. Re-run the verification query below after any
+-- schema change made outside migrations/.
+alter default privileges in schema public
+  revoke truncate, references, trigger on tables from anon, authenticated;
+
+-- Verification — expects zero rows. information_schema.table_privileges omits
+-- TRUNCATE/REFERENCES/TRIGGER for some server versions, so this reads the
+-- aclitem array on the catalog directly rather than trusting the view.
+--
+--   select c.relname, a.grantee, a.privilege_type
+--     from pg_class c
+--     join pg_namespace n on n.oid = c.relnamespace
+--     cross join lateral aclexplode(c.relacl) a
+--    where n.nspname = 'public'
+--      and c.relkind = 'r'
+--      and a.grantee::regrole::text in ('anon', 'authenticated')
+--      and a.privilege_type in ('TRUNCATE', 'REFERENCES', 'TRIGGER')
+--    order by 1, 2, 3;
