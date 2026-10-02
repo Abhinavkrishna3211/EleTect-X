@@ -150,7 +150,12 @@ class HttpVisionDetector:
     (module docstring), not something this class starts or stops.
     """
 
-    def __init__(self, base_url: str, timeout_s: float) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        timeout_s: float,
+        min_confidence_by_label: dict[str, float] | None = None,
+    ) -> None:
         """Store the endpoint and per-call timeout; performs no I/O itself.
 
         Args:
@@ -164,9 +169,18 @@ class HttpVisionDetector:
                 services/config.py's own BRIDGE_CALL_TIMEOUT_S: this call
                 sits between a seismic trigger and the alert decision, so a
                 hung detector must not hang the whole event.
+            min_confidence_by_label: Optional per-class score floor applied
+                on top of the runner's own single min_score. A box whose
+                label is listed is dropped below its floor; unlisted labels
+                pass through unchanged, so an empty/None mapping is exactly
+                the pre-existing behaviour. The .eim bakes in one threshold
+                for every class; this is how a model tuned with different
+                cut-offs per class (services/config.py's
+                VISION_MIN_CONFIDENCE_BY_LABEL) is deployed without a rebuild.
         """
         self._base_url = base_url.rstrip("/")
         self._timeout_s = timeout_s
+        self._min_confidence_by_label = dict(min_confidence_by_label or {})
 
     def __call__(self, images: list[Any]) -> list[list[Detection]]:
         """Implements VisionDetectFn - see that Protocol's own docstring."""
@@ -225,7 +239,7 @@ class HttpVisionDetector:
             raise DetectionError(f"unexpected vision inference response shape: {exc}") from exc
 
         try:
-            return [
+            detections = [
                 Detection(
                     label=box["label"],
                     confidence=float(box["value"]),
@@ -238,3 +252,8 @@ class HttpVisionDetector:
             ]
         except (KeyError, TypeError, ValueError) as exc:
             raise DetectionError(f"unexpected bounding_boxes entry shape: {exc}") from exc
+        return [
+            d
+            for d in detections
+            if d.confidence >= self._min_confidence_by_label.get(d.label, 0.0)
+        ]
