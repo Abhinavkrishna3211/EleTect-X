@@ -60,6 +60,7 @@ Arduino UNO Q board, split by responsibility rather than by chip:
 | [`hardware/`](hardware/) | PCB (KiCad), enclosure CAD, wiring, bill of materials |
 | [`web/backend/`](web/backend/) | Supabase schema, row-level security, edge functions |
 | [`web/ingest/`](web/ingest/) | ChirpStack MQTT → Supabase bridge |
+| [`web/chirpstack/`](web/chirpstack/) | LoRaWAN network server stack (Docker Compose) — gateway to database |
 | [`web/frontend/`](web/frontend/) | Ranger/resident dashboard + public site (React PWA) |
 | [`docs/decisions/`](docs/decisions/) | Architecture decision records — the "why" behind every non-trivial call |
 | [`docs/research/`](docs/research/) | Background research (behavioral science, platform, competitors) |
@@ -104,6 +105,8 @@ prerequisites.
 | `ml/` | see [`ml/README.md`](ml/README.md) | Training pipelines, run on a PC |
 | `web/frontend` | `npm run dev` / `npm run build` | React PWA — dashboard + public site |
 | `web/backend` | see [`web/backend/README.md`](web/backend/README.md) | Supabase schema + edge functions |
+| `web/ingest` | `npm test` / `npm run build` | MQTT → Supabase bridge ([details](web/ingest/README.md)) |
+| `web/chirpstack` | `docker compose up -d` | LoRaWAN network server; needs Docker ([details](web/chirpstack/README.md)) |
 
 ### Understand a design decision
 
@@ -113,8 +116,22 @@ were made. Start with `0001` for the core sensing/vision/fusion architecture.
 
 ## Status
 
-Build complete — firmware, cognition layers, and the web app are done. The project is now in
-field validation and testing.
+**Field validation.** The build is complete — reflex firmware, cognition layers, the LoRaWAN path
+and the web app — and a node is running the full detect → confirm → deter loop on real hardware at
+a forest edge. The uplink path is live end to end: node → gateway → ChirpStack → bridge → Supabase
+→ dashboard.
+
+What is still being worked:
+
+- **Detection thresholds**, tuned against recorded field encounters rather than bench data. The
+  confusables that matter are the ones nothing in a dataset prepares you for — an insect on the
+  lens, a wind-moved banana leaf — and the fix for those is calibration, not a bigger model.
+- **Multi-node coordination**, implemented and bench-tested across two boards, but not yet
+  exercised on a real multi-node install.
+- **Deployment hosting** for the network server and bridge, which currently run on a workstation
+  rather than an always-on host.
+
+The dashboard runs against the live database ahead of handover to the forest division.
 
 ## License
 

@@ -3,8 +3,9 @@
 - **Status:** accepted
 - **Date:** 2026-09-30
 - **Amends:** ADR 0002 (what goes over LoRa), ADR 0029 B.3 (when a joined radio takes USART1)
-- **Amended:** 2026-10-02 — see the amendment immediately below, which replaces §A's "no species
-  is guessed" rule and widens §D's priority and audience tables
+- **Amended:** 2026-10-02 — replaces §A's "no species is guessed" rule and widens §D's priority
+  and audience tables; 2026-10-03 — the event frame grows an age field and dedupe stops keying on
+  `seq`. Both amendments are below, newest last.
 
 ## Amendment, 2 Oct 2026 — the frame carries the species the camera saw (not a rewrite of this ADR)
 
@@ -68,6 +69,57 @@ off the audience. Those were the same test while `staff_only` meant "poaching so
 anti-poaching protocol because the class byte was one this build does not know would be a
 fabricated instruction.
 
+## Amendment, 3 Oct 2026 — the frame says how long it waited, and dedupe stops trusting `seq`
+
+Two defects, one shared cause: the server was treating the moment a frame *arrived* as the moment
+the event *happened*, and treating `seq` as if it identified an event.
+
+**1. §A's event frame is 12 bytes, not 10.** Bytes 10–11 are `age_s`, a u16 big-endian count of
+seconds the frame has been waiting, with `0xFFFF` meaning unknown.
+
+The node has no RTC and no synchronised clock, so it cannot report an absolute time — but it does
+not need one. *Elapsed* time needs no synchronisation. The server dates the event at its own
+receive time less `age_s`, which is the only thing that stops a frame delayed by a horn fire, a
+send retry or a join backoff from being recorded as if it had just happened. Before this, a frame
+held for four minutes was indistinguishable from a fresh one.
+
+The field is **stamped at transmit, not at encode**. `uplink_encode_event()` has no clock by
+design — its header promises "no Serial, no radio, no clock" and its known-answer tests depend on
+that — so it writes `UPLINK_AGE_UNKNOWN` and `mac.cpp`'s `start_send()` patches the two bytes in
+via `uplink_set_event_age()`. Stamping at transmit is what makes the number include the queue
+wait, not just the encode-to-send gap.
+
+Decoders accept **both** 10- and 12-byte event frames, and a 10-byte frame decodes with a null
+age. This is not politeness towards old firmware in the abstract: a deployed node runs pre-age
+firmware until someone physically reaches it, and rejecting its frames would discard real elephant
+alerts to fix a timestamp.
+
+**2. §B's "a retransmit re-sends the same bytes with the same seq" is narrowed.** It no longer
+re-sends the *same bytes*: age is restamped on every attempt, because the point of the field is
+how long **this copy** waited, and a retry after a 30 s backoff waited 30 s longer than the
+attempt before it.
+
+So frame identity now explicitly **excludes the two age bytes** — `frameIdentityBytes()` in
+`web/ingest/src/payload.ts`, mirrored by the MCU test fixture. The hash identifies the *event*;
+age describes *this transmission*. Without that cut, every retransmission would hash differently
+and arrive as a second elephant.
+
+**3. §B's dedupe no longer keys on `seq`, and the Consequences line saying it does is wrong.**
+`seq` cannot identify a frame across the failures this system actually has: `lora_init()` resets
+it to 0 on every boot, and it is a `uint8_t` that wraps at 256. Brown-out reboots are a documented
+field failure on this hardware, so the first path is not hypothetical. Either one makes a genuinely
+new event collide with an old one and be silently dropped — the dedupe failing *closed*, losing an
+alert, which is the worse direction.
+
+Dedupe now keys on a digest of the identity bytes. `seq` is still assigned at queue time and still
+re-sent unchanged; it is simply no longer load-bearing on its own.
+
+**4. The dedupe window is measured against `created_at`, not `ts`.** Once `ts` is backdated by
+point 1, a window measured on `ts` stops containing the row it is looking for: a frame delayed
+longer than the window lands outside it, the earlier copy is not found, and the duplicate is
+written anyway. `created_at` is insertion time and nothing backdates it. `events` already had the
+column; `health` did not, hence migration 0012.
+
 ## Context
 
 ADR 0002 puts alerts and health on LoRaWAN (Grove LoRa-E5 → SenseCAP gateway, IN865 → ChirpStack →
@@ -83,7 +135,9 @@ decodable without anything configured by hand on the network server.
 Every frame goes out on **FPort 10**, big-endian. Byte 0 is `(format << 4) | type` with format 1;
 byte 1 is a `seq` assigned when the frame is queued and reused on every re-send of that frame.
 
-**Event (type 2, 10 bytes)**
+**Event (type 2, 10 bytes)** — *12 as of the 3 Oct amendment, which appends `age_s` at bytes
+10–11; classes 5–6 and flag 0x08 are appended by the 2 Oct amendment. Both are above. The table
+below is the original and is left as written, per this file's amendment convention.*
 
 | Byte | Field |
 |---|---|
@@ -147,7 +201,10 @@ are never retried on timeout (each call is a separate uplink).
 ## Consequences
 
 - A whole event is 10 bytes, well inside the smallest IN865 data-rate payload.
+  *(12 bytes as of the 3 Oct amendment — still well inside it.)*
 - Dedupe depends on `seq` surviving a re-send, which is why it is assigned at queue time.
+  *(Superseded by the 3 Oct amendment: `seq` resets on boot and wraps at 256, so dedupe keys on a
+  digest of the frame's identity bytes instead.)*
 - Battery is reported as unknown until a battery ADC is fitted; `health.battery_pct` stays null.
 - Changing a byte's meaning needs format 2 and both decoders updated together.
 

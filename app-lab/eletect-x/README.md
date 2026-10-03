@@ -13,7 +13,7 @@ into a real app on your board.
 
 ```text
 app-lab/eletect-x/
-  app.yaml     App Lab manifest (name/description/version)
+  app.yaml     App Lab manifest (name, icon, ports, bricks)
   assets/      Static assets bundled with the app (currently empty)
   README.md    this file
 ```
