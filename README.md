@@ -110,7 +110,7 @@ results they were accepted on, exactly as they run on a node:
 | Model | Project | What it does |
 | --- | --- | --- |
 | Acoustic — `ETX-A` | [studio.edgeimpulse.com/public/1110036/live](https://studio.edgeimpulse.com/public/1110036/live) | PANNs Cnn10 transfer over a custom log-mel DSP block; `ambient` / `chainsaw` / `elephant_call` / `gunshot`, 92.6% over a 605-clip held-out split |
-| Vision — `ETX-V` | [studio.edgeimpulse.com/public/1097972/live](https://studio.edgeimpulse.com/public/1097972/live) | YOLO-Pro object detector — `Elephant` / `Boar` / `Fox` — that confirms a reflex-layer trigger before any deterrence fires |
+| Vision — `ETX-V` | [studio.edgeimpulse.com/public/1097972/live](https://studio.edgeimpulse.com/public/1097972/live) | YOLO-Pro object detector, 160 px int8 — detects `Elephant`, `Boar` and `Fox`, trained against a fourth `Background` class of negatives; confirms a reflex-layer trigger before any deterrence fires |
 
 The training and evaluation pipelines that produced them, the per-sample dataset manifests, and the
 caveats worth reading before quoting either number are in [`ml/acoustic/`](ml/acoustic/) and

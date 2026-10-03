@@ -1,16 +1,30 @@
-# Three-class object-detection vision model — Elephant + Boar + Background
+# Four-class object-detection vision model — Elephant + Boar + Fox + Background
 
-Edge Impulse project **1097972** (`ETX-V`). This was project 1094260 (`EleTect-X-Vision`) at the
-proof-of-concept stage; the project was recreated once the corpus grew past the original two-class
-FOMO scope (see below). Project ID only is recorded here; the API key is not in the repo and must be
-supplied through `EI_API_KEY` at run time.
+Edge Impulse project **1097972** (`ETX-V`), public at
+<https://studio.edgeimpulse.com/public/1097972/live>. This was project 1094260
+(`EleTect-X-Vision`) at the proof-of-concept stage; the project was recreated once the corpus grew
+past the original two-class FOMO scope (see below). Project ID only is recorded here; the API key is
+not in the repo and must be supplied through `EI_API_KEY` at run time.
 
-**Read the caveats section before quoting either number anywhere.** The deployed champion is a
-**YOLO-Pro (`no_attn_relu`, `medium` sizing)** object detector, not the original FOMO proof-of-concept
-— trained on real, openly-licensed camera-trap and wildlife-photography datasets with real
-annotator-drawn bounding boxes, plus a small amount of the project's own board captures and synthetic
-pseudo-IR augmentation — and it is still trained mostly on daytime colour wildlife photography, while
-the deployment target is a night-IR camera. Both halves of that sentence have to travel together.
+`Elephant`, `Boar` and `Fox` are detection classes the model emits boxes for. `Background` is the
+fourth class in the corpus and carries no boxes at all — 2,631 negative images whose only job is to
+teach the model what *not* to fire on, and whose false-positive rate is the metric every promotion
+decision below turns on.
+
+**The deployed model is Run F — YOLO-Pro `no_attn_relu`, `medium` sizing, 160 px input, int8, with a
+single 0.65 confidence floor.** It replaced the 30 Aug 96 px three-class champion
+(`etx_cpu_final_0830.eim`) on 29 Sept 2026, and it is the first deployed build that emits `Fox` as
+its own label. The dated log below runs to 19–20 Sept and therefore describes the *old* champion as
+deployed. The entry that supersedes it is the last one in the log, **"28–29 Sept — Run F
+promoted"**, and the earlier "Fox is a no-go" conclusions were overtaken by it.
+
+**Read the caveats section before quoting any number anywhere.** This is a
+**YOLO-Pro (`no_attn_relu`, `medium` sizing)** object detector, not the original FOMO
+proof-of-concept — trained on real, openly-licensed camera-trap and wildlife-photography datasets
+with real annotator-drawn bounding boxes, plus a small amount of the project's own board captures and
+synthetic pseudo-IR augmentation — and it is still trained mostly on daytime colour wildlife
+photography, while the deployment target is a night-IR camera. Both halves of that sentence have to
+travel together.
 
 ## Dataset
 
@@ -3346,6 +3360,12 @@ never reached because nothing qualified to be gated.
 
 ## 13 Sept — Fox added as an experimental 4th class: sourcing, first retrain, full sweep, no-go on promotion
 
+> **Outcome reversed 29 Sept 2026.** Fox was promoted and ships. What changed was not the Fox data
+> but the resolution and the hard negatives: at 160 px, trained with the node's own false triggers,
+> Fox recall went from the 0.60s recorded across these four passes to 0.728, and the model cleared
+> every other class as well. The four passes below stand as the record of why 96 px could not carry
+> a fourth class. See the final entry in this log.
+
 Separate from the Boar-gap close-out above: an experimental **Elephant / Boar / Fox / Background**
 4-class branch, motivated by real field footage in which a fox was called "Boar" — a wrong-species
 alarm, not a miss, but the wrong kind of wrong for a deterrent decision. Fox is explicitly
@@ -3571,7 +3591,7 @@ decisively — it is the worst Fox recall of all three passes, continuing a mono
 than showing the "meaningfully better" recall this pass was run to achieve. The deployed checkpoint
 remains the original 3-class champion (`etx_cpu_final_0830.eim`); none of the three Fox checkpoints
 to date is a promotion candidate. No export, no version snapshot — the adoption gate was never
-reached.
+reached. *(True as of this pass; the gate was reached on 29 Sept at 160 px — see the final entry.)*
 
 **Where this leaves the Fox branch.** The straightforward lever (more real Fox data, more real
 night/IR Fox data specifically) has now been tried three times, each time truthfully executed, each
@@ -3890,7 +3910,9 @@ gain is. This is reported plainly rather than rounded away: the honest read is a
 (Elephant recall up, Elephant precision and Background FP down) traded against a large Fox gain,
 not a strictly-better model on every axis. No export, no version snapshot, no deployment — the
 original 3-class champion (`etx_cpu_final_0830.eim`) remains the only deployed artifact; this
-research branch has still not produced a promotable 4-class candidate.
+research branch has still not produced a promotable 4-class candidate. *(It did on 29 Sept, once
+resolution moved to 160 px and the node's own hard negatives entered training — see the final
+entry.)*
 
 **Where this leaves the Fox branch.** Four passes in, the pattern has changed shape: passes 1-3
 showed monotonic Fox recall decline with rising precision and flat-to-declining Elephant recall;
@@ -4005,7 +4027,104 @@ Studio-side candidate, gated on an unverified on-device latency/throughput check
 user can run.** Nothing is exported, no project version is snapshotted as a new champion, and
 `etx_cpu_final_0830.eim` (96×96) remains the only deployed artifact pending that check.
 
+> **Superseded 29 Sept 2026.** The on-device check this entry was gated on was run, at 160 px rather
+> than 128. Run F is deployed and `etx_cpu_final_0830.eim` is retired — see the entry below.
+
 <!-- LIVE_SYNC_PLACEHOLDER -->
+
+## 28–29 Sept — Run F promoted: 160 px, int8-safe, Fox shipped, and a single 0.65 floor chosen on the board
+
+This is the entry that retires the 30 Aug champion. Everything above it describes a node running
+`etx_cpu_final_0830.eim`; from 29 Sept the node runs Run F.
+
+### What was swept
+
+Four axes, all against the same test set and all scored on the **int8** build, because int8 is what
+the board runs:
+
+- **Resolution.** 128 px (Run A) and 160 px (Runs C/E/F/H) and 192 px (Run G) against the champion's
+  96 px. Resolution was the single biggest source of gain, confirming the 19–20 Sept res128 result
+  above and extending it.
+- **Architecture.** `attn_silu` against `no_attn_relu`. The attention variant scored better in
+  float32 and **did not survive int8 quantisation** — the collapse was visible in Studio's own int8
+  metrics, which is why every number here is an int8 number. That finding alone eliminated two runs.
+- **Learning rate.** 0.0005 against the default (Runs E and H).
+- **Hard negatives.** 166 reviewed frames from the node's own camera — the insects, leaves and
+  early-morning light that were actually firing it — entered training for the first time with Run F.
+
+### The comparison that decided it
+
+`Run R` is the champion's own recipe retrained on the current corpus, so the baseline is measured on
+the same test set as the candidates rather than carried over from an older one. Per-class thresholds,
+int8, 1,357 background images:
+
+| | R (champion recipe, 96 px) | **F (160 px)** | H (160 px, lr 5e-4) | G (192 px) |
+|---|---|---|---|---|
+| Boar recall | 0.841 | 0.865 | 0.873 | **0.904** |
+| Elephant recall | 0.885 | 0.901 | 0.909 | **0.915** |
+| Fox recall | 0.605 | **0.728** | 0.710 | 0.630 |
+| Background FP | 10.6% | 6.0% | **5.0%** | 5.6% |
+| Box precision B / E / F | .72 / .76 / .76 | **.84 / .83 / .84** | .83 / .82 / .81 | .78 / .79 / .85 |
+| Relative compute | 1× | 2.8× | 2.8× | 4× |
+
+All three candidates beat the champion recipe on every accuracy axis. On this table alone H is the
+pick. **The board disagreed, which is the whole reason for testing there.**
+
+### What the board changed
+
+- **Latency.** Classification goes from 137–140 ms on the champion to 374 ms on F and H, 533 ms on G,
+  all inside the 2 s per-image budget. A 3-frame watch poll at F takes about 1.25 s, longer than the
+  1.0 s `VISION_WATCH_POLL_INTERVAL_S`, so the poll cadence has to move with the model.
+- **A trap in the export.** Each candidate `.eim` carries `min_score` 0.5 baked in — the last value
+  the threshold sweep wrote before the build. Run it as-is and every box below 0.5 is dropped before
+  any per-class floor can see it. The runner needs `--thresholds 3.min_score=0.05` (block 3 is the
+  object-detection block), and `GET /api/info` should be checked after every deploy.
+- **An empty plantation for 81 minutes.** 378 frames of a banana/taro scene with no animal in it.
+  At the per-class floors chosen offline, F alarmed on 62% of frames and H on 34% — against **zero**
+  false alarms on the offline test set's 340 field frames. The boxes sit on large taro leaves. Low
+  per-class floors do not survive a new backyard. Highest score any model reached on that scene: 0.56.
+- **55 hand-labelled encounter clips** recorded by the node between 23 and 29 Sept — 7 real fox
+  visits, 1 cat, 47 false triggers (early light, a fly on the lens, people). A clip counts as alarmed
+  when at least 2 sampled frames clear the cut-off:
+
+  | Single cut-off | Fox clips caught (of 7) | False-trigger clips alarmed (of 47) |
+  |---|---|---|
+  | Champion @ 0.8 (live at the time) | 0 | 2 |
+  | Champion @ 0.5 | 3 | 13 |
+  | **F @ 0.6 / 0.65 / 0.7** | **7 / 7 / 7** | **0 / 0 / 0** |
+  | H @ 0.6 / 0.65 / 0.7 | 7 / 6 / 6 | 1 / 0 / 0 |
+  | G @ 0.6 / 0.65 / 0.7 / 0.8 | 7 / 7 / 7 / 7 | 4 / 1 / 1 / 1 |
+
+### Decision
+
+**Run F at a single 0.65 floor**, not H at per-class floors. The per-class thresholds were withdrawn
+outright: they were tuned to a test set and did not transfer to a scene the test set never contained.
+F caught every fox, alarmed on no false-trigger clip, and produced the fewest high-scoring single
+frames — one frame at ≥ 0.7 across all 47 false-trigger clips, against five each for H and G.
+
+Deployed artifact: `runF_res160_noattnrelu_int8.eim`, 32,466,064 bytes,
+sha256 `d77f629d…6ff5c10`. The live floor is `HOME_TEST_FIRE_MIN_CONFIDENCE`, set to 0.65 on
+promotion and lowered to 0.60 the same night so a fox visit is not lost to the margin; the same
+replay catches 7/7 at 0.60 as well. See `device/mpu/services/config.py`.
+
+Per-class floors remain *implemented* even though they were not promoted:
+`VISION_MIN_CONFIDENCE_BY_LABEL` in `services/config.py`, applied client-side in
+`perception/detector.py`, empty by default. Covered by `tests/test_detector_thresholds.py`.
+
+### What this result does not establish
+
+- **The margin is thin.** F's worst score on the empty plantation was 0.56 and the live floor is
+  0.60. That is 0.04. Three distinct confusables have since been seen to cross it in the field — an
+  insect on the lens, a wind-moved banana leaf, and dawn twilight. Threshold tuning is not what
+  closes those.
+- **Five of the seven fox clips were uploaded whole to training** when the Fox class was built. Only
+  two are fair tests. F at 0.65 catches both, and the champion has no Fox class at all, so the
+  direction holds — but 7/7 is not seven independent observations. Twenty-six of the false-trigger
+  clips likewise fed the hard-negative set.
+- **False-trigger clips were sampled 4× more sparsely than the live 1 s poll**, so the zero-alarm
+  column is optimistic. Single high-scoring frames do occur; a fly on the lens scored 0.93 on H.
+- **No real boar or elephant footage from this node has been tested**, because none exists yet. Every
+  Boar and Elephant number here is from the offline corpus.
 
 ## Reproducing
 
