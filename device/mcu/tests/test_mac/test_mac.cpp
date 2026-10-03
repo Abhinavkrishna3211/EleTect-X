@@ -49,6 +49,12 @@ static void assert_state(lora_join_state expected, const char *msg) {
 // just that step's gate, without re-deriving the whole preceding chain.
 // Mirrors each state's real AT command/response pairing exactly as mac.cpp
 // documents it (manual sections cited in mac.cpp's own comments).
+//
+// None of the identifiers fed below is real. The EUIs are the obvious
+// 01:23:...:EF counting pattern and the APPKEY is the published AES-128 test
+// vector from FIPS-197 (2b7e1516...), chosen precisely because it is a known
+// public constant - the parser only has to see sixteen well-formed bytes, and
+// a real key must never appear in a test.
 static void drive_to_state(lora_join_state target, uint32_t *t) {
   lora_service(*t);  // kIdle -> kProbing (unconditional, no response needed)
   if (target == lora_join_state::kProbing) return;
