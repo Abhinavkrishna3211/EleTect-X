@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto';
 import { supabase } from './supabase.js';
 import {
   decodeUplink,
   eventAction,
   eventPriority,
+  frameIdentityBytes,
   PayloadError,
   UPLINK_FPORT,
   type UplinkEvent,
@@ -21,6 +23,12 @@ interface ChirpstackUplink {
   data?: string;
   object?: Record<string, unknown>;
   rxInfo?: Array<{ rssi?: number; snr?: number }>;
+  // RFC3339, stamped by ChirpStack when it received the frame. Read in
+  // preference to this process's own clock: with a persistent session the
+  // broker holds uplinks while the bridge is down, so on reconnect a backlog
+  // arrives all at once and Date.now() would file an hour of history as
+  // having happened in the same second.
+  time?: string;
 }
 
 interface Radio {
@@ -30,10 +38,47 @@ interface Radio {
 }
 
 // A frame the node re-sends after its AT exchange was cut short carries the
-// same seq (ADR 0031). seq wraps at 256, so a match only counts inside this
-// window - far longer than the node's retry span, far shorter than 256
-// uplinks at the heartbeat rate.
+// same bytes and the same seq (ADR 0031 B), so a retransmission is identified
+// by hashing the frame rather than by its seq alone.
+//
+// Keying on seq was wrong in two ways that both silently discarded real
+// alerts. lora_init() resets g_seq to 0 on every boot, and this board's
+// brown-out reboots are a documented field failure - so the first events after
+// a reboot reused seq values already seen and were dropped as duplicates. And
+// g_seq is a uint8_t that wraps at 256 independently of any reboot. Dropping a
+// genuine elephant alert is the most expensive thing this bridge can do, so
+// the key is now the frame content, which collides only when the node really
+// did send the same frame twice.
+//
+// The window is anchored on created_at, the row's insertion time, not on ts:
+// ts is now backdated by age_s and by ChirpStack's receive time, and a
+// backdated row would fall outside a window measured from the wall clock.
+// 15 minutes is far longer than the node's own resend span -
+// LORA_UPLINK_MAX_ATTEMPTS 3 at LORA_UPLINK_RETRY_BASE_MS 15 s is under a
+// minute - and short enough that two unrelated events cannot collide.
 const DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
+
+// 64 bits of SHA-256. The population inside one window is a handful of frames
+// from one node, so this is nowhere near a collision; the full digest would
+// just be 48 more bytes in every jsonb row.
+function frameDigest(bytes: Uint8Array): string {
+  return createHash('sha256').update(frameIdentityBytes(bytes)).digest('hex').slice(0, 16);
+}
+
+// When the node says the event actually happened: ChirpStack's receive time,
+// less the transport delay the node reported.
+//
+// Both terms matter and they cover different gaps. age_s covers the node side
+// - a frame that waited out a horn fire, two send retries or a join backoff.
+// ChirpStack's `time` covers the server side - a broker backlog handed over
+// after this bridge reconnects. Without either, every delayed frame was filed
+// at the moment it happened to be written, so a stale alert looked new and the
+// dashboard's ordering was transport latency rather than history.
+function eventTimestamp(msg: ChirpstackUplink, ageS: number | null): string {
+  const received = msg.time ? Date.parse(msg.time) : Number.NaN;
+  const base = Number.isFinite(received) ? received : Date.now();
+  return new Date(base - (ageS ?? 0) * 1000).toISOString();
+}
 
 function num(v: unknown): number | null {
   return typeof v === 'number' ? v : null;
@@ -75,33 +120,39 @@ async function touchNode(devEui: string, deviceName: string | undefined, extra: 
   if (statusErr) throw statusErr;
 }
 
-async function isDuplicate(table: 'events' | 'health', column: string, devEui: string, seq: number) {
+// Rows written before the frame digest existed carry no `frame` key and so
+// never match. A retransmission that straddles the deploy is written twice,
+// once; after one duplicate window has passed there is nothing left to miss.
+async function isDuplicate(table: 'events' | 'health', column: string, devEui: string, frame: string) {
   const since = new Date(Date.now() - DUPLICATE_WINDOW_MS).toISOString();
   const { data, error } = await supabase
     .from(table)
     .select('id')
     .eq('node_id', devEui)
-    .eq(`${column}->>seq`, String(seq))
-    .gte('ts', since)
+    .eq(`${column}->>frame`, frame)
+    .gte('created_at', since)
     .limit(1);
   if (error) throw error;
   return (data ?? []).length > 0;
 }
 
-async function writeEvent(devEui: string, ev: UplinkEvent, radio: Radio) {
-  if (await isDuplicate('events', 'uplink', devEui, ev.seq)) {
-    console.log(`Dropped duplicate event seq=${ev.seq} from ${devEui}`);
+async function writeEvent(devEui: string, ev: UplinkEvent, radio: Radio, frame: string, ts: string) {
+  if (await isDuplicate('events', 'uplink', devEui, frame)) {
+    console.log(`Dropped duplicate event frame=${frame} seq=${ev.seq} from ${devEui}`);
     return;
   }
   const priority = eventPriority(ev);
   const { error } = await supabase.from('events').insert({
     node_id: devEui,
+    ts,
     species: ev.species,
     confidence: ev.confidence,
     action: eventAction(ev),
     priority,
     uplink: {
+      frame,
       seq: ev.seq,
+      age_s: ev.ageS,
       class: ev.eventClass,
       tier: ev.tier,
       flags: ev.flags,
@@ -120,15 +171,17 @@ async function writeEvent(devEui: string, ev: UplinkEvent, radio: Radio) {
   );
 }
 
-async function writeStatus(devEui: string, st: UplinkStatus, radio: Radio) {
-  if (await isDuplicate('health', 'metrics', devEui, st.seq)) {
-    console.log(`Dropped duplicate status seq=${st.seq} from ${devEui}`);
+async function writeStatus(devEui: string, st: UplinkStatus, radio: Radio, frame: string, ts: string) {
+  if (await isDuplicate('health', 'metrics', devEui, frame)) {
+    console.log(`Dropped duplicate status frame=${frame} seq=${st.seq} from ${devEui}`);
     return;
   }
   const { error } = await supabase.from('health').insert({
     node_id: devEui,
+    ts,
     battery_pct: null, // the node reports mV; no pack curve is agreed yet
     metrics: {
+      frame,
       seq: st.seq,
       battery_mv: st.batteryMv,
       uptime_s: st.uptimeS,
@@ -142,9 +195,10 @@ async function writeStatus(devEui: string, st: UplinkStatus, radio: Radio) {
 }
 
 async function handleRawFrame(devEui: string, msg: ChirpstackUplink) {
+  const bytes = Uint8Array.from(Buffer.from(msg.data ?? '', 'base64'));
   let decoded;
   try {
-    decoded = decodeUplink(Uint8Array.from(Buffer.from(msg.data ?? '', 'base64')));
+    decoded = decodeUplink(bytes);
   } catch (err) {
     if (err instanceof PayloadError) {
       console.warn(`Undecodable frame from ${devEui} (fCnt=${msg.fCnt ?? '?'}): ${err.message}`);
@@ -153,8 +207,11 @@ async function handleRawFrame(devEui: string, msg: ChirpstackUplink) {
     throw err;
   }
   const radio = bestRadio(msg);
-  if (decoded.kind === 'event') await writeEvent(devEui, decoded, radio);
-  else await writeStatus(devEui, decoded, radio);
+  const frame = frameDigest(bytes);
+  // A status frame has no age field; its timestamp is the receive time.
+  const ts = eventTimestamp(msg, decoded.kind === 'event' ? decoded.ageS : null);
+  if (decoded.kind === 'event') await writeEvent(devEui, decoded, radio, frame, ts);
+  else await writeStatus(devEui, decoded, radio, frame, ts);
 }
 
 // Pre-decoded JSON in `object` - test devices and test-uplink.json.

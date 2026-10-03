@@ -1,13 +1,20 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { decodeUplink, eventAction, eventPriority, PayloadError, type UplinkEvent } from './payload.js';
+import {
+  decodeUplink,
+  eventAction,
+  eventPriority,
+  frameIdentityBytes,
+  PayloadError,
+  type UplinkEvent,
+} from './payload.js';
 
 const hex = (s: string) => Uint8Array.from(Buffer.from(s.replace(/\s+/g, ''), 'hex'));
 
 // Same vectors as device/mcu/tests/test_uplink/test_uplink.cpp.
 test('event known answer', () => {
-  const ev = decodeUplink(hex('12 05 01 57 02 03 01 02 03 04'));
+  const ev = decodeUplink(hex('12 05 01 57 02 03 01 02 03 04 FF FF'));
   assert.deepEqual(ev, {
     kind: 'event',
     seq: 5,
@@ -21,12 +28,13 @@ test('event known answer', () => {
     safeMode: false,
     noRetreat: false,
     captureRef: 0x01020304,
+    ageS: null,
   });
 });
 
 // Same vector as test_uplink.cpp's test_no_retreat_event_known_answer.
 test('no-retreat event known answer', () => {
-  const ev = decodeUplink(hex('12 07 06 32 03 0B 00 00 00 00'));
+  const ev = decodeUplink(hex('12 07 06 32 03 0B 00 00 00 00 FF FF'));
   assert.deepEqual(ev, {
     kind: 'event',
     seq: 7,
@@ -40,7 +48,43 @@ test('no-retreat event known answer', () => {
     safeMode: false,
     noRetreat: true,
     captureRef: 0,
+    ageS: null,
   });
+});
+
+// The field reports how long the frame waited, so the server can date the
+// event rather than the delivery.
+test('a stamped age decodes to seconds', () => {
+  // 0x0E10 = 3600: the node held this frame for an hour.
+  const ev = decodeUplink(hex('12 05 01 57 02 03 01 02 03 04 0E 10')) as UplinkEvent;
+  assert.equal(ev.ageS, 3600);
+  // Zero is a real answer - sent immediately - and must not read as unknown.
+  const fresh = decodeUplink(hex('12 05 01 57 02 03 01 02 03 04 00 00')) as UplinkEvent;
+  assert.equal(fresh.ageS, 0);
+});
+
+// The field node keeps running pre-age firmware until someone flashes it.
+// Rejecting its frames would lose real alerts to fix a timestamp.
+test('a pre-age 10-byte event still decodes, with no age', () => {
+  const ev = decodeUplink(hex('12 05 01 57 02 03 01 02 03 04')) as UplinkEvent;
+  assert.equal(ev.ageS, null);
+  assert.equal(ev.species, 'elephant');
+  assert.equal(ev.captureRef, 0x01020304);
+});
+
+// The reason frameIdentityBytes exists. The node restamps age on every send
+// attempt, so hashing the whole frame would make each retransmission look
+// like a new elephant.
+test('frame identity ignores the age field', () => {
+  const first = hex('12 05 01 57 02 03 01 02 03 04 00 05');
+  const resent = hex('12 05 01 57 02 03 01 02 03 04 00 23');
+  assert.deepEqual(frameIdentityBytes(first), frameIdentityBytes(resent));
+  // ...but a genuinely different event still differs. Same age, different seq.
+  const other = hex('12 06 01 57 02 03 01 02 03 04 00 05');
+  assert.notDeepEqual(frameIdentityBytes(first), frameIdentityBytes(other));
+  // A status frame has no age field, so it is hashed whole.
+  const status = hex('11 C8 03 0E 80 00 01 51 80');
+  assert.deepEqual(frameIdentityBytes(status), status);
 });
 
 test('the appended classes decode to their own species', () => {
@@ -82,6 +126,11 @@ test('malformed frames are rejected', () => {
   assert.throws(() => decodeUplink(hex('12')), PayloadError);
   assert.throws(() => decodeUplink(hex('22 00 01 57 02 03 01 02 03 04')), PayloadError, 'format 2');
   assert.throws(() => decodeUplink(hex('12 05 01 57 02 03 01 02 03')), PayloadError, 'short event');
+  assert.throws(
+    () => decodeUplink(hex('12 05 01 57 02 03 01 02 03 04 FF')),
+    PayloadError,
+    'event between the two legal lengths',
+  );
   assert.throws(() => decodeUplink(hex('13 05 01')), PayloadError, 'unknown type');
 });
 

@@ -12,8 +12,20 @@ export const UPLINK_FORMAT_VERSION = 1;
 
 const TYPE_STATUS = 1;
 const TYPE_EVENT = 2;
-const EVENT_LEN = 10;
+// The event frame grew from 10 to 12 bytes when age_s was appended. Both
+// lengths decode, on purpose: the field node keeps running pre-age firmware
+// until someone flashes it, and refusing its events would be a worse defect
+// than the timestamp skew age_s exists to fix.
+const EVENT_LEN = 12;
+const EVENT_LEN_NO_AGE = 10;
 const STATUS_LEN = 9;
+
+// Seconds between the node finishing its decision and putting this copy of
+// the frame on the air - the transport delay, written by the MCU at transmit
+// (device/mcu/src/mac.cpp) rather than at encode, so a frame that waited out
+// a horn fire, a send retry or a join backoff reports the wait it actually
+// had. 0xFFFF means the node could not say.
+const AGE_UNKNOWN = 0xffff;
 
 export const EVENT_FLAG_VISION_CONFIRMED = 0x01;
 export const EVENT_FLAG_DETERRENT_FIRED = 0x02;
@@ -61,6 +73,10 @@ export interface UplinkEvent {
   safeMode: boolean;
   noRetreat: boolean;
   captureRef: number;
+  // null from a frame with no age field, not "zero delay" - the caller has to
+  // decide what to do about not knowing, and silently calling it fresh is the
+  // bug this field was added to remove.
+  ageS: number | null;
 }
 
 export interface UplinkStatus {
@@ -88,7 +104,10 @@ export function decodeUplink(bytes: Uint8Array): DecodedUplink {
   const seq = bytes[1];
 
   if (type === TYPE_EVENT) {
-    if (bytes.length !== EVENT_LEN) throw new PayloadError(`event frame is ${bytes.length} bytes`);
+    if (bytes.length !== EVENT_LEN && bytes.length !== EVENT_LEN_NO_AGE) {
+      throw new PayloadError(`event frame is ${bytes.length} bytes`);
+    }
+    const ageRaw = bytes.length === EVENT_LEN ? view.getUint16(10) : AGE_UNKNOWN;
     const eventClass = bytes[2];
     const flags = bytes[5];
     return {
@@ -106,6 +125,7 @@ export function decodeUplink(bytes: Uint8Array): DecodedUplink {
       safeMode: (flags & EVENT_FLAG_SAFE_MODE) !== 0,
       noRetreat: (flags & EVENT_FLAG_NO_RETREAT) !== 0,
       captureRef: view.getUint32(6),
+      ageS: ageRaw === AGE_UNKNOWN ? null : ageRaw,
     };
   }
 
@@ -198,4 +218,22 @@ export function eventAction(ev: UplinkEvent): string | null {
   if (ev.safeMode) parts.push('dry run');
   else if (!ev.deterrentFired) parts.push('not fired');
   return parts.join(', ');
+}
+
+// The bytes that identify *which event* a frame reports, as opposed to which
+// transmission of it this is. Used to drop the node's own retransmissions.
+//
+// age_s is excluded deliberately, and it is the whole reason this function
+// exists rather than hashing the frame whole. ADR 0031 B promises a re-send
+// carries the same bytes with the same seq, and the dedupe depends on that
+// promise - but age_s is restamped on every attempt, because the point of it
+// is to report this copy's own delay. Hashing it in would make every
+// retransmission look like a new event, which is the failure the dedupe is
+// there to prevent.
+export function frameIdentityBytes(bytes: Uint8Array): Uint8Array {
+  const type = bytes[0] & 0x0f;
+  if (type === TYPE_EVENT && bytes.length === EVENT_LEN) {
+    return bytes.subarray(0, EVENT_LEN_NO_AGE);
+  }
+  return bytes;
 }
