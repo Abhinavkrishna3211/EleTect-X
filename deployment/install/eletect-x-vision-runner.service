@@ -5,7 +5,19 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/home/arduino
-ExecStart=/usr/local/bin/edge-impulse-linux-runner --model-file /home/arduino/etx_cpu_final_0830.eim --run-http-server 1337
+# Model path deliberately points into the app tree, not /home/arduino. That is
+# the copy scripts/sync-to-board.sh keeps current, so promoting a new
+# checkpoint is one rsync and not "remember to also replace the host copy" —
+# which is how this unit spent four weeks still loading the retired 30 Aug
+# 96x96 champion after Run F was deployed by hand on 29 Sept.
+#
+# --thresholds is not optional. Every .eim Edge Impulse exports bakes in the
+# last min_score the threshold sweep wrote, which for these builds is 0.5;
+# left alone, the runner drops every box under 0.5 before the fusion layer's
+# own confidence floor can ever see it, and the floor in config.py silently
+# stops meaning what it says. Block 3 is the object-detection block. Confirm
+# with `curl 127.0.0.1:1337/api/info` after any model change.
+ExecStart=/usr/local/bin/edge-impulse-linux-runner --model-file /home/arduino/ArduinoApps/eletect-x/python/models/vision/runF_res160_noattnrelu_int8.eim --thresholds 3.min_score=0.05 --run-http-server 1337
 Restart=always
 RestartSec=5
 StandardOutput=append:/home/arduino/.local/state/eletect-x-vision-runner/service.log
