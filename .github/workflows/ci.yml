@@ -25,12 +25,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
-      - run: pip install ruff pytest
+      # OpenCV is the one third-party runtime dependency the MPU suite needs:
+      # services/home_test.py imports cv2 at module scope, and two tests patch
+      # cv2.imencode to prove an encode failure is swallowed rather than
+      # raised. The headless wheel is the right one - there is no display on a
+      # runner, and none on the board either.
+      - run: pip install ruff pytest opencv-python-headless
       # device/mpu resolves its own pyproject.toml; ml/ and scripts/ resolve
-      # the root ruff.toml. Both are enforced - no `|| true`. The MPU suite
-      # needs no third-party runtime deps by design (device/mpu/pyproject.toml
-      # explains why arduino.app_utils must never be imported at module scope),
-      # which is what lets it run here on a bare interpreter.
+      # the root ruff.toml. Both are enforced - no `|| true`. The board's own
+      # arduino.app_utils is still never importable here, which is why
+      # device/mpu/pyproject.toml forbids importing it at module scope.
       - run: ruff check device/mpu ml scripts
       - run: pytest -q
         working-directory: device/mpu
@@ -46,6 +50,13 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
       - run: pip install platformio
+      # secrets.h holds this node's own OTAA credentials and is git-ignored,
+      # so a clone does not have one and mac.cpp will not compile without it.
+      # The example carries placeholder keys, which is all the host suites
+      # need - none of them joins a network.
+      - name: provide placeholder LoRaWAN credentials
+        run: cp src/secrets.h.example src/secrets.h
+        working-directory: device/mcu
       - name: pio test (all three native environments)
         run: pio test -e native -e native_dfplayer_only -e native_seismic_capture
         working-directory: device/mcu
@@ -65,7 +76,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # Matches the Dockerfile, which is what actually runs in the field.
+          # supabase-js reaches for a native WebSocket at client construction
+          # and throws on Node 20, so testing on 20 fails on a difference from
+          # production rather than on anything in this code.
+          node-version: "22"
           cache: npm
           cache-dependency-path: web/ingest/package-lock.json
       - run: npm ci
