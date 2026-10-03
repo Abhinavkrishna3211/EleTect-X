@@ -2817,6 +2817,14 @@ which exact bytes are the live checkpoint:
 | `etx_cpu_final_0830.eim` (32,445,248 bytes) | `d7c2f2435badfad9ceb543c09c3edb155c5522d46ae9f84e9d7662bf46558081` | Yes — `/home/arduino/etx_cpu_final_0830.eim` and the app's active `~/ArduinoApps/eletect-x/python/models/vision/etx_cpu_final_0830.eim` both match this hash exactly |
 | `etx_gpu_final_0830.eim` (30,928,096 bytes) | `64f01e67edbab168999ede5b5e30a6ca7f01a10f8569159728c0ef4035c08635` | Yes — `/home/arduino/etx_gpu_final_0830.eim` matches this hash exactly |
 
+> **Superseded 29 Sept 2026.** Both files above are retired. The live checkpoint is
+> `runF_res160_noattnrelu_int8.eim`, 32,466,064 bytes, sha256
+> `d77f629d085cb4ef41786ec8e72dd365ca8138441ebf19d91d06e728d6ff5c10`, at
+> `~/ArduinoApps/eletect-x/python/models/vision/` — which is the path
+> `deployment/install/eletect-x-vision-runner.service` loads and the one
+> `scripts/sync-to-board.sh` keeps current. The 30 Aug pair is kept locally under
+> `device/mpu/models/vision/champion_archive_etx_0830/`, excluded from the board sync.
+
 Both files were additionally copied off-repo (outside the working tree) as a local safety-net
 backup before anything here was touched.
 

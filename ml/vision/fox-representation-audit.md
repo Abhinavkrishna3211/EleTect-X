@@ -1,5 +1,13 @@
 # Fox representation audit and sourcing plan
 
+> **Outcome settled 29 Sept 2026 — Fox ships.** This document's conclusion, that no Fox checkpoint
+> was good enough to promote, held only at 96–128 px. At 160 px with the node's own hard negatives
+> in training, Run F cleared the bar and replaced the three-class champion; `Fox` is now a live
+> detection class on deployed nodes. References below to `etx_cpu_final_0830.eim` as "the
+> currently-deployed champion" describe 13 Sept, not today — the deployed artifact is
+> `runF_res160_noattnrelu_int8.eim`. The sourcing analysis itself stands and is what the
+> retrain drew on; see the last entry in [`README.md`](README.md). Body left unedited below.
+
 **13 Sept 2026. Docs-only — no upload, no retrain, no EI project mutation.** This closes the
 external-sourcing half of the Fox-class addition (own-capture half already built by
 `scripts/build_fox_encounter1_vision.py`, see below). It mirrors `boar-representation-audit.md`'s

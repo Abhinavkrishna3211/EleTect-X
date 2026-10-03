@@ -705,15 +705,23 @@ VISION_WATCH_BASE_S = 8.0
 VISION_WATCH_EXTENDED_S = 45.0
 
 # Interval between watch polls, measured start-of-poll to start-of-poll.
-# The real board classifies at a measured 138ms mean per frame (~5.7 FPS
-# end to end across 123 live frames, 29-30 Aug - ml/vision/README.md), so a
-# VISION_CHECK_FRAME_COUNT=3 poll costs roughly 0.4s of inference and this
-# leaves the rest of each second to the H.264 encoder sharing the same four
-# A53 cores. Polling flat out instead would give about five times the
-# attempts at a target that takes tens of seconds to cross a 95-degree
-# field of view (hardware/cad/enclosure-design-concept.md) - very little
-# extra recall for several times the CPU and the power behind it. INVENTED
-# as a ratio; the 138ms it is sized against is measured.
+# Polling flat out instead would give several times the attempts at a target
+# that takes tens of seconds to cross a 95-degree field of view
+# (hardware/cad/enclosure-design-concept.md) - very little extra recall for
+# several times the CPU and the power behind it. INVENTED as a ratio.
+#
+# The ratio no longer holds, and the number is kept deliberately. It was
+# sized against the 30 Aug 96x96 champion's measured 138ms mean per frame,
+# where a VISION_CHECK_FRAME_COUNT=3 poll cost ~0.4s and the rest of each
+# second went to the H.264 encoder sharing the same four A53 cores. Run F
+# (160px int8, deployed 29 Sept) classifies at a measured 374ms, so a 3-frame
+# poll is ~1.12s and already overruns this interval: the watch loop is
+# inference-bound, polls land every ~1.12s rather than every 1.0s, and the
+# encoder no longer gets the slack this value was chosen to leave it. Raising
+# it to ~1.5s would restore the original intent at the cost of ~25% fewer
+# confirmation attempts per watch window. Not changed here because the trade
+# wants a field decision, not an arithmetic one - see ml/vision/README.md's
+# last entry.
 VISION_WATCH_POLL_INTERVAL_S = 1.0
 
 # Consecutive polls that return no frames at all before the watch gives up
