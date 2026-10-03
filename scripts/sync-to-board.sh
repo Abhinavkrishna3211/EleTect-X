@@ -57,6 +57,18 @@ if [ ! -f "${MCU_DIR}/src/secrets.h" ]; then
   exit 1
 fi
 [ -f "${APP_LAB_DIR}/app.yaml" ] || { echo "   MISSING ${APP_LAB_DIR}/app.yaml — aborting"; exit 1; }
+# The vision checkpoint is gitignored (model binaries are not versioned here),
+# so a fresh clone has an empty models/vision/ and step 7 would rsync that
+# emptiness onto the board — with --delete, that removes the board's only copy
+# and the vision runner dies on its next restart with nothing to load. Checked
+# here, before the first SSH, so a clone that cannot deploy says so up front.
+VISION_MODEL="${MPU_DIR}/models/vision/runF_res160_noattnrelu_int8.eim"
+if [ ! -f "${VISION_MODEL}" ]; then
+  echo "   MISSING $(basename "${VISION_MODEL}") in device/mpu/models/vision/ — aborting"
+  echo "   Export it from Edge Impulse project 1097972 (ml/vision/README.md names the"
+  echo "   exact build and its sha256) or restore it from your own backup, then re-run."
+  exit 1
+fi
 
 echo "==> 2. Reachability check: ${BOARD_USER}@${BOARD_HOST}"
 if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "${BOARD_USER}@${BOARD_HOST}" true 2>/dev/null; then
@@ -135,10 +147,22 @@ echo "==> 7. rsync device/mpu/ -> python/ (one-directional, deletes files remove
 # a one-line change. Never sync this directory in either direction; pull it
 # off the board deliberately, with its own command, when you want it.
 #
+# models/acoustic/ is the same trap as data/, and it was armed: the board's
+# python/models/acoustic/acoustic-panns-20260930-focal.eim is what
+# install-acoustic-brick.sh registers with the App Lab daemon, it is a locally
+# cross-compiled Focal build that has never existed in this repo, and with no
+# exclude here --delete would have removed it on the next sync. The acoustic
+# checkpoint is placed on the board by hand; this script does not manage it in
+# either direction. install-acoustic-brick.sh verifies its sha256.
+#
 # models/vision/ keeps the deployed .eim but not the experiment archive:
 # candidates_*/ and champion_archive_*/ are several hundred MB of models
 # the board will never load, on a device whose root filesystem has a few
-# GB free.
+# GB free. The top level of models/vision/ therefore holds exactly one
+# checkpoint — the live one — and the guard above enforces that, because
+# --delete makes the alternative silent: a missing artifact locally means
+# rsync removes the board's copy and the vision runner dies on next restart
+# with nothing to load.
 rsync -avz --delete ${DRY_RUN} \
   --exclude='tests/' \
   --exclude='bench/' \
@@ -146,6 +170,7 @@ rsync -avz --delete ${DRY_RUN} \
   --exclude='__pycache__/' \
   --exclude='*.pyc' \
   --exclude='data/' \
+  --exclude='models/acoustic/' \
   --exclude='models/vision/candidates_*/' \
   --exclude='models/vision/champion_archive_*/' \
   "${MPU_DIR}/" \
