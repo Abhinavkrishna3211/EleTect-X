@@ -118,7 +118,7 @@ results they were accepted on, exactly as they run on a node:
 | Model | Project | What it does |
 | --- | --- | --- |
 | Acoustic — `ETX-A` | [studio.edgeimpulse.com/public/1110036/live](https://studio.edgeimpulse.com/public/1110036/live) | PANNs Cnn10 transfer over a custom log-mel DSP block; `ambient` / `chainsaw` / `elephant_call` / `gunshot`, 92.6% over a 605-clip held-out split |
-| Vision — `ETX-V` | [studio.edgeimpulse.com/public/1097972/live](https://studio.edgeimpulse.com/public/1097972/live) | YOLO-Pro object detector — Elephant / Boar / Background — that confirms a reflex-layer trigger before any deterrence fires |
+| Vision — `ETX-V` | [studio.edgeimpulse.com/public/1097972/live](https://studio.edgeimpulse.com/public/1097972/live) | YOLO-Pro object detector — `Elephant` / `Boar` / `Fox` — that confirms a reflex-layer trigger before any deterrence fires |
 
 The training and evaluation pipelines that produced them, the per-sample dataset manifests, and the
 caveats worth reading before quoting either number are in [`ml/acoustic/`](ml/acoustic/) and
@@ -134,22 +134,10 @@ for the core sensing/vision/fusion architecture.
 
 ## Status
 
-**Field validation.** The build is complete — reflex firmware, cognition layers, the LoRaWAN path
-and the web app — and a node is running the full detect → confirm → deter loop on real hardware at
-a forest edge. The uplink path is live end to end: node → gateway → ChirpStack → bridge → Supabase
-→ dashboard.
-
-What is still being worked:
-
-- **Detection thresholds**, tuned against recorded field encounters rather than bench data. The
-  confusables that matter are the ones nothing in a dataset prepares you for — an insect on the
-  lens, a wind-moved banana leaf — and the fix for those is calibration, not a bigger model.
-- **Multi-node coordination**, implemented and bench-tested across two boards, but not yet
-  exercised on a real multi-node install.
-- **Deployment hosting** for the network server and bridge, which currently run on a workstation
-  rather than an always-on host.
-
-The dashboard runs against the live database ahead of handover to the forest division.
+**Field testing.** The build is complete — reflex firmware, cognition layers, the LoRaWAN path and
+the web app — and nodes are deployed in two areas, running the full detect → confirm → deter loop on
+real hardware at the forest edge. The uplink path is live end to end: node → gateway → ChirpStack →
+bridge → Supabase → dashboard.
 
 ## License
 
