@@ -1,4 +1,4 @@
-"""Configure and train the three-class object-detection impulse in the EleTect-X-Vision project.
+"""Configure and train the three-class object-detection impulse in the ETX-V project.
 
 Companion to scripts/edge_impulse_upload_vision.py, which must have run first -
 this script only configures and trains against whatever data is already in the

@@ -2,7 +2,7 @@
 
 Pulls openly-licensed, bounding-box-annotated datasets straight from Roboflow's
 export API, converts their COCO annotations into Edge Impulse's bounding_boxes.labels
-ingestion format, and uploads them into the EleTect-X-Vision project:
+ingestion format, and uploads them into the ETX-V project:
 
   - "Elephant": roboflow-universe-projects/elephant-detection-cxnt1, version 2
     ("resized640"), CC BY 4.0. 3,280 images / 4,478 boxes, 640x640.

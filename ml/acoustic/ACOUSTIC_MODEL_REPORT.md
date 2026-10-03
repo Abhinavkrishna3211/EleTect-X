@@ -4,8 +4,9 @@
 elephant_call / gunshot)**
 
 > **Superseded as the production story (30 Sept 2026).** This report is about project **1109511**
-> (`ETX-A`) and its MFE lineage. That lineage was abandoned: it never reached the 80%-per-class
-> bar, and production is now project **1110036** (`ETX-Test`), impulse 19 — the PANNs Cnn10
+> (named `ETX-A` when this was written, `ETX-A-test` since the 2026-10-03 rename) and its MFE
+> lineage. That lineage was abandoned: it never reached the 80%-per-class
+> bar, and production is now project **1110036** (now named `ETX-A`), impulse 19 — the PANNs Cnn10
 > transfer model at 92.6% over the same 605-clip frozen split
 > (`harness/results_eim_impulse19.json`, [ADR 0032](../../docs/decisions/0032-acoustic-production-project-is-1110036.md)).
 > Everything below stands as written and is still the reason the MFE route was dropped — read it

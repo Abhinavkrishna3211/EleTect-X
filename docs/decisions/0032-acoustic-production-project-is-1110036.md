@@ -1,16 +1,22 @@
-# ADR 0032: The acoustic production project is 1110036 (`ETX-Test`), not 1109511 (`ETX-A`)
+# ADR 0032: The acoustic production project is 1110036, not 1109511
 
 - **Status:** accepted
 - **Date:** 2026-09-30
 - **Amends:** ADR 0026 (which project must stay on `float32`), ADR 0030 (which project the int8
   question is asked about)
 
+> **Update 2026-10-03 — the rename recommended below has been done, and it swapped the two names.**
+> In Studio today, **1110036 is `ETX-A`** (production) and **1109511 is `ETX-A-test`** (dormant).
+> Before the rename they were `ETX-Test` and `ETX-A` respectively. Everything written before this
+> date — the body of this ADR included — uses the old names, which now point at the *wrong*
+> projects. Names are annotated inline below. **Act on the project ID, never on the name.**
+
 ## Context
 
 Two Edge Impulse projects carry acoustic work, and the one that was *designated* production is not
 the one that *earned* it.
 
-**1109511 (`ETX-A`)** was created on 2026-09-23 specifically to be production. It was rebuilt from
+**1109511** (`ETX-A` then, `ETX-A-test` now) was created on 2026-09-23 specifically to be production. It was rebuilt from
 scratch from the frozen group-aware split by `scripts/edge_impulse_upload_from_split.py` — the
 whole point being a clean lineage with no leaked split and no experiment residue in its history.
 It was then deliberately kept off the sweep path.
@@ -22,7 +28,8 @@ diagnoses why in full: two Studio API behaviours silently discarded half of what
 configuration asked for. Fixing those recovered real points but not enough of them — the MFE
 front end on this corpus is the ceiling, not the bug.
 
-**1110036 (`ETX-Test`)** was the scratch project for architecture, data, DSP and window sweeps.
+**1110036** (`ETX-Test` then, `ETX-A` now) was the scratch project for architecture, data, DSP and
+window sweeps.
 The PANNs Cnn10 transfer impulse built there — a custom log-mel DSP block feeding a pretrained
 audio backbone — cleared the bar the MFE lineage never reached.
 
@@ -72,16 +79,21 @@ the offline harness uses. The gap is the model, not the partition.
   `selectedModelType` must not be flipped to int8 — is one that now attaches to 1110036, and the
   `metadata.source: edgeimpulse` validator's hard `ei-model-type: float32` requirement makes it
   binding for the registered-model path regardless of what 0030 eventually concludes.
-- **The production project is named `ETX-Test`.** This is a live footgun: the name invites someone
-  to reset, clear or delete it, and overwriting it as a throwaway was previously approved —
-  correctly, at the time. That approval no longer applies. Renaming it in Studio is the
-  cheap fix and should be done.
+- **The production project was named `ETX-Test`** — a live footgun, because the name invited
+  someone to reset, clear or delete it, and overwriting it as a throwaway was previously approved,
+  correctly, at the time. That approval no longer applies. **Renamed in Studio on 2026-10-03:
+  1110036 is now `ETX-A`.** The footgun is closed in Studio but inverted in text — the dormant
+  project took the `ETX-A` name this ADR used for it, so any pre-rename document that says
+  "`ETX-A` is the abandoned MFE project" now names production. Hence the rule at the top: act on
+  the ID.
 - **The custom DSP block makes this project unbuildable for a device target in Studio**, which is
   why the `.eim` on the board was compiled locally from the C++ library export. That constraint
   travels with the decision; it is not new, but it is now production's constraint rather than a
   scratch project's.
 - The outreach and publication drafts kept outside this repo still narrate `ETX-A` as the
-  production project and `ETX-Test` as scratch. They need a pass before anything is published.
+  production project and `ETX-Test` as scratch. Post-rename, the first half of that is accidentally
+  true and the second half names nothing. They still need a pass against the IDs before anything is
+  published.
 
 ## Alternatives considered
 
@@ -91,5 +103,5 @@ already identical, and it costs a full re-upload and rebuild plus a re-verificat
 605-clip partition — with a real chance of introducing the duplicate-sample hazard that
 `edge_impulse_upload_from_split.py` documents (the ingestion API does no content-hash dedup, so an
 interrupted re-send creates duplicates rather than collapsing them). Renaming 1110036 achieves the
-same clarity for free. If the projects are ever consolidated, this is the direction, and this ADR
+same clarity for free, and that is what was done on 2026-10-03. If the projects are ever consolidated, this is the direction, and this ADR
 is the thing to amend.

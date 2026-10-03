@@ -7,21 +7,24 @@
 
 ## Which Edge Impulse project is production
 
-**Production is project 1110036 (`ETX-Test`), impulse 19, deploy v7** — the PANNs Cnn10 transfer
+**Production is project 1110036 (`ETX-A`), impulse 19, deploy v7** — the PANNs Cnn10 transfer
 model. Enterprise account; project ID only is recorded here, the API key is not in the repo and
 must be supplied through `EI_API_KEY` at run time.
 
-The name is misleading and the history is worth stating once, because two projects appear all over
-this file and the older one is still named as production in places that have not caught up.
+The history is worth stating once, because two projects appear all over this file and **their
+names were swapped in Studio on 2026-10-03**: 1110036 was `ETX-Test` and is now `ETX-A`, while
+1109511 was `ETX-A` and is now `ETX-A-test`. Text written before that date — here, in the ADRs and
+in captured console output — still uses the old names. **Go by project ID, never by name.**
 
-**1109511 (`ETX-A`)** was built on 2026-09-23 to *be* production: a clean rebuild from the frozen
+**1109511 (`ETX-A-test`; `ETX-A` before the rename)** was built on 2026-09-23 to *be* production: a clean rebuild from the frozen
 group-aware split, deliberately kept off the experiment path so its history stayed clean. It did
 not reach the bar. Its best MFE configuration missed the 80%-per-class target on every class, and
 `chainsaw` sat in the high single digits to mid-twenties across six separate real training runs on
 the identical post-audit dataset (four MFE, two MFCC) — see the 2026-09-22 and 2026-09-15 Result
 sections below, and `ACOUSTIC_MODEL_REPORT.md` for why.
 
-**1110036 (`ETX-Test`)** started as the scratch project for architecture/data/DSP/window sweeps.
+**1110036 (`ETX-A`; `ETX-Test` before the rename)** started as the scratch project for
+architecture/data/DSP/window sweeps.
 The PANNs Cnn10 transfer impulse built there cleared the bar that 1109511 never did:
 
 | | 1110036 impulse 19 |
@@ -44,9 +47,12 @@ against `ei_upload_ledger.json` at scoring time (605/605). The 92.6% above is me
 same 605 test clips the harness uses, so it is directly comparable to every other number in this
 file. Full numbers: `harness/results_eim_impulse19.json`.
 
-**Naming hazard:** the production project is literally called `ETX-Test`. Do not delete, reset or
-overwrite it on the assumption that the name means what it says. `ETX-A` is the one that is now
-dormant. Renaming 1110036 in Studio would make this safer and is worth doing.
+**Naming hazard — fixed in Studio, but inverted in older text.** The 2026-10-03 rename removed the
+original hazard: production (1110036) is now `ETX-A` and the dormant project (1109511) is
+`ETX-A-test`. The remaining risk runs the other way. Anything written before that date calls
+1110036 `ETX-Test` and 1109511 `ETX-A`, so a reader going by name could look at `ETX-A` in Studio,
+believe the older docs when they call `ETX-A` the abandoned MFE project, and reset production.
+Act on the project ID.
 
 (An earlier project, 1094275, was abandoned before any of this work and is never referenced again
 in this document or in either script.)

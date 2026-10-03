@@ -26,7 +26,7 @@ from perception.microphone import AudioClip
 # small without changing any of the arithmetic under test.
 WINDOW = 1000
 INFO_PAYLOAD = {
-    "project": {"owner": "Edge Impulse Experts", "name": "ETX-Test"},
+    "project": {"owner": "Edge Impulse Experts", "name": "ETX-A"},
     "modelParameters": {
         "labels": ["ambient", "chainsaw", "elephant_call", "gunshot"],
         "frequency": 8000,
