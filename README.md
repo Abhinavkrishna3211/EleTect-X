@@ -34,7 +34,7 @@ Arduino UNO Q board, split by responsibility rather than by chip:
    └────────────────────┘                                └──────────────────────┘
             │                                                        │
             ▼                                                        ▼
-   Horn / LED / IR deterrence                          LoRaWAN uplink → ranger dashboard
+   Horn + LED deterrence · IR illumination             LoRaWAN uplink → ranger dashboard
 ```
 
 - **Reflex (MCU, always-on):** geophone STA/LTA trigger, acoustic gunshot/chainsaw gate, actuator
@@ -43,7 +43,9 @@ Arduino UNO Q board, split by responsibility rather than by chip:
   detector, fuses every available sensor with a weighted log-odds model
   (`L = L_prior + Σ aᵢ wᵢ (ℓᵢ − ℓ₀ᵢ)`, explainable — missing sensors just drop out), then picks a
   deterrence action with a contextual bandit that never repeats the same tone and stops once the
-  animal retreats, instead of blasting a fixed siren until it stops working.
+  animal retreats, instead of blasting a fixed siren until it stops working. The 940 nm IR
+  illuminator is deliberately outside that loop — it lights the scene so the camera can see after
+  dark, and is invisible to the animal.
 - **Coordination:** nodes share detections over LoRa so a herd is steered along a forest-side
   escape lane, not trapped toward a village.
 - **Autonomy:** all control decisions are made on the node. The cloud side is monitoring and
@@ -112,7 +114,9 @@ prerequisites.
 
 Every non-trivial engineering call — why seismic over camera-only, why this horn, why this fusion
 math — is recorded as an ADR in [`docs/decisions/`](docs/decisions/), numbered in the order they
-were made. Start with `0001` for the core sensing/vision/fusion architecture.
+were made. Start with
+[`0001-physical-ai-sensing-and-fusion-architecture.md`](docs/decisions/0001-physical-ai-sensing-and-fusion-architecture.md)
+for the core sensing/vision/fusion architecture.
 
 ## Status
 
