@@ -919,10 +919,15 @@ DATASETS = [
         # contaminated after make_pseudo_ir_vision.py renames it.
         "exclude_broadcast_clips": True,
     },
+    # Fox is a permanent class. It ships in the deployed model (Run F, 29 Sept)
+    # and the field nodes detect and act on it; these entries are load-bearing,
+    # not research. Do not drop them to "simplify" the label set.
+    #
     # 14 Sept 2026 Fox-sourcing re-pass. The prior two Fox passes (13 Sept, see
-    # ml/vision/README.md) were removed the same day by explicit decision
-    # (cleanup_fox_class_removal_vision.py) after the class was pulled from scope;
-    # the removed DATASETS entries were never committed to git (verified via
+    # ml/vision/README.md) were removed the same day by explicit decision, when
+    # the class was briefly pulled from scope and a one-shot script deleted the
+    # live samples; that script is gone and that decision is reversed.
+    # The removed DATASETS entries were never committed to git (verified via
     # `git log -S` against every source name below - no match), so this block is
     # a from-scratch reconstruction against ml/vision/README.md's two dated Fox
     # entries and ml/vision/fox-representation-audit.md, cross-checked live

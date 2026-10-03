@@ -1,9 +1,11 @@
 # Fox representation audit and sourcing plan
 
-> **Outcome settled 29 Sept 2026 — Fox ships.** This document's conclusion, that no Fox checkpoint
-> was good enough to promote, held only at 96–128 px. At 160 px with the node's own hard negatives
-> in training, Run F cleared the bar and replaced the three-class champion; `Fox` is now a live
-> detection class on deployed nodes. References below to `etx_cpu_final_0830.eim` as "the
+> **Outcome settled 29 Sept 2026 — Fox is a permanent class.** This document's conclusion, that no
+> Fox checkpoint was good enough to promote, held only at 96–128 px. At 160 px with the node's own
+> hard negatives in training, Run F cleared the bar and replaced the three-class champion. `Fox` is
+> a live detection class on deployed nodes and is not under review: the sources below are
+> load-bearing training data, not a research branch, and the label stays in the corpus, the impulse
+> and the runtime. References below to `etx_cpu_final_0830.eim` as "the
 > currently-deployed champion" describe 13 Sept, not today — the deployed artifact is
 > `runF_res160_noattnrelu_int8.eim`. The sourcing analysis itself stands and is what the
 > retrain drew on; see the last entry in [`README.md`](README.md). Body left unedited below.

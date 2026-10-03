@@ -11,6 +11,12 @@ fourth class in the corpus and carries no boxes at all — 2,631 negative images
 teach the model what *not* to fire on, and whose false-positive rate is the metric every promotion
 decision below turns on.
 
+**All three detection classes are permanent.** Fox spent 13–29 Sept as a research branch and parts
+of the log below still read that way; that is history. It ships, the nodes act on it, and it stays
+in the corpus, the impulse and the runtime. Which species a given node *responds* to is a
+deployment setting (`ELETECT_DETERRENCE_SCOPE`, see `device/mpu/services/config.py`), not a
+property of the model — a node configured to ignore Fox still detects it.
+
 **The deployed model is Run F — YOLO-Pro `no_attn_relu`, `medium` sizing, 160 px input, int8, with a
 single 0.65 confidence floor.** It replaced the 30 Aug 96 px three-class champion
 (`etx_cpu_final_0830.eim`) on 29 Sept 2026, and it is the first deployed build that emits `Fox` as

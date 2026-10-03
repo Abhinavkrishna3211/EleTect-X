@@ -1,12 +1,9 @@
-"""Configure and train the three-class object-detection impulse in the ETX-V project.
+"""Configure and train the four-class object-detection impulse in the ETX-V project.
 
 Companion to scripts/edge_impulse_upload_vision.py, which must have run first -
 this script only configures and trains against whatever data is already in the
 project. It builds the impulse (image input -> image DSP -> object detection),
-selects a model family/variant/sizing (see --family/--yolo-variant/--yolo-sizing
-below - the deployed champion is `--family yolo-pro --yolo-variant no_attn_relu
---yolo-sizing medium`, not FOMO; FOMO is one of the families this script can
-still target, but it was not the winner), generates features, trains, and then
+selects a model family/variant/sizing, generates features, trains, and then
 runs a model test over the held-out set, printing the per-class numbers Edge
 Impulse actually returns.
 
@@ -20,11 +17,13 @@ Two things worth knowing before reading the output:
 
   - Object detectors here are not classifiers. Edge Impulse's model-testing
     job reports per-class F1 with precision/recall and a confusion matrix, not
-    "accuracy". Report what it returns, and report Elephant and Boar separately -
-    the two classes have different dataset sizes (4,094 Elephant / 7,394 Boar,
-    across 5 and 7 sources respectively - the ratio has inverted since this was
-    first written) and a per-class gap is expected. The project is a three-label
-    problem (Elephant, Boar, and Background at 2,631 images), not two.
+    "accuracy". Report what it returns, and report Elephant, Boar and Fox
+    separately - the classes have different dataset sizes and a per-class gap is
+    expected. The project is a four-label problem: Elephant, Boar and Fox are
+    detection classes the model emits boxes for, and Background is 2,631 negative
+    images carrying no boxes at all, whose false-positive rate is what promotion
+    decisions turn on. Fox is permanent - it ships in the deployed model and the
+    field nodes act on it.
   - The reported number is a held-out result on general daytime/colour wildlife
     photography. It says nothing about night IR field performance. See
     ml/vision/README.md for the full caveat list before quoting it anywhere.
@@ -33,7 +32,12 @@ Usage (run from a machine with normal internet access, not a sandboxed one):
 
     set EI_API_KEY=ei_...
     set EI_PROJECT_ID=1097972
-    python scripts\\edge_impulse_train_vision.py --family yolo-pro --yolo-variant no_attn_relu --yolo-sizing medium
+    python scripts\\edge_impulse_train_vision.py
+
+The defaults reproduce the deployed model, Run F: YOLO-Pro `no_attn_relu`,
+`medium` sizing, 160px. FOMO and SSD are still reachable via --family; neither
+won. Every default here is overridable, so sweeping an axis means passing one
+flag rather than editing the module.
 
 Requires only the standard library - no pip install needed.
 """
@@ -49,14 +53,17 @@ from collections import defaultdict
 
 STUDIO = "https://studio.edgeimpulse.com/v1/api"
 
-# Three controlled trials at 96/128/160px (everything else held constant) showed
-# resolution increase alone monotonically REGRESSES both classes - Boar F1
-# 0.567 -> 0.313 -> 0.165, Elephant 0.670 -> 0.593 -> 0.639. Reverted to 96px (the
-# best real result) rather than keep guessing single hyperparameters against a
-# capped compute budget; see ml/vision/README.md's iteration narrative for the full
-# comparison. "squash" matches how Roboflow already stretch-resized both source
-# sets (elephant to 640x640, boar to 416x416), so no new aspect-ratio distortion.
-IMAGE_SIZE_DEFAULT = 96
+# 160px, the deployed resolution. Earlier controlled trials at 96/128/160px had
+# resolution appearing to monotonically REGRESS both classes - Boar F1
+# 0.567 -> 0.313 -> 0.165, Elephant 0.670 -> 0.593 -> 0.639 - and 96px was kept on
+# that basis. The 28-29 Sept sweep reversed it: scored on int8 against a common
+# test set, resolution was the single biggest source of gain, and Run F at 160px
+# beat the 96px recipe on every accuracy axis (ml/vision/README.md's last entry).
+# The earlier trials were measured on a different architecture and a corpus
+# since grown; they are not evidence against 160px on the current one.
+# "squash" matches how Roboflow already stretch-resized the source sets, so no
+# new aspect-ratio distortion.
+IMAGE_SIZE_DEFAULT = 160
 # The 26 Aug 224px trial was pre-flight rejected at 1h31m under the old free-tier
 # 1h job cap - Enterprise has no such cap, so this axis is untested for real, not
 # ruled out. --image-size re-opens it without editing the module constant by hand.
@@ -685,25 +692,30 @@ def main():
     ap.add_argument(
         "--family",
         choices=("fomo", "ssd", "yolo-pro"),
-        default="fomo",
-        help="architecture candidate to train (default: fomo, the control)",
+        default="yolo-pro",
+        help="architecture candidate to train (default: yolo-pro, the deployed family)",
     )
     ap.add_argument(
         "--yolo-variant",
         choices=("attn_silu", "no_attn_relu"),
-        help="required when --family yolo-pro",
+        default="no_attn_relu",
+        help=(
+            "required when --family yolo-pro (default: no_attn_relu, the deployed "
+            "variant). attn_silu scores better in float32 and does not survive int8 "
+            "quantisation, which is what the board runs - see ml/vision/README.md"
+        ),
     )
     ap.add_argument(
         "--yolo-sizing",
         choices=("pico", "nano", "small", "medium", "large", "xlarge"),
-        default="nano",
+        default="medium",
         help=(
-            "YOLO-Pro model capacity (default: nano/2.4M params, the plan's original "
-            "edge-device budget). The model's own transfer-learning-model default is "
-            "'small' (6.9M) - confirmed live via /transfer-learning-models and "
-            "/optimize/all-blocks 29 Aug, never previously exercised. Ladder: pico "
-            "(682K) < nano (2.4M) < small (6.9M) < medium (16.6M) < large (30M) < "
-            "xlarge (35M). Ignored outside --family yolo-pro."
+            "YOLO-Pro model capacity (default: medium/16.6M params, the deployed "
+            "sizing). nano (2.4M) was the plan's original edge-device budget; the "
+            "board turned out to have the headroom for medium at 374ms per frame, "
+            "inside the 2s per-image budget. Ladder: pico (682K) < nano (2.4M) < "
+            "small (6.9M) < medium (16.6M) < large (30M) < xlarge (35M). Ignored "
+            "outside --family yolo-pro."
         ),
     )
     ap.add_argument(
@@ -784,9 +796,6 @@ def main():
     global RESULTS_DIR, MODEL_VARIANT
     RESULTS_DIR = args.results_dir
     MODEL_VARIANT = args.model_variant
-    if args.family == "yolo-pro" and not args.yolo_variant:
-        print("--family yolo-pro requires --yolo-variant", file=sys.stderr)
-        sys.exit(1)
     if args.image_size is None:
         # object_ssd_mobilenet_v2_fpnlite_320x320 hard-rejects any other input
         # size (confirmed live: "Your image size is currently set to 96x96 ...
