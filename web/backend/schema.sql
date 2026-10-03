@@ -119,8 +119,14 @@ create table alerts (
 create table health (
   id         bigint generated always as identity primary key,
   node_id    text references nodes on delete cascade,
+  -- When the node says the reading was taken. web/ingest backdates this from
+  -- the frame's reported transport delay, so it is not the insertion time and
+  -- must not be used as one.
   ts         timestamptz not null default now(),
-  battery_pct int, solar_w real, temp_c real, metrics jsonb
+  battery_pct int, solar_w real, temp_c real, metrics jsonb,
+  -- Never backdated, which is why the bridge's duplicate-frame window is
+  -- measured against this and not ts (migration 0012).
+  created_at timestamptz not null default now()
 );
 create index on health (node_id, ts desc);
 
