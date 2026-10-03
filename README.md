@@ -110,6 +110,20 @@ prerequisites.
 | `web/ingest` | `npm test` / `npm run build` | MQTT → Supabase bridge ([details](web/ingest/README.md)) |
 | `web/chirpstack` | `docker compose up -d` | LoRaWAN network server; needs Docker ([details](web/chirpstack/README.md)) |
 
+### Inspect the trained models
+
+Both on-device models are public on Edge Impulse — impulse, DSP block, training data, and the test
+results they were accepted on, exactly as they run on a node:
+
+| Model | Project | What it does |
+| --- | --- | --- |
+| Acoustic — `ETX-A` | [studio.edgeimpulse.com/public/1110036/live](https://studio.edgeimpulse.com/public/1110036/live) | PANNs Cnn10 transfer over a custom log-mel DSP block; `ambient` / `chainsaw` / `elephant_call` / `gunshot`, 92.6% over a 605-clip held-out split |
+| Vision — `ETX-V` | [studio.edgeimpulse.com/public/1097972/live](https://studio.edgeimpulse.com/public/1097972/live) | YOLO-Pro object detector — Elephant / Boar / Background — that confirms a reflex-layer trigger before any deterrence fires |
+
+The training and evaluation pipelines that produced them, the per-sample dataset manifests, and the
+caveats worth reading before quoting either number are in [`ml/acoustic/`](ml/acoustic/) and
+[`ml/vision/`](ml/vision/).
+
 ### Understand a design decision
 
 Every non-trivial engineering call — why seismic over camera-only, why this horn, why this fusion
@@ -145,3 +159,10 @@ The deterrence audio on the device is third-party work under separate terms. Thr
 five tracks are CC-BY and require attribution wherever this is distributed; the credits are
 in [`docs/AUDIO_CREDITS.md`](docs/AUDIO_CREDITS.md) and travel with any build or write-up
 that ships the sounds.
+
+The training corpora are third-party work too, and the MIT licence above does not cover them. The
+vision set is CC BY 4.0 and CDLA-Permissive, which require attribution; per-source terms are in
+[`ml/vision/dataset_manifest.json`](ml/vision/dataset_manifest.json) and the table in
+[`ml/vision/README.md`](ml/vision/README.md). The acoustic set is mixed and is tracked per sample in
+[`ml/acoustic/dataset_manifest.json`](ml/acoustic/dataset_manifest.json). Check both before reusing
+the data; the models themselves carry no such restriction.
