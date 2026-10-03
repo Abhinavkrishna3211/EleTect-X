@@ -1,7 +1,7 @@
 name: CI
 on:
-  push: { branches: [main, develop] }
-  pull_request: { branches: [main, develop] }
+  push: { branches: [main] }
+  pull_request: { branches: [main] }
 
 # Read-only by default. Nothing here publishes, comments or writes to the
 # repo, so the token does not need the write scopes a default grant hands it.
