@@ -55,6 +55,10 @@ create table events (
   created_at   timestamptz not null default now()
 );
 create index on events (node_id, ts desc);
+-- The bridge's duplicate-frame lookup filters on created_at, not ts, because ts
+-- is backdated from the node's reported transport delay (0012). Different clock,
+-- so it needs its own index (0013).
+create index events_node_created_at_idx on events (node_id, created_at desc);
 -- The open-critical queue is the only reader of the ack columns, and it wants
 -- a handful of rows out of a table that grows with every detection.
 create index events_unacked_critical_idx
@@ -129,6 +133,9 @@ create table health (
   created_at timestamptz not null default now()
 );
 create index on health (node_id, ts desc);
+-- See events_node_created_at_idx: the dedupe window is measured against
+-- created_at, which nothing backdates (0012, 0013).
+create index health_node_created_at_idx on health (node_id, created_at desc);
 
 -- 6. Maintenance queue (predictive). `source` records who raised the flag:
 -- 'rule' = the fleet threshold rule (staff-confirmed on the Fleet page), 'demo' =
