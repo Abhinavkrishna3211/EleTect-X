@@ -3,6 +3,15 @@ project 1097972 so the live impulse can be retrained on the exact champion
 recipe (Boar/Elephant/Background only) and Studio's live Testing tab shows
 real champion-equivalent numbers again.
 
+SPENT - DO NOT RUN. Kept for the record only. This ran once, on 14 Sept 2026,
+against a project whose champion was 3-class. That decision was reversed on
+29 Sept: Fox was retrained in at 160 px and ships in the deployed model
+(Run F, runF_res160_noattnrelu_int8.eim - see ml/vision/README.md's last
+entry). Running this against 1097972 today would delete the live samples
+behind a class the field nodes currently detect and act on. Everything below
+this paragraph describes the state as of 14 Sept and is left unedited; read
+it as history, not as instructions.
+
 Why this exists rather than a plain re-upload skip: scripts/edge_impulse_upload_vision.py
 is append-only - dropping the four Fox DATASETS entries stops them being re-sent, but
 the 1,379 samples already sitting live stay live, and reconcile_project_counts() would
@@ -69,6 +78,20 @@ def remote_samples(project_id, api_key):
 
 
 def main():
+    # Spent script, and now a destructive one: Fox is back in the deployed
+    # model (see the docstring). Refuse by default rather than rely on the
+    # reader having opened the file first - the override exists only so the
+    # tool is still usable if the class is ever genuinely dropped again.
+    if "--i-know-fox-is-deployed" not in sys.argv:
+        print(
+            "Refusing to run: Fox ships in the deployed model as of 29 Sept 2026.\n"
+            "This script removes the live Fox samples behind it. If you really are\n"
+            "dropping the class again, re-read the docstring and pass\n"
+            "--i-know-fox-is-deployed.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     api_key = os.environ.get("EI_API_KEY")
     project_id = os.environ.get("EI_PROJECT_ID", "1097972")
     if not api_key:
