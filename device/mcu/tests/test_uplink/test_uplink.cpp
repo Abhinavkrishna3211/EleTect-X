@@ -24,8 +24,41 @@ static void test_event_known_answer(void) {
 
   uint8_t out[UPLINK_EVENT_LEN];
   TEST_ASSERT_EQUAL_UINT(UPLINK_EVENT_LEN, uplink_encode_event(ev, 5, out, sizeof(out)));
-  const uint8_t expected[] = {0x12, 0x05, 0x01, 0x57, 0x02, 0x03, 0x01, 0x02, 0x03, 0x04};
+  // The trailing FF FF is the age field left unset: the encoder has no clock,
+  // and mac.cpp stamps it at transmit.
+  const uint8_t expected[] = {0x12, 0x05, 0x01, 0x57, 0x02, 0x03,
+                              0x01, 0x02, 0x03, 0x04, 0xFF, 0xFF};
   TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, sizeof(expected));
+}
+
+static void test_set_event_age(void) {
+  uplink_event ev{};
+  ev.event_class = static_cast<uint8_t>(uplink_event_class::kElephant);
+  uint8_t out[UPLINK_EVENT_LEN];
+  uplink_encode_event(ev, 1, out, sizeof(out));
+
+  TEST_ASSERT_TRUE(uplink_set_event_age(out, UPLINK_EVENT_LEN, 3600));
+  TEST_ASSERT_EQUAL_HEX8(0x0E, out[10]);
+  TEST_ASSERT_EQUAL_HEX8(0x10, out[11]);
+
+  // Zero is a real age, not "unset".
+  TEST_ASSERT_TRUE(uplink_set_event_age(out, UPLINK_EVENT_LEN, 0));
+  TEST_ASSERT_EQUAL_HEX8(0x00, out[10]);
+  TEST_ASSERT_EQUAL_HEX8(0x00, out[11]);
+
+  // Saturates rather than wrapping: a frame stuck for a week must not report
+  // itself as fresh.
+  TEST_ASSERT_TRUE(uplink_set_event_age(out, UPLINK_EVENT_LEN, 999999u));
+  TEST_ASSERT_EQUAL_HEX8(0xFF, out[10]);
+  TEST_ASSERT_EQUAL_HEX8(0xFE, out[11]);
+
+  // Only full-length event frames have the field.
+  uplink_status st{};
+  uint8_t stat[UPLINK_STATUS_LEN];
+  uplink_encode_status(st, 1, stat, sizeof(stat));
+  TEST_ASSERT_FALSE(uplink_set_event_age(stat, UPLINK_STATUS_LEN, 10));
+  TEST_ASSERT_FALSE(uplink_set_event_age(out, UPLINK_EVENT_LEN - 1, 10));
+  TEST_ASSERT_FALSE(uplink_set_event_age(nullptr, UPLINK_EVENT_LEN, 10));
 }
 
 static void test_status_known_answer(void) {
@@ -64,7 +97,8 @@ static void test_no_retreat_event_known_answer(void) {
 
   uint8_t out[UPLINK_EVENT_LEN];
   TEST_ASSERT_EQUAL_UINT(UPLINK_EVENT_LEN, uplink_encode_event(ev, 7, out, sizeof(out)));
-  const uint8_t expected[] = {0x12, 0x07, 0x06, 0x32, 0x03, 0x0B, 0x00, 0x00, 0x00, 0x00};
+  const uint8_t expected[] = {0x12, 0x07, 0x06, 0x32, 0x03, 0x0B,
+                              0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF};
   TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, out, sizeof(expected));
 }
 
@@ -141,6 +175,7 @@ int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_event_known_answer);
   RUN_TEST(test_no_retreat_event_known_answer);
+  RUN_TEST(test_set_event_age);
   RUN_TEST(test_every_named_class_survives_encoding);
   RUN_TEST(test_status_known_answer);
   RUN_TEST(test_status_unknown_battery);

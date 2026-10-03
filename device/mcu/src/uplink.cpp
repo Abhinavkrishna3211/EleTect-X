@@ -40,7 +40,21 @@ size_t uplink_encode_event(const uplink_event &ev, uint8_t seq, uint8_t *out, si
   out[4] = ev.tier > 3 ? 3 : ev.tier;
   out[5] = ev.flags;
   put_u32(&out[6], ev.capture_ref);
+  // Not knowable here. This encoder has no clock by design - that is what
+  // makes it testable against fixed byte vectors - so the age goes in at
+  // transmit, in mac.cpp. A frame that somehow reaches the air without being
+  // stamped says "unknown" rather than claiming to be instant.
+  put_u16(&out[10], UPLINK_AGE_UNKNOWN);
   return UPLINK_EVENT_LEN;
+}
+
+bool uplink_set_event_age(uint8_t *frame, size_t len, uint32_t age_s) {
+  if (frame == nullptr || len != UPLINK_EVENT_LEN) return false;
+  if ((frame[0] & 0x0F) != UPLINK_TYPE_EVENT) return false;
+  const uint16_t age = age_s > UPLINK_AGE_MAX ? static_cast<uint16_t>(UPLINK_AGE_MAX)
+                                              : static_cast<uint16_t>(age_s);
+  put_u16(&frame[10], age);
+  return true;
 }
 
 size_t uplink_encode_status(const uplink_status &st, uint8_t seq, uint8_t *out, size_t cap) {

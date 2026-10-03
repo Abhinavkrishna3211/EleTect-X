@@ -24,6 +24,12 @@
 // restarts from the bare AT probe, and an uplink goes back to the front of
 // the queue and is re-sent with the same seq (ADR 0031) - neither is charged
 // as a failure.
+//
+// A re-sent frame is identical to its first attempt except for the two age
+// bytes, which start_send() re-stamps on every attempt so the server learns
+// how long this particular copy waited. That amends ADR 0031 B's "the same
+// bytes": the bytes that identify the event are unchanged, and the server
+// excludes the age field from its duplicate check for exactly this reason.
 
 #include "mac.h"
 
@@ -42,7 +48,8 @@ struct queued_frame {
   uint8_t len;
   bool confirmed;
   bool is_event;
-  uint8_t attempts;  // failed sends so far
+  uint8_t attempts;     // failed sends so far
+  uint32_t queued_at_ms;  // service() clock when accepted; the age field's zero
 };
 
 lora_join_state g_state = lora_join_state::kIdle;
@@ -72,6 +79,13 @@ uint32_t g_dropped = 0;
 uplink_status (*g_status_source)(uint32_t) = nullptr;
 bool g_status_due = false;
 uint32_t g_last_status_ms = 0;
+
+// The most recent now_ms service() was given. This module takes its time from
+// its caller rather than reading the clock, so that host tests can drive it on
+// a synthetic clock; enqueue() is the one entry point with no now_ms of its
+// own, and borrows this instead of calling millis() directly. Zero until the
+// first service() tick.
+uint32_t g_now_ms = 0;
 
 // Wrap-safe "now is at or past `at`" for millis() timestamps.
 bool due(uint32_t now_ms, uint32_t at_ms) {
@@ -274,7 +288,14 @@ void finish_send_failed(uint32_t now_ms, bool permanent) {
 }
 
 void start_send(uint32_t now_ms) {
-  const queued_frame &f = g_queue[0];
+  queued_frame &f = g_queue[0];
+  // Stamped per attempt, not per frame: the point of the field is how long
+  // this copy waited, and a retry that follows a 30 s backoff waited 30 s
+  // longer than the attempt before it. Unsigned subtraction is wrap-correct
+  // across the millis() rollover.
+  if (f.is_event) {
+    uplink_set_event_age(f.bytes, f.len, (now_ms - f.queued_at_ms) / 1000u);
+  }
   char cmd[16 + 2 * LORA_UPLINK_MAX_LEN];
   if (!uplink_at_command(f.bytes, f.len, f.confirmed, cmd, sizeof(cmd))) {
     // Cannot happen for a frame lora_queue_* accepted; drop rather than
@@ -354,6 +375,15 @@ bool enqueue(const uint8_t *bytes, size_t len, bool confirmed, bool is_event) {
   f.confirmed = confirmed;
   f.is_event = is_event;
   f.attempts = 0;
+  // A frame is queued from the Bridge callback, which has no now_ms of its
+  // own, so it is stamped with the last service() tick. That under-reports the
+  // wait by however long it is until the next tick: normally one loop pass,
+  // and at worst the ~3.8 s a horn fire blocks loop() for. Both are below the
+  // field's 1 s resolution or close to it, against delays the field exists to
+  // report that run from tens of seconds to minutes. Reading millis() here
+  // would be exact, but it would put a second clock in a module that otherwise
+  // has exactly one, and leave this path untestable on the host.
+  f.queued_at_ms = g_now_ms;
   return true;
 }
 
@@ -373,9 +403,11 @@ void lora_init() {
   g_dropped = 0;
   g_status_due = false;
   g_last_status_ms = 0;
+  g_now_ms = 0;
 }
 
 void lora_service(uint32_t now_ms) {
+  g_now_ms = now_ms;
   service_heartbeat(now_ms);
 
   if (!needs_port(now_ms)) {

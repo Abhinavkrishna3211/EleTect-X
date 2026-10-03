@@ -13,12 +13,34 @@
 // re-sent after a horn fire cut its AT exchange short carries the same seq and
 // the server can drop the duplicate. All multi-byte fields are big-endian.
 //
-// Event (type 2), 10 bytes:
+// Event (type 2), 12 bytes:
 //   2  event class (uplink_event_class)
 //   3  confidence, 0-100 %
 //   4  deterrence tier, 0 = none, 1-3
 //   5  flags (UPLINK_EVENT_FLAG_*)
 //   6-9 capture_ref
+//   10-11 age, s: how long this frame waited between being queued and being
+//        put on the air; UPLINK_AGE_UNKNOWN when the node cannot say
+//
+// age is the one field the encoder does not write, because it is not known
+// until the frame is actually sent. uplink_encode_event() leaves it
+// UPLINK_AGE_UNKNOWN and mac.cpp stamps it in start_send(), so a frame that
+// sat out a horn fire, two send retries or a join backoff reports the wait it
+// really had rather than a wait measured at encode time, which is always
+// zero.
+//
+// Why it exists: without it the server has nothing but its own receive time,
+// so a frame delayed by minutes is filed as having just happened. An alert
+// that is half an hour stale then sorts above a fresh one, and the operator
+// has no way to tell. The node has no RTC and no synchronised clock, so it
+// cannot report an absolute time - but elapsed time needs no synchronisation
+// and is exactly what the server is missing.
+//
+// It also means a re-sent frame is no longer byte-identical to its first
+// attempt, which amends ADR 0031 B. The server's duplicate check excludes
+// these two bytes for that reason (web/ingest/src/payload.ts,
+// frameIdentityBytes) - the rest of the frame still identifies the event, and
+// age describes the transmission, not the event.
 //
 // Status (type 1), 9 bytes:
 //   2  flags (UPLINK_STATUS_FLAG_*)
@@ -36,7 +58,7 @@
 #define UPLINK_TYPE_STATUS 1
 #define UPLINK_TYPE_EVENT 2
 
-#define UPLINK_EVENT_LEN 10
+#define UPLINK_EVENT_LEN 12
 #define UPLINK_STATUS_LEN 9
 
 // What the node saw. Codes are wire values - append only, never renumber.
@@ -80,6 +102,12 @@ enum class uplink_event_class : uint8_t {
 
 #define UPLINK_BATTERY_UNKNOWN 0xFFFFu
 
+// Age the node could not determine, and the clamp for anything that would not
+// fit. 0xFFFE is a real 18-hour age; nothing the queue can hold comes close,
+// so saturating there rather than wrapping keeps a stuck frame honest.
+#define UPLINK_AGE_UNKNOWN 0xFFFFu
+#define UPLINK_AGE_MAX 0xFFFEu
+
 struct uplink_event {
   uint8_t event_class;  // uplink_event_class, as sent over the Bridge
   float confidence;     // 0-1
@@ -99,6 +127,12 @@ struct uplink_status {
 // to 0-100 %, tier to 0-3, an unknown class to kUnconfirmed.
 size_t uplink_encode_event(const uplink_event &ev, uint8_t seq, uint8_t *out, size_t cap);
 size_t uplink_encode_status(const uplink_status &st, uint8_t seq, uint8_t *out, size_t cap);
+
+// Stamps the age field of an already-encoded event frame, immediately before
+// it goes on the air. `age_s` is clamped to UPLINK_AGE_MAX. Returns false, and
+// changes nothing, for anything that is not a full-length event frame - a
+// status frame has no age field, and neither does a short one.
+bool uplink_set_event_age(uint8_t *frame, size_t len, uint32_t age_s);
 
 // Formats `AT+MSGHEX="<hex>"` (or `AT+CMSGHEX` when `confirmed`) without the
 // line ending. Returns false, with `out` empty, if `out` cannot hold it or

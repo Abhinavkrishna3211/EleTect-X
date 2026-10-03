@@ -18,6 +18,7 @@
 
 #include <unity.h>
 
+#include <cstdio>
 #include <cstring>
 
 #include "Arduino.h"
@@ -118,8 +119,17 @@ static uplink_event sample_event() {
   return ev;
 }
 
-// sample_event() with seq 0, as uplink_at_command() renders it.
-static const char kSampleEventCmd[] = "AT+CMSGHEX=\"12000157020301020304\"";
+// sample_event() with seq 0, as uplink_at_command() renders it, up to but not
+// including the two age bytes. The age is restamped on every attempt - that is
+// the point of it - so it is deliberately not part of what identifies a frame.
+// This mirrors the server, where frameIdentityBytes() (web/ingest/src/payload.ts)
+// hashes the same prefix so a retransmission is recognised as one event and not
+// as a second elephant. Tests that mean "the same frame, same seq" assert on
+// this; test_event_age_is_stamped_at_transmit is what pins the age itself.
+static const char kSampleEventCmd[] = "AT+CMSGHEX=\"12000157020301020304";
+
+// The full command for an event that was queued and sent in the same second.
+static const char kSampleEventCmdFresh[] = "AT+CMSGHEX=\"120001570203010203040000\"";
 
 static uplink_status sample_status(uint32_t now_ms) {
   uplink_status st{};
@@ -440,6 +450,41 @@ static void test_unacked_event_is_retried_then_dropped(void) {
   TEST_ASSERT_EQUAL_UINT8(0, lora_queue_depth());
 }
 
+// The node has no RTC, so it cannot say when an event happened - but it can
+// say how long ago, and elapsed time needs no synchronised clock. The server
+// subtracts this from its own receive time (web/ingest/src/uplink.ts), which
+// is the only thing that stops a frame delayed by a join backoff or a queue
+// from being dated to the moment it finally arrived.
+static void test_event_age_is_stamped_at_transmit(void) {
+  uint32_t t = 1000;
+  drive_to_joined(&t);
+  const uint32_t queued_at = t;
+  TEST_ASSERT_TRUE(lora_queue_event(sample_event()));
+
+  t += 10;
+  lora_service(t);
+  TEST_ASSERT_TRUE_MESSAGE(tx_contains(kSampleEventCmdFresh),
+                           "a frame sent in the same second must report an age of zero, "
+                           "not the 0xFFFF the encoder left in place");
+
+  // Let it go unacked, then wait out the backoff. The re-send is the same
+  // event - same seq, same bytes - but it has been waiting since, and the
+  // field must say so rather than repeating the first attempt's zero.
+  LORA_SERIAL.host_feed("+CMSGHEX: Start\r\n+CMSGHEX: Wait ACK\r\n+CMSGHEX: Done\r\n");
+  service_lines(&t, 3);
+  LORA_SERIAL.host_reset_tx();
+
+  t += 90u * 1000u;
+  lora_service(t);
+  char expected[64];
+  std::snprintf(expected, sizeof(expected), "AT+CMSGHEX=\"12000157020301020304%04lX\"",
+                static_cast<unsigned long>((t - queued_at) / 1000u));
+  TEST_ASSERT_TRUE_MESSAGE(tx_contains(expected),
+                           "a re-sent frame must report the whole wait so far");
+  TEST_ASSERT_TRUE_MESSAGE(tx_contains(kSampleEventCmd),
+                           "...while still being the same frame, same seq");
+}
+
 static void test_unacked_event_waits_before_retry(void) {
   uint32_t t = 1000;
   drive_to_joined(&t);
@@ -566,6 +611,7 @@ int main(int, char **) {
   RUN_TEST(test_event_queued_before_join_goes_out_after_it);
   RUN_TEST(test_acked_event_counts_as_sent);
   RUN_TEST(test_unacked_event_is_retried_then_dropped);
+  RUN_TEST(test_event_age_is_stamped_at_transmit);
   RUN_TEST(test_unacked_event_waits_before_retry);
   RUN_TEST(test_not_joined_error_rejoins_and_keeps_the_frame);
   RUN_TEST(test_horn_mid_send_resends_the_same_frame);
