@@ -1,0 +1,137 @@
+# LoRaWAN network server for EleTect X, plus the bridge that moves uplinks
+# into Supabase. See README.md for first-time setup.
+#
+# Derived from chirpstack/chirpstack-docker (MIT, LICENSE.chirpstack-docker),
+# with four deliberate differences, all of which matter:
+#
+#   1. Credentials come from .env instead of being baked in. Upstream ships a
+#      placeholder API secret and a postgres password of "chirpstack"; both
+#      are fine for a laptop demo and neither is fine for a deployment that
+#      forest officers rely on.
+#   2. Mosquitto has no host port. The broker allows anonymous connections, so
+#      publishing it on the LAN would let anyone inject a fake elephant uplink.
+#   3. Mosquitto persists its queue, and the ChirpStack MQTT integration
+#      publishes at QoS 1. Together these let the broker hold uplinks while
+#      the ingest bridge is down, which is what web/ingest's manual
+#      acknowledgement relies on - see web/ingest/src/mqtt.ts.
+#   4. The ingest bridge runs as a service here rather than separately, so the
+#      whole LoRa path comes up with one command.
+
+services:
+  chirpstack:
+    image: chirpstack/chirpstack:4
+    command: -c /etc/chirpstack
+    restart: unless-stopped
+    volumes:
+      - ./configuration/chirpstack:/etc/chirpstack
+    depends_on:
+      - postgres
+      - mosquitto
+      - redis
+    environment:
+      - MQTT_BROKER_HOST=mosquitto
+      - REDIS_HOST=redis
+      - POSTGRESQL_HOST=postgres
+      - POSTGRESQL_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # Signs every login and API token. chirpstack.toml reads it as
+      # $CHIRPSTACK_API_SECRET; an unset variable would expand to an empty
+      # secret rather than erroring, so it is required here instead.
+      - CHIRPSTACK_API_SECRET=${CHIRPSTACK_API_SECRET:?set CHIRPSTACK_API_SECRET in .env - see README.md}
+    ports:
+      # The web UI and gRPC API. Bound to localhost because this interface has
+      # no TLS: reaching it from another machine should go over a tunnel or a
+      # reverse proxy that terminates TLS, not over a plain LAN socket.
+      - "127.0.0.1:8080:8080"
+
+  chirpstack-gateway-bridge:
+    image: chirpstack/chirpstack-gateway-bridge:4
+    restart: unless-stopped
+    ports:
+      # Semtech UDP packet forwarder, which is what most gateways speak.
+      - "1700:1700/udp"
+    volumes:
+      - ./configuration/chirpstack-gateway-bridge:/etc/chirpstack-gateway-bridge
+    environment:
+      - INTEGRATION__MQTT__EVENT_TOPIC_TEMPLATE=${CHIRPSTACK_REGION}/gateway/{{ .GatewayID }}/event/{{ .EventType }}
+      - INTEGRATION__MQTT__STATE_TOPIC_TEMPLATE=${CHIRPSTACK_REGION}/gateway/{{ .GatewayID }}/state/{{ .StateType }}
+      - INTEGRATION__MQTT__COMMAND_TOPIC_TEMPLATE=${CHIRPSTACK_REGION}/gateway/{{ .GatewayID }}/command/#
+    depends_on:
+      - mosquitto
+
+  # For gateways running LoRa Basics Station rather than the UDP forwarder.
+  # Harmless if unused; drop the service if your gateway speaks UDP.
+  chirpstack-gateway-bridge-basicstation:
+    image: chirpstack/chirpstack-gateway-bridge:4
+    restart: unless-stopped
+    command: -c /etc/chirpstack-gateway-bridge/chirpstack-gateway-bridge-basicstation-${CHIRPSTACK_REGION}.toml
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./configuration/chirpstack-gateway-bridge:/etc/chirpstack-gateway-bridge
+    depends_on:
+      - mosquitto
+
+  chirpstack-rest-api:
+    image: chirpstack/chirpstack-rest-api:4
+    restart: unless-stopped
+    command: --server chirpstack:8080 --bind 0.0.0.0:8090 --insecure
+    ports:
+      # --insecure, hence localhost only, for the same reason as 8080.
+      - "127.0.0.1:8090:8090"
+    depends_on:
+      - chirpstack
+
+  postgres:
+    image: postgres:14-alpine
+    restart: unless-stopped
+    volumes:
+      - ./configuration/postgresql/initdb:/docker-entrypoint-initdb.d
+      - postgresqldata:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=chirpstack
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      - POSTGRES_DB=chirpstack
+    # No host port on purpose. Nothing outside this compose network has any
+    # business reaching the network server's database; use
+    # `docker compose exec postgres psql -U chirpstack` when you need a shell.
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save 300 1 --save 60 100 --appendonly no
+    volumes:
+      - redisdata:/data
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    # Anonymous broker, so no host port: only the containers on this compose
+    # network reach it, or anyone on the LAN could publish a fake elephant
+    # uplink. To test from inside:
+    #   docker compose exec mosquitto mosquitto_sub -t '#' -v
+    volumes:
+      - ./configuration/mosquitto/config/:/mosquitto/config/
+      # Persisted so queued QoS 1 uplinks survive a broker restart.
+      - mosquittodata:/mosquitto/data
+
+  # MQTT -> Supabase bridge. Built from web/ingest in this repository; its
+  # Supabase URL and service-role key come from web/ingest/.env, which is not
+  # in version control. See web/ingest/README.md.
+  eletect-ingest:
+    build: ../ingest
+    restart: unless-stopped
+    env_file: ../ingest/.env
+    environment:
+      - MQTT_URL=mqtt://mosquitto:1883
+      # Optional, and necessarily empty on a first run - the application does
+      # not exist until you create it. Empty means "subscribe to every
+      # application", which is right for a stack with one. Set it once you
+      # have the UUID, or if this broker carries more than one application.
+      - CHIRPSTACK_APPLICATION_ID=${CHIRPSTACK_APPLICATION_ID:-}
+    depends_on:
+      - mosquitto
+
+volumes:
+  postgresqldata:
+  redisdata:
+  mosquittodata:

@@ -8,8 +8,8 @@ codec is needed - leave the device profile's codec empty.
 
 ## Local setup
 
-1. Stand up ChirpStack locally (see the sibling `chirpstack-stack` repo's
-   `docker-compose.yml`, configured for region IN865).
+1. Stand up ChirpStack locally - [`web/chirpstack/`](../chirpstack/) has the
+   whole stack and its setup steps. Region IN865 by default.
 2. Copy `.env.example` to `.env` and fill in:
    - `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` - from the Supabase project
      settings. The service-role key bypasses RLS; keep it out of git and out
@@ -52,19 +52,20 @@ codec is needed - leave the device profile's codec empty.
   arrive while the bridge is down are queued by the broker and delivered when
   it reconnects. That only holds if ChirpStack publishes at QoS 1
   (`[integration.mqtt] qos=1`) and Mosquitto persists its queue across its own
-  restarts - both are set in `chirpstack-stack`.
+  restarts - both are set in [`web/chirpstack/`](../chirpstack/).
 
 Run the decoder tests with `npm test`.
 
 ## Running it for real
 
 In the field the bridge runs as the `eletect-ingest` service in
-`chirpstack-stack`'s `docker-compose.yml`, built from this directory's
-`Dockerfile` (compiled JS, no dev dependencies, non-root) and restarted
-automatically. Its secrets come from `chirpstack-stack/ingest.env`, which is
-not committed. After changing code here:
+[`web/chirpstack/docker-compose.yml`](../chirpstack/docker-compose.yml), built
+from this directory's `Dockerfile` (compiled JS, no dev dependencies,
+non-root) and restarted automatically. Its secrets come from this directory's
+`.env`, which is not committed. After changing code here:
 
 ```
+cd ../chirpstack
 docker compose up -d --build eletect-ingest
 docker compose logs -f eletect-ingest
 ```
