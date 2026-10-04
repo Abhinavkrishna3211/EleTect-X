@@ -40,7 +40,7 @@ GPIOs are 3.3 V logic and 5 V tolerant, except A0 and A1"* — misses this; the 
 specific, so it governs. See `hardware/references/UNO_Q_PINOUT_REFERENCE.md` §"5V tolerance".
 
 This landed on us by accident: D3 was chosen on 31 Aug only because D5 was unusable, so the constraint was
-never checked. **Checked now, and D3 is safe as wired** — `hardware/pcb/led-ir-actuators.kicad_sch` puts a
+never checked. **Checked now, and D3 is safe as wired** — `hardware/pcb/eletect_x/led_ir.kicad_sch` puts a
 270 R series gate resistor and a **10 k pulldown to GND** on the net, with no pull-up anywhere, and the
 XL4015 bucks are fixed-output with no MCU-driven enable. The pulldown covers the high-Z reset/boot window.
 **The rule still binds anything added later:** never put a pull-up above 3.3 V on D3.
@@ -108,7 +108,7 @@ The public STM32U585 reference implementation ADR 0006 reviewed drives SAI1_A ov
 |---|---|---|
 | PB9 | nothing (D10) | free |
 | PB10 | nothing (D21) | free — the geophone is on A4/A5, not D20/D21 |
-| PC1 | I2C3/`Wire2` SDA (A4) on the geophone front-end | routed on `hardware/pcb/geophone-frontend.kicad_sch` |
+| PC1 | I2C3/`Wire2` SDA (A4) on the geophone front-end | routed on `hardware/pcb/eletect_x/geophone.kicad_sch` |
 
 Two of the three were free all along; only PC1 would have cost a PCB revision. That is a smaller
 obstacle than this section once implied, and it was never the one that mattered.
